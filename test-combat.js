@@ -453,14 +453,20 @@ eq("cycles to down", state().party.roster[0].status, "down");
 click(byAct("partyStatus", { i: "0" }));
 eq("cycles back to healthy", state().party.roster[0].status, "healthy");
 
-console.log("\n=== SESSION LOG ===");
+console.log("\n=== PRE-SESSION CHECKLIST ===");
 ok("SEED starts with no active session", !w.eval("SEED.session.active"));
 click(byAct("sessionModal"));
-ok("session modal offers Start session before one is running", !!byAct("sessionStart"));
+ok("session modal offers to open the pre-session checklist, not start directly", !!byAct("preSessionModal"));
+click(byAct("preSessionModal"));
+ok("checklist embeds the party panel", !!byAct("partyAdd"));
+ok("checklist offers a Rested shortcut", !!byAct("preSessionRest"));
+ok("checklist offers Begin session", !!byAct("sessionStart"));
+ok("session not started yet — still just the checklist", !w.eval("SEED.session.active"));
 click(byAct("sessionStart"));
 st = state();
 eq("session marked active", st.session.active, true);
 ok("session has a start time", typeof st.session.startedAt === "number");
+ok("checklist modal closed after Begin session", !byAct("preSessionRest"));
 /* Starting itself is a labeled mutate() call, so it's the log's first
    entry — that's a feature, not a bug: the recap opens with "Started". */
 eq("log opens with its own Start session entry", st.session.log.length, 1);

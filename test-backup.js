@@ -145,6 +145,7 @@ ok("Long Rest fired a sync with no manual Back up now tap", fetchCalls.length >=
 
 console.log("\n=== CHECKPOINT: END SESSION TRIGGERS A SYNC ===");
 click(byAct("sessionModal"));
+click(byAct("preSessionModal"));
 click(byAct("sessionStart"));
 closeAnyModal();
 fetchCalls.length = 0;

@@ -141,6 +141,33 @@ ok("Unconscious condition auto-applied", st.conditions.indexOf("unconscious") >=
 click(byAct("deathSave", { kind: "failures", i: "0" }));
 eq("failure pip recorded", JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).deathSaves.failures, 1);
 
+console.log("\n=== HIT DICE (single die matches old math, multiple dice sum, count capped) ===");
+click(byAct("hitDiceModal"));
+ok("hit dice modal open", !!$("#hd-in") && !!$("#hd-count"));
+$("#hd-count").value = "1";
+$("#hd-in").value = "6";
+click(byAct("spendHitDie"));
+st = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1"));
+eq("1 die: 6 + CON(+1) = 7 HP from 0", st.currentHP, 7);
+eq("hitDiceUsed now 1", st.hitDiceUsed, 1);
+ok("modal closed after applying", !$("#hd-in"));
+
+click(byAct("hitDiceModal"));
+$("#hd-count").value = "2";
+$("#hd-in").value = "10";
+click(byAct("spendHitDie"));
+st = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1"));
+eq("2 dice: (10 total) + CON(+1)x2 = +12 HP -> 19", st.currentHP, 19);
+eq("hitDiceUsed now 3", st.hitDiceUsed, 3);
+
+click(byAct("hitDiceModal"));
+$("#hd-count").value = "5";
+$("#hd-in").value = "3";
+click(byAct("spendHitDie"));
+st = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1"));
+eq("dice count capped at 1 remaining: 3 + CON(+1)x1 = +4 HP -> 23", st.currentHP, 23);
+eq("hitDiceUsed capped at level (4)", st.hitDiceUsed, 4);
+
 console.log("\n=== LONG REST ===");
 /* spend resources first so the reset is observable */
 click(byAct("loh", { d: "-10" }));
@@ -161,6 +188,15 @@ eq("death saves cleared", st.deathSaves, { successes: 0, failures: 0 });
 ok("unconscious cleared", st.conditions.indexOf("unconscious") < 0);
 ok("long rest modal offers a mastery swap", /weapon masteries/i.test(text()));
 click(byAct("closeModal"));
+
+console.log("\n=== HIT DICE: HP CAPS AT MAX ===");
+click(byAct("hitDiceModal"));
+$("#hd-count").value = "1";
+$("#hd-in").value = "50";
+click(byAct("spendHitDie"));
+st = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1"));
+eq("HP caps at max (35) even on a huge roll", st.currentHP, 35);
+eq("hitDiceUsed still increments on an overheal", st.hitDiceUsed, 3);
 
 console.log("\n=== SHORT REST (RAW: regain ONE use) ===");
 click(byAct("cd", { d: "-1" }));
@@ -279,6 +315,18 @@ ok("Bless survives the concentration filter", /Bless/.test(filtered));
 ok("Cure Wounds is filtered out", !/Cure Wounds/.test(filtered));
 click(byAct("clearFilter"));
 ok("Cure Wounds returns after clearing", /Cure Wounds/.test(text()));
+
+console.log("\n=== FILTER PANEL IS COLLAPSIBLE ===");
+click(byAct("tab", { tab: "features" }));
+ok("filter bar visible by default", $$(".tagbar").length > 0);
+const filterToggle = $$("h3").map(function (h) { return h; })
+  .filter(function (h) { return h.textContent.trim().indexOf("Filter") === 0; })[0]
+  .querySelector('[data-act="expand"]');
+ok("Filter panel has a Hide/Show toggle", !!filterToggle);
+click(filterToggle);
+ok("filter bar hidden after collapsing", $$(".tagbar").length === 0);
+click(byAct("expand", { id: "filterCollapsed" }));
+ok("filter bar reappears after expanding again", $$(".tagbar").length > 0);
 
 console.log("\n=== WIKI ACCESS (deliberate, secondary — never the default click) ===");
 /* Names are no longer <a href> wiki links — tapping a name now acts,

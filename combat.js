@@ -57,9 +57,10 @@ mutate = function (fn, label) {
     histSave(h);
   }
   if (changed && label && S.session && S.session.active) {
-    S.session.log.push({ t: Date.now(), label: label });
-    if (S.session.log.length > 500) S.session.log.shift();
-    save();
+    _mutate(function (st) {
+      st.session.log.push({ t: Date.now(), label: label });
+      if (st.session.log.length > 500) st.session.log.shift();
+    });
   }
 };
 
@@ -501,7 +502,7 @@ EXT.sessionModal = function () {
       '<button class="bt cutsm" data-act="closeModal">Keep playing</button></div>';
   } else {
     body += '<div class="msub">A lightweight, automatic log of what happens at the table — casts, attacks, rests, and creature/party changes get a timestamped line while a session is running.</div>';
-    body += '<div class="mrow"><button class="bt cutsm pri" data-act="sessionStart">Start session</button></div>';
+    body += '<div class="mrow"><button class="bt cutsm pri" data-act="preSessionModal">Start session</button></div>';
     if (S.sessionHistory.length) {
       const last = S.sessionHistory[S.sessionHistory.length - 1];
       const lastStats = [];
@@ -514,6 +515,30 @@ EXT.sessionModal = function () {
     }
     body += '<div class="mfoot"><button class="bt cutsm" data-act="closeModal">Close</button></div>';
   }
+  return body;
+};
+
+/* ---------- PRE-SESSION CHECKLIST -------------------------------
+   A quick pre-game check-in shown before the session log actually
+   starts: who's here tonight, an optional shortcut into a long rest
+   for a fresh in-game day, and a heads-up about anything left over
+   from last time that might need clearing before you begin. */
+EXT.preSessionModal = function () {
+  let body = "<h2>Before you start</h2>" +
+    '<div class="msub">Mark who\'s here, then begin the session log.</div>';
+  body += EXT.partyPanel();
+  body += '<div class="ph2" style="margin-top:10px">Rested?</div>' +
+    '<div class="mrow"><button class="bt cutsm" data-act="preSessionRest">' +
+    "Long rest (new in-game day)</button></div>";
+  const stale = [];
+  if (S.effects.length) stale.push(S.effects.length + " active effect" + (S.effects.length === 1 ? "" : "s"));
+  if (S.toggles.concentrating) stale.push("Concentrating" + (S.toggles.concentratingOn ? " on " + esc(S.toggles.concentratingOn) : ""));
+  if (stale.length) {
+    body += '<div class="warnbox">Carried over from last time: ' + esc(stale.join(", ")) +
+      ". Worth clearing before you begin if that's not intentional.</div>";
+  }
+  body += '<div class="mfoot"><button class="bt cutsm pri" data-act="sessionStart">Begin session</button>' +
+    '<button class="bt cutsm" data-act="closeModal">Cancel</button></div>';
   return body;
 };
 
@@ -894,6 +919,8 @@ Object.assign(ACT, {
 
   /* ---- Session log ---- */
   sessionModal() { UI.modal = { type: "session" }; render(); },
+  preSessionModal() { UI.modal = { type: "preSession" }; render(); },
+  preSessionRest() { ACT.longRest(); },
   sessionStart() {
     mutate(function (st) {
       st.session.active = true;
@@ -901,6 +928,7 @@ Object.assign(ACT, {
       st.session.log = [];
       st.session.stats = { highestACFaced: null, highestDCSet: null };
     }, "Start session");
+    UI.modal = null;
     render();
   },
   sessionEnd() {
@@ -1048,6 +1076,34 @@ render = function () {
   _render();
   const app = document.getElementById("app");
 
+  /* Modals owned by this module — done first, right after the base render,
+     so a later throw in the glow/bar/panel steps below can never leave a
+     half-open modal shell on screen with no content and no way to close it. */
+  const root = document.getElementById("modal-root");
+  if (UI.modal && ["roll", "override", "settings", "loh", "history", "attack", "order", "session", "preSession"].indexOf(UI.modal.type) >= 0) {
+    let body = "";
+    if (UI.modal.type === "roll") body = EXT.rollModal();
+    else if (UI.modal.type === "override") body = EXT.overrideModal();
+    else if (UI.modal.type === "settings") body = EXT.settingsModal();
+    else if (UI.modal.type === "loh") body = EXT.lohModal();
+    else if (UI.modal.type === "attack") body = EXT.attackModal();
+    else if (UI.modal.type === "order") body = EXT.orderModal();
+    else if (UI.modal.type === "session") body = EXT.sessionModal();
+    else if (UI.modal.type === "preSession") body = EXT.preSessionModal();
+    else if (UI.modal.type === "history") {
+      const h = histLoad().slice().reverse();
+      body = "<h2>Recent changes</h2><div class=\"msub\">Most recent first. Undo steps back one at a time.</div>";
+      h.forEach(function (x) {
+        body += '<div class="gain k-level"><span class="gk">' +
+          new Date(x.at).toLocaleTimeString() + "</span><span>" + esc(x.label) + "</span></div>";
+      });
+      if (!h.length) body += '<div class="foot">No history yet.</div>';
+      body += '<div class="mfoot"><button class="bt cutsm dg" data-act="undo">Undo last</button>' +
+        '<button class="bt cutsm" data-act="closeModal">Close</button></div>';
+    }
+    root.innerHTML = '<div class="mask"><div class="modal cut">' + body + "</div></div>";
+  }
+
   /* Glow overlay */
   const oldGlow = document.getElementById("glow-root");
   if (oldGlow) oldGlow.remove();
@@ -1083,31 +1139,6 @@ render = function () {
       '<button class="bt cutsm' + (S.session.active ? " pri" : "") + '" data-act="sessionModal">' +
       (S.session.active ? "Session ●" : "Session") + "</button>" +
       '<button class="bt cutsm" data-act="settingsModal">Settings</button>');
-  }
-
-  /* Modals owned by this module */
-  const root = document.getElementById("modal-root");
-  if (UI.modal && ["roll", "override", "settings", "loh", "history", "attack", "order", "session"].indexOf(UI.modal.type) >= 0) {
-    let body = "";
-    if (UI.modal.type === "roll") body = EXT.rollModal();
-    else if (UI.modal.type === "override") body = EXT.overrideModal();
-    else if (UI.modal.type === "settings") body = EXT.settingsModal();
-    else if (UI.modal.type === "loh") body = EXT.lohModal();
-    else if (UI.modal.type === "attack") body = EXT.attackModal();
-    else if (UI.modal.type === "order") body = EXT.orderModal();
-    else if (UI.modal.type === "session") body = EXT.sessionModal();
-    else if (UI.modal.type === "history") {
-      const h = histLoad().slice().reverse();
-      body = "<h2>Recent changes</h2><div class=\"msub\">Most recent first. Undo steps back one at a time.</div>";
-      h.forEach(function (x) {
-        body += '<div class="gain k-level"><span class="gk">' +
-          new Date(x.at).toLocaleTimeString() + "</span><span>" + esc(x.label) + "</span></div>";
-      });
-      if (!h.length) body += '<div class="foot">No history yet.</div>';
-      body += '<div class="mfoot"><button class="bt cutsm dg" data-act="undo">Undo last</button>' +
-        '<button class="bt cutsm" data-act="closeModal">Close</button></div>';
-    }
-    root.innerHTML = '<div class="mask"><div class="modal cut">' + body + "</div></div>";
   }
 };
 

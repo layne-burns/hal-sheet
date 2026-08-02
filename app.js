@@ -148,7 +148,7 @@ function matchesFilter(list) {
 /* ---------- ACTIONS ----------------------------------------- */
 const ACT = {
 
-  tab(el) { S.ui = S.ui || {}; mutate(function (st) { st.ui = st.ui || {}; st.ui.tab = el.dataset.tab; }); },
+  tab(el) { mutate(function (st) { st.ui = st.ui || {}; st.ui.tab = el.dataset.tab; }); },
 
   /* Wiki is now a deliberate, separate action — never the default
      result of tapping a name. */
@@ -306,14 +306,20 @@ const ACT = {
     UI.modal = { type: "longRest" };
     render();
   },
+  hitDiceModal() { UI.modal = { type: "hitDice" }; render(); },
   spendHitDie() {
+    const hdLeft = S.level - S.hitDiceUsed;
+    const n = Math.max(1, Math.min(parseInt(document.getElementById("hd-count").value, 10) || 1, hdLeft));
     const roll = parseInt(document.getElementById("hd-in").value, 10);
     if (!roll) return;
     mutate(function (st) {
       const con = CALC.mod(st.abilities.con);
-      st.currentHP = Math.min(CALC.maxHP(st).value, st.currentHP + Math.max(1, roll + con));
-      st.hitDiceUsed = Math.min(st.level, st.hitDiceUsed + 1);
+      const gained = Math.max(n, roll + con * n);
+      st.currentHP = Math.min(CALC.maxHP(st).value, st.currentHP + gained);
+      st.hitDiceUsed = Math.min(st.level, st.hitDiceUsed + n);
     });
+    UI.modal = null;
+    render();
   },
 
   /* ---- Level up ---- */
@@ -821,9 +827,8 @@ function combatTab() {
   /* Hit dice */
   const hdLeft = S.level - S.hitDiceUsed;
   out += '<div class="pnl cut"><h3>Hit dice <span class="cnt">' + hdLeft + " of " + S.level + " d10 left</span></h3>" +
-    '<div class="mrow"><span class="lbl">Roll a d10, add CON ' + sign(CALC.mod(S.abilities.con)) + "</span>" +
-    '<input type="number" id="hd-in" min="1" max="10" placeholder="d10">' +
-    '<button class="bt cutsm" data-act="spendHitDie"' + (hdLeft <= 0 ? " disabled" : "") + ">Spend</button></div></div>";
+    '<div class="mrow"><span class="lbl">Roll d10s, add CON ' + sign(CALC.mod(S.abilities.con)) + " per die</span>" +
+    '<button class="bt cutsm" data-act="hitDiceModal"' + (hdLeft <= 0 ? " disabled" : "") + ">Spend</button></div></div>";
 
   /* Conditions detail */
   out += '<div class="pnl cut"><h3>Conditions</h3><div class="gridcols">';
@@ -945,7 +950,7 @@ function spellEntry(k, editable) {
 /* ---------- FEATURES ---------- */
 function featuresTab() {
   const E = S.toggles.editMode;
-  let out = '<div class="pnl cut"><h3>Filter</h3>' + tagFilterBar() + "</div>";
+  let out = filterPanel();
 
   out += '<div class="pnl cut"><h3>Class &amp; subclass</h3>';
   S.features.forEach(function (k) {
@@ -1057,7 +1062,7 @@ function featureEntry(k, f) {
 function inventoryTab() {
   const E = S.toggles.editMode;
   const c = S.equipment.coins;
-  let out = '<div class="pnl cut"><h3>Filter</h3>' + tagFilterBar() + "</div>";
+  let out = filterPanel();
 
   out += '<div class="pnl cut"><h3>Carried</h3>';
   S.equipment.inventory.forEach(function (it, i) {
@@ -1132,6 +1137,16 @@ function notesTab() {
     '<button class="bt cutsm" data-act="importJSON">Import JSON</button>' +
     '<button class="bt cutsm dg" data-act="resetSheet">Reset to Hal.pdf</button></div></div>';
   return out;
+}
+
+/* ---------- FILTER PANEL (collapsible) ---------- */
+function filterPanel() {
+  const collapsed = !!UI.expanded.filterCollapsed;
+  let out = '<div class="pnl cut"><h3>Filter' +
+    '<button class="bt cutsm" data-act="expand" data-id="filterCollapsed">' +
+    (collapsed ? "Show" : "Hide") + "</button></h3>";
+  if (!collapsed) out += tagFilterBar();
+  return out + "</div>";
 }
 
 /* ---------- TAG FILTER BAR ---------- */
@@ -1247,6 +1262,19 @@ function modalHTML() {
       '<div class="mfoot"><button class="bt cutsm" data-act="closeModal">Cancel</button></div>';
   }
 
+  else if (t === "hitDice") {
+    const con = CALC.mod(S.abilities.con);
+    const hdLeft = S.level - S.hitDiceUsed;
+    body = "<h2>Spend Hit Dice</h2>" +
+      '<div class="msub">Each die recovers its roll + CON (' + sign(con) + ") per die, minimum 1 per die.</div>" +
+      '<div class="mrow"><label class="lbl">How many dice (up to ' + hdLeft + ')</label>' +
+      '<input type="number" id="hd-count" min="1" max="' + hdLeft + '" value="1"></div>' +
+      '<div class="mrow"><label class="lbl">Total rolled (sum of all dice)</label>' +
+      '<input type="number" id="hd-in" min="' + hdLeft + '" placeholder="Total"></div>' +
+      '<div class="mfoot"><button class="bt cutsm dg" data-act="spendHitDie">Apply</button>' +
+      '<button class="bt cutsm" data-act="closeModal">Cancel</button></div>';
+  }
+
   else if (t === "longRest") {
     body = "<h2>Long rest complete</h2>" +
       '<div class="msub">HP, spell slots, Lay on Hands, Channel Divinity, the free Divine Smite, ' +
@@ -1295,6 +1323,7 @@ function modalHTML() {
     body += '<div class="mfoot"><button class="bt cutsm" data-act="closeModal">Cancel</button></div>';
   }
 
+  if (!body) return "";
   return '<div class="mask"><div class="modal cut">' + body + "</div></div>";
 }
 
