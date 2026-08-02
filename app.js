@@ -857,12 +857,16 @@ function spellsTab() {
   const oath = oathSpellKeys();
   const E = S.toggles.editMode;
 
+  const filterCollapsed = !!UI.expanded.filterCollapsed;
   let out = '<div class="pnl cut"><h3>Spellcasting</h3>' +
     '<div class="mrow"><span class="lbl">Save DC</span><b class="mono" style="font-size:22.5px">' + dc + "</b>" +
     '<span class="lbl" style="margin-left:12px">Attack</span><b class="mono" style="font-size:22.5px">' + sign(atk) + "</b>" +
     '<span class="lbl" style="margin-left:12px">Ability</span><b class="mono">Charisma</b>' +
     '<span class="lbl" style="margin-left:12px">Focus</span><b class="mono">Holy Symbol</b></div>' +
-    tagFilterBar() + "</div>";
+    '<div class="ph2" style="margin-top:10px">Filter' +
+    '<button class="bt cutsm" style="margin-left:8px" data-act="expand" data-id="filterCollapsed">' +
+    (filterCollapsed ? "Show" : "Hide") + "</button></div>" +
+    (filterCollapsed ? "" : tagFilterBar()) + "</div>";
 
   /* Cantrips */
   out += '<div class="pnl cut"><h3>Cantrips <span class="cnt">Magic Initiate (Wizard)</span></h3>';

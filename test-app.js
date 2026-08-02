@@ -328,6 +328,16 @@ ok("filter bar hidden after collapsing", $$(".tagbar").length === 0);
 click(byAct("expand", { id: "filterCollapsed" }));
 ok("filter bar reappears after expanding again", $$(".tagbar").length > 0);
 
+console.log("\n=== SPELLCASTING PANEL'S FILTER IS ALSO COLLAPSIBLE ===");
+click(byAct("tab", { tab: "spells" }));
+ok("filter bar visible by default on Spells tab", $$(".tagbar").length > 0);
+ok("Spellcasting panel has its own Hide/Show toggle", !!byAct("expand", { id: "filterCollapsed" }));
+click(byAct("expand", { id: "filterCollapsed" }));
+ok("filter bar hidden after collapsing on Spells tab", $$(".tagbar").length === 0);
+ok("Save DC / Attack info stays visible while filter is hidden", /Save DC/.test(text()));
+click(byAct("expand", { id: "filterCollapsed" }));
+ok("filter bar reappears on Spells tab", $$(".tagbar").length > 0);
+
 console.log("\n=== WIKI ACCESS (deliberate, secondary — never the default click) ===");
 /* Names are no longer <a href> wiki links — tapping a name now acts,
    and the wiki is reached through a separate, small, explicit control. */
