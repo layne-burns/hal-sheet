@@ -1,0 +1,12 @@
+{
+  "name": "hal-sheet",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Hal Briarshade D&D 2024 character sheet PWA",
+  "scripts": {
+    "test": "node test-rules.js && node test-app.js && node test-combat.js && node test-portrait.js && node test-backup.js"
+  },
+  "devDependencies": {
+    "jsdom": "^24.0.0"
+  }
+}
