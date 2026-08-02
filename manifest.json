@@ -1,0 +1,16 @@
+{
+  "name": "Hal Briarshade — Paladin 4",
+  "short_name": "Hal",
+  "description": "Offline character sheet for Hal Briarshade, Jerbeen Paladin of the Oath of the Ancients.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#0A0D11",
+  "theme_color": "#0A0D11",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
