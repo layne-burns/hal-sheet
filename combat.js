@@ -266,7 +266,13 @@ EXT.settingsModal = function () {
     ["edgeGlow", "Screen edge glow", "Cyan rim while concentrating, red rim below 20% HP."],
     ["creatureTracker", "Creature tracker", "Track creatures you've affected and their repeating saves."]
   ];
+  const scale = (S.settings && S.settings.uiScale) || 100;
   let body = "<h2>Settings</h2><div class=\"msub\">All of these are stored with your sheet.</div>";
+  body += '<div class="mrow"><span class="lbl">Display size</span>' +
+    '<button class="bt cutsm" data-act="scaleUI" data-dir="-1">A−</button>' +
+    '<button class="bt cutsm" data-act="scaleUI" data-dir="1">A+</button>' +
+    '<button class="bt cutsm" data-act="resetUIScale">Reset</button>' +
+    '<span class="lbl" style="margin-left:12px">' + scale + '%</span></div>';
   rows.forEach(function (r) {
     const on = S.settings[r[0]];
     body += '<button class="pick' + (on ? " sel" : "") + '" data-act="setting" data-key="' + r[0] + '">' +
@@ -479,7 +485,10 @@ function sessionToMarkdown(s) {
   if (s.stats.highestACFaced != null) out += "- Toughest AC faced: **" + s.stats.highestACFaced + "**\n";
   if (s.stats.highestDCSet != null) out += "- Highest save DC set: **" + s.stats.highestDCSet + "**\n";
   out += "\n## Log\n\n";
-  s.log.forEach(function (e) { out += "- " + fmtTime(e.t) + " — " + e.label + "\n"; });
+  s.log.forEach(function (e) {
+    const tag = e.kind === "note" ? "**[Note]** " : e.kind === "flag" ? "**[!]** " : "";
+    out += "- " + fmtTime(e.t) + " — " + tag + e.label + "\n";
+  });
   return out;
 }
 EXT.sessionModal = function () {
@@ -491,12 +500,16 @@ EXT.sessionModal = function () {
     if (s.stats.highestACFaced != null) stats.push("Toughest AC faced: " + s.stats.highestACFaced);
     if (s.stats.highestDCSet != null) stats.push("Highest save DC set: " + s.stats.highestDCSet);
     if (stats.length) body += '<div class="foot">' + esc(stats.join(" · ")) + "</div>";
+    body += '<div class="mrow"><input type="text" id="session-note-in" placeholder="Add a note…" style="flex:1">' +
+      '<button class="bt cutsm" data-act="addSessionNote">Add</button></div>';
     body += '<div class="ph2" style="margin-top:10px">Log</div>';
     if (!s.log.length) {
       body += '<div class="foot">Nothing logged yet — casting, attacking, resting, and creature/party changes show up here automatically.</div>';
     }
     s.log.slice().reverse().forEach(function (e) {
-      body += '<div class="gain k-level"><span class="gk">' + fmtTime(e.t) + "</span><span>" + esc(e.label) + "</span></div>";
+      const cls = e.kind === "note" ? "k-note" : e.kind === "flag" ? "k-flag" : "k-level";
+      const prefix = e.kind === "note" ? "Note — " : e.kind === "flag" ? "⚠ " : "";
+      body += '<div class="gain ' + cls + '"><span class="gk">' + fmtTime(e.t) + "</span><span>" + prefix + esc(e.label) + "</span></div>";
     });
     body += '<div class="mfoot"><button class="bt cutsm dg" data-act="sessionEnd">End session</button>' +
       '<button class="bt cutsm" data-act="closeModal">Keep playing</button></div>';
@@ -516,6 +529,21 @@ EXT.sessionModal = function () {
     body += '<div class="mfoot"><button class="bt cutsm" data-act="closeModal">Close</button></div>';
   }
   return body;
+};
+
+/* A gentle reminder strip, visible outside the Session modal, when a
+   session is running and it's been a while since the last note (or
+   since the session started, if there's no note yet). Lets you jot
+   one right there without opening the modal. */
+const SESSION_NOTE_REMINDER_MS = 25 * 60 * 1000;
+EXT.sessionNudge = function () {
+  if (!S.session.active) return "";
+  const notes = S.session.log.filter(function (e) { return e.kind === "note"; });
+  const last = notes.length ? notes[notes.length - 1].t : S.session.startedAt;
+  if (Date.now() - last < SESSION_NOTE_REMINDER_MS) return "";
+  return '<div class="strip cut"><span class="lbl">Been a while since your last note</span>' +
+    '<input type="text" placeholder="Quick note…" style="flex:1;min-width:120px">' +
+    '<button class="bt cutsm pri" data-act="addSessionNote">Add</button></div>';
 };
 
 /* ---------- PRE-SESSION CHECKLIST -------------------------------
@@ -965,6 +993,16 @@ Object.assign(ACT, {
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
   },
+  addSessionNote(el) {
+    const input = el.parentElement.querySelector('input[type="text"]');
+    const text = input && input.value.trim();
+    if (!text) return;
+    mutate(function (st) {
+      st.session.log.push({ t: Date.now(), label: text, kind: "note" });
+      if (st.session.log.length > 500) st.session.log.shift();
+    });
+    render();
+  },
 
   /* ---- Undo ---- */
   undo() {
@@ -1117,7 +1155,7 @@ render = function () {
 
   /* Combat bar goes directly under the top bar */
   const bar = app.querySelector(".bar");
-  if (bar) bar.insertAdjacentHTML("afterend", EXT.combatBar());
+  if (bar) bar.insertAdjacentHTML("afterend", EXT.combatBar() + EXT.sessionNudge());
 
   /* Extra panels into the centre column of the Combat tab */
   const tab = (S.ui && S.ui.tab) || "combat";

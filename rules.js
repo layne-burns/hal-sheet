@@ -835,7 +835,8 @@ const SEED = {
     economyLockout: true,   /* grey out what you can't afford */
     edgeGlow: true,         /* concentration and low-HP screen rim */
     creatureTracker: true,
-    confirmOverride: true   /* warn before spending economy you don't have */
+    confirmOverride: true,  /* warn before spending economy you don't have */
+    uiScale: 100            /* percent — whole-UI zoom, not just font */
   },
   notes: {
     backstory: "Found wandering two years ago by a Locathah named Gill. No cohesive memory of origins — only sensory fragments: the ticking of a massive clockwork device, ozone and crushed pine, geometric shadows, the sensation of falling upward. Clings fiercely to chosen family. Gill's reverence for Eadro is casual; Hal's is absolute.",

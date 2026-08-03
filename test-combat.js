@@ -340,6 +340,31 @@ click(byAct("setting", { key: "edgeGlow" }));
 click(byAct("closeModal"));
 ok("glow suppressed entirely when the setting is off", glowClass() === "");
 
+console.log("\n=== UI SCALE (WHOLE-UI ZOOM, NOT JUST FONT) ===");
+eq("starts at 100%", state().settings.uiScale, 100);
+click(byAct("settingsModal"));
+ok("settings modal shows Display size at 100%", /Display size/.test(text()) && /100%/.test(text()));
+click(byAct("scaleUI", { dir: "1" }));
+eq("A+ bumps by 10", state().settings.uiScale, 110);
+click(byAct("scaleUI", { dir: "1" }));
+click(byAct("scaleUI", { dir: "1" }));
+click(byAct("scaleUI", { dir: "1" }));
+click(byAct("scaleUI", { dir: "1" }));
+click(byAct("scaleUI", { dir: "1" }));
+click(byAct("scaleUI", { dir: "1" }));
+click(byAct("scaleUI", { dir: "1" }));
+click(byAct("scaleUI", { dir: "1" }));
+click(byAct("scaleUI", { dir: "1" }));
+eq("caps at 200%, never exceeds it", state().settings.uiScale, 200);
+eq("body zoom style reflects the scale", $("body").style.zoom, "200%");
+click(byAct("resetUIScale"));
+eq("Reset returns to 100%", state().settings.uiScale, 100);
+click(byAct("scaleUI", { dir: "-1" }));
+for (let i = 0; i < 10; i++) click(byAct("scaleUI", { dir: "-1" }));
+eq("floors at 50%, never goes below it", state().settings.uiScale, 50);
+click(byAct("resetUIScale"));
+click(byAct("closeModal"));
+
 console.log("\n=== UNDO DOES NOT FIRE ON COSMETIC CHANGES ===");
 click(byAct("settingsModal"));
 click(byAct("setting", { key: "edgeGlow" }));
@@ -487,6 +512,66 @@ eq("an unlabeled toggle does not add a log line", state().session.log.length, lo
 click(byAct("settingsModal"));
 click(byAct("setting", { key: "rollPrompts" }));
 click(byAct("closeModal"));
+
+console.log("\n=== SESSION NOTES ===");
+click(byAct("sessionModal"));
+ok("session modal offers a note input", !!$("#session-note-in"));
+setVal($("#session-note-in"), "The innkeeper seemed nervous about something.");
+click(byAct("addSessionNote"));
+st = state();
+const lastEntry = st.session.log[st.session.log.length - 1];
+eq("note lands as the newest log entry", lastEntry.label, "The innkeeper seemed nervous about something.");
+eq("note is tagged kind: note", lastEntry.kind, "note");
+click(byAct("closeModal"));
+
+console.log("\n=== SESSION NOTE REMINDER NUDGE ===");
+ok("no nudge right after a fresh note", w.eval("EXT.sessionNudge()") === "");
+w.eval("S.session.log = S.session.log.filter(function(e){ return e.kind !== 'note'; }); S.session.startedAt = Date.now() - 30*60*1000;");
+ok("nudge appears once it's been a while with no note", /Been a while/.test(w.eval("EXT.sessionNudge()")));
+w.eval("render()");
+const nudgeBtn = $$('[data-act="addSessionNote"]').find(function (b) { return b.closest(".strip"); });
+ok("nudge strip is actually in the rendered DOM", !!nudgeBtn);
+setVal(nudgeBtn.parentElement.querySelector("input"), "Quick note from the nudge");
+click(nudgeBtn);
+st = state();
+ok("quick note from the nudge lands in the log",
+   st.session.log.some(function (e) { return e.kind === "note" && /Quick note from the nudge/.test(e.label); }));
+ok("nudge disappears again right after adding a note", w.eval("EXT.sessionNudge()") === "");
+
+console.log("\n=== AUTO-FLAGGED SIGNIFICANT EVENTS ===");
+click(byAct("damageModal"));
+setVal($("#dmg-in"), "999");
+click(byAct("applyDamage"));
+if (byAct("dismissAlert")) click(byAct("dismissAlert"));
+st = state();
+ok("going down at 0 HP is auto-flagged",
+   st.session.log.some(function (e) { return e.kind === "flag" && /Hal is down/.test(e.label); }));
+click(byAct("damageModal"));
+setVal($("#dmg-in"), "10");
+click(byAct("heal"));
+st = state();
+ok("recovering from 0 HP is auto-flagged",
+   st.session.log.some(function (e) { return e.kind === "flag" && /Hal is back up/.test(e.label); }));
+
+click(byAct("damageModal"));
+setVal($("#dmg-in"), "999");
+click(byAct("applyDamage"));
+if (byAct("dismissAlert")) click(byAct("dismissAlert"));
+click(byAct("deathSave", { kind: "failures", i: "0" }));
+click(byAct("deathSave", { kind: "failures", i: "1" }));
+click(byAct("deathSave", { kind: "failures", i: "2" }));
+st = state();
+ok("3 failed death saves is auto-flagged as a death",
+   st.session.log.some(function (e) { return e.kind === "flag" && /Hal has died/.test(e.label); }));
+click(byAct("deathSave", { kind: "successes", i: "0" }));
+click(byAct("deathSave", { kind: "successes", i: "1" }));
+click(byAct("deathSave", { kind: "successes", i: "2" }));
+st = state();
+ok("3 successful death saves is auto-flagged as stabilized",
+   st.session.log.some(function (e) { return e.kind === "flag" && /Hal has stabilized/.test(e.label); }));
+click(byAct("damageModal"));
+setVal($("#dmg-in"), "999");
+click(byAct("heal"));
 
 console.log("\n=== SESSION STATS: TOUGHEST AC / HIGHEST DC (BOOKKEEPING, NOT LOGGED) ===");
 click(byAct("tab", { tab: "combat" }));

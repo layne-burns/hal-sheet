@@ -74,6 +74,17 @@ function save() {
   catch (e) { console.error("Save failed:", e); }
 }
 
+/* Auto-flag a significant, table-relevant moment into the session log
+   (deaths, going down, stabilizing) — separate from the session-active
+   labeled-mutate logging so it fires from any code path, not just ones
+   that pass a label. No-op when no session is running. */
+function logFlag(st, text) {
+  if (st.session && st.session.active) {
+    st.session.log.push({ t: Date.now(), label: text, kind: "flag" });
+    if (st.session.log.length > 500) st.session.log.shift();
+  }
+}
+
 /* Keep derived caps honest after any change (level, CON, etc.) */
 function clampState(st) {
   const maxHP = CALC.maxHP(st).value;
@@ -147,6 +158,18 @@ function matchesFilter(list) {
 
 /* ---------- ACTIONS ----------------------------------------- */
 const ACT = {
+
+  /* ---- Display ---- */
+  scaleUI(el) {
+    const dir = parseInt(el.dataset.dir, 10);
+    mutate(function (st) {
+      const current = st.settings.uiScale || 100;
+      st.settings.uiScale = Math.max(50, Math.min(200, current + dir * 10));
+    });
+  },
+  resetUIScale() {
+    mutate(function (st) { st.settings.uiScale = 100; });
+  },
 
   tab(el) { mutate(function (st) { st.ui = st.ui || {}; st.ui.tab = el.dataset.tab; }); },
 
@@ -231,6 +254,7 @@ const ACT = {
     if (!n || n < 0) { UI.modal = null; render(); return; }
     const wasConcentrating = S.toggles.concentrating;
     mutate(function (st) {
+      const wasUp = st.currentHP > 0;
       let rem = n;
       if (st.tempHP > 0) {
         const absorbed = Math.min(st.tempHP, rem);
@@ -240,6 +264,7 @@ const ACT = {
       if (st.currentHP === 0 && st.conditions.indexOf("unconscious") < 0) {
         st.conditions.push("unconscious");
       }
+      if (wasUp && st.currentHP === 0) logFlag(st, "Hal is down (0 HP)");
     });
     UI.modal = null;
     if (wasConcentrating) {
@@ -250,11 +275,13 @@ const ACT = {
   heal() {
     const n = parseInt(document.getElementById("dmg-in").value, 10) || 0;
     mutate(function (st) {
+      const wasDown = st.currentHP === 0;
       st.currentHP = Math.min(CALC.maxHP(st).value, st.currentHP + n);
       if (st.currentHP > 0) {
         const i = st.conditions.indexOf("unconscious");
         if (i >= 0) st.conditions.splice(i, 1);
       }
+      if (wasDown && st.currentHP > 0) logFlag(st, "Hal is back up");
     });
     UI.modal = null; render();
   },
@@ -265,6 +292,8 @@ const ACT = {
     mutate(function (st) {
       const cur = st.deathSaves[kind];
       st.deathSaves[kind] = (cur === i + 1) ? i : i + 1;
+      if (kind === "failures" && st.deathSaves.failures >= 3) logFlag(st, "Hal has died (3 failed death saves)");
+      if (kind === "successes" && st.deathSaves.successes >= 3) logFlag(st, "Hal has stabilized");
     });
   },
 
@@ -536,6 +565,10 @@ const ACT = {
    RENDER
    ============================================================ */
 function render() {
+  /* Whole-UI zoom, not just text — the stylesheet is all px, so scaling
+     root font-size would do nothing; CSS zoom (well-supported in the
+     Safari/WebKit this app targets) actually reflows everything. */
+  document.body.style.zoom = ((S.settings && S.settings.uiScale) || 100) + "%";
   const app = document.getElementById("app");
   const tab = (S.ui && S.ui.tab) || "combat";
   app.innerHTML =
