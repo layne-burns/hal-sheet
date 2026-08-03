@@ -375,6 +375,21 @@ click(byAct("tab", { tab: "combat" }));
 const histAfterTabs = JSON.parse(w.localStorage.getItem("hal-briarshade-history-v1") || "[]").length;
 eq("switching tabs does not push undo history", histAfterTabs, histBefore);
 
+console.log("\n=== COMBAT PANELS COLLAPSE INDIVIDUALLY ===");
+click(byAct("tab", { tab: "combat" }));
+ok("Party panel is expanded by default", !!byAct("partyAdd"));
+click(byAct("expand", { id: "partyCollapsed" }));
+ok("collapsing Party hides its contents", !byAct("partyAdd"));
+ok("but its header stays, so you can bring it back",
+   !!byAct("expand", { id: "partyCollapsed" }));
+ok("collapsing Party leaves the Creatures panel alone", !!byAct("creatureAdd"));
+click(byAct("expand", { id: "partyCollapsed" }));
+ok("Party comes back", !!byAct("partyAdd"));
+click(byAct("expand", { id: "creaturesCollapsed" }));
+ok("Creatures collapses on its own", !byAct("creatureAdd"));
+ok("Party is unaffected by the Creatures collapse", !!byAct("partyAdd"));
+click(byAct("expand", { id: "creaturesCollapsed" }));
+
 console.log("\n=== SEED DATA HAS THE NEW FIELDS ===");
 ok("SEED includes settings", !!w.eval("SEED.settings"));
 ok("SEED includes combat block", !!w.eval("SEED.combat"));
@@ -484,6 +499,17 @@ click(byAct("sessionModal"));
 ok("session modal offers to open the pre-session checklist, not start directly", !!byAct("preSessionModal"));
 click(byAct("preSessionModal"));
 ok("checklist embeds the party panel", !!byAct("partyAdd"));
+/* The checklist forces the roster open — collapsing it on the Combat tab
+   must not hide the one place you're being asked to check people in. */
+click(byAct("closeModal"));
+click(byAct("expand", { id: "partyCollapsed" }));
+click(byAct("sessionModal"));
+click(byAct("preSessionModal"));
+ok("checklist ignores the Party collapse flag", !!byAct("partyAdd"));
+click(byAct("closeModal"));
+click(byAct("expand", { id: "partyCollapsed" }));
+click(byAct("sessionModal"));
+click(byAct("preSessionModal"));
 ok("checklist offers a Rested shortcut", !!byAct("preSessionRest"));
 ok("checklist offers Begin session", !!byAct("sessionStart"));
 ok("session not started yet — still just the checklist", !w.eval("SEED.session.active"));

@@ -102,6 +102,14 @@ click(byAct("mastery", { id: "shortsword" }));
 const restored = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).equipment.activeMasteries;
 eq("back to 2 active", restored.length, 2);
 
+console.log("\n=== ALL 18 SKILLS ARE LISTED, NOT JUST PROFICIENT ONES ===");
+eq("every skill has a row", $$('[data-prov^="skill:"]').length, 18);
+ok("a proficient skill is marked as such", !!$('[data-prov="skill:persuasion"].prof'));
+ok("an unproficient skill is listed but dimmed", !!$('[data-prov="skill:arcana"].unprof'));
+ok("unproficient skills still show a modifier",
+   /Arcana/.test(text()) && /Stealth/.test(text()));
+ok("Athletics (unproficient, STR -1) is visible", /Athletics/.test(text()));
+
 console.log("\n=== PROVENANCE ===");
 click('[data-prov="save:cha"]');
 ok("provenance panel opened", /Charisma save/.test(text()));
@@ -281,9 +289,14 @@ ok("sequence now has two numbered attacks plus Nick",
    seqSteps.slice(0, 3).join(",") === "1,2,+");
 
 console.log("\n=== EDIT MODE ===");
+/* Edit now lives behind the top bar's "More" group */
+ok("Edit is tucked away until More is opened", !byAct("editMode"));
+click(byAct("expand", { id: "moreActions" }));
+ok("More reveals Edit", !!byAct("editMode"));
 click(byAct("editMode"));
 st = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1"));
 eq("edit mode on", st.toggles.editMode, true);
+ok("Edit stays visible while editing, even with More closed", !!byAct("editMode"));
 ok("ability inputs appear", $$('[data-act="editAbility"]').length === 6);
 const dexIn = byAct("editAbility", { key: "dex" });
 dexIn.value = "18";
@@ -380,19 +393,36 @@ key("r");
 ok("R is NOT a shortcut — rail unaffected", !/railoff/.test($("#app").innerHTML));
 
 console.log("\n=== RAIL COLLAPSE IS TAP-ONLY ===");
-const collapseBtn = $("h3.collapse");
+const collapseBtn = $(".rrail h3.collapse");
 ok("collapse control is visible in the rail header", !!collapseBtn);
 ok("it reads as a control", /Hide/.test(collapseBtn.textContent));
 click(collapseBtn);
 ok("tapping the header collapses the rail", /railoff/.test($("#app").innerHTML));
 eq("collapse state persisted",
    JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).toggles.railCollapsed, true);
-const reopen = $(".railtab");
+const reopen = $(".rrail .railtab");
 ok("a vertical Resources tab is shown when collapsed", !!reopen);
 click(reopen);
 ok("tapping the tab reopens the rail", !/railoff/.test($("#app").innerHTML));
 eq("expanded state persisted",
    JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).toggles.railCollapsed, false);
+
+console.log("\n=== LEFT (STATS) RAIL COLLAPSES INDEPENDENTLY ===");
+const leftBtn = $(".lrail h3.collapse");
+ok("the stats rail has its own collapse control", !!leftBtn);
+click(leftBtn);
+ok("collapsing the left rail sets leftoff", /leftoff/.test($("#app").innerHTML));
+ok("collapsing the left rail does NOT collapse the right one",
+   !/railoff/.test($("#app").innerHTML));
+eq("left collapse state persisted",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).toggles.leftRailCollapsed, true);
+ok("a Stats tab is shown when collapsed", !!$(".lrail .railtab"));
+ok("the right rail's body is untouched while the left is collapsed",
+   !!$(".rrail .railbody h3"));
+click($(".lrail .railtab"));
+ok("tapping the Stats tab reopens it", !/leftoff/.test($("#app").innerHTML));
+eq("left expanded state persisted",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).toggles.leftRailCollapsed, false);
 
 console.log("\n=== PWA WIRING ===");
 ok("manifest linked", !!$('link[rel="manifest"]'));

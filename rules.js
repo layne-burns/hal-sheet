@@ -787,7 +787,8 @@ const SEED = {
 
   toggles: {
     concentrating: false, concentratingOn: "",
-    takeHeart: false, auraOfProtection: false, editMode: false, railCollapsed: false
+    takeHeart: false, auraOfProtection: false, editMode: false,
+    railCollapsed: false, leftRailCollapsed: false
   },
   conditions: [],
   exhaustion: 0,

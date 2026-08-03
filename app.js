@@ -183,6 +183,7 @@ const ACT = {
   portraitView() { UI.modal = { type: "portrait" }; render(); },
 
   toggleRail() { mutate(function (st) { st.toggles.railCollapsed = !st.toggles.railCollapsed; }); },
+  toggleLeftRail() { mutate(function (st) { st.toggles.leftRailCollapsed = !st.toggles.leftRailCollapsed; }); },
 
   toggle(el) {
     const k = el.dataset.key;
@@ -576,10 +577,14 @@ function render() {
     conditionStrip() +
     alertBar() +
     tabBar(tab) +
-    '<div class="wrap' + (S.toggles.railCollapsed ? " railoff" : "") + '">' +
-      '<div>' + leftRail() + '</div>' +
+    '<div class="wrap' + (S.toggles.railCollapsed ? " railoff" : "") +
+      (S.toggles.leftRailCollapsed ? " leftoff" : "") + '">' +
+      '<div class="rail lrail">' +
+        '<div class="railtab" data-act="toggleLeftRail"><span>Stats</span></div>' +
+        '<div class="railbody">' + leftRail() + '</div>' +
+      '</div>' +
       '<div>' + tabContent(tab) + '</div>' +
-      '<div class="rail">' +
+      '<div class="rail rrail">' +
         '<div class="railtab" data-act="toggleRail"><span>Resources</span></div>' +
         '<div class="railbody">' + resourceRail() + '</div>' +
       '</div>' +
@@ -611,6 +616,12 @@ function topBar() {
 
   const portrait = CALC.portraitFor(S);
 
+  /* Low-frequency actions live behind "More" so the bar isn't 14 buttons
+     wide during play. Damage/rests/level-up stay first-class. */
+  const moreOpen = !!UI.expanded.moreActions;
+  const editBtn = '<button class="bt cutsm' + (E ? " pri" : "") + '" data-act="editMode">' +
+    (E ? "Editing" : "Edit") + "<k>E</k></button>";
+
   return '<div class="bar cut">' +
     '<button class="portrait" data-act="portraitView" title="' + esc(portrait.label) +
       '" aria-label="View portrait — ' + esc(portrait.label) + '">' +
@@ -641,10 +652,14 @@ function topBar() {
     '<button class="bt cutsm" data-act="shortRest">Short<k>S</k></button>' +
     '<button class="bt cutsm" data-act="longRest">Long<k>L</k></button>' +
     '<button class="bt pri cutsm" data-act="levelUpModal">Level up</button>' +
-    '<button class="bt cutsm' + (E ? " pri" : "") + '" data-act="editMode">' +
-      (E ? "Editing" : "Edit") + "<k>E</k></button>" +
-    '<button class="bt cutsm" data-act="exportJSON">Export</button>' +
-    '<button class="bt cutsm" data-act="importJSON">Import</button>' +
+    /* Editing stays visible whenever it's ON — being in edit mode without
+       an obvious way out is worse than one extra button. */
+    (E ? editBtn : "") +
+    '<button class="bt cutsm" data-act="expand" data-id="moreActions">' +
+      (moreOpen ? "Less" : "More") + "</button>" +
+    (moreOpen ? (E ? "" : editBtn) +
+      '<button class="bt cutsm" data-act="exportJSON">Export</button>' +
+      '<button class="bt cutsm" data-act="importJSON">Import</button>' : "") +
   "</div>";
 }
 
@@ -710,7 +725,10 @@ function tabBar(active) {
 /* ---------- LEFT RAIL ---------- */
 function leftRail() {
   const E = S.toggles.editMode;
-  let out = '<div class="pnl cut"><h3>Abilities</h3>';
+  /* Topmost header doubles as the collapse control for the whole stats
+     column, mirroring how the Resources rail collapses on the right. */
+  let out = '<div class="pnl cut"><h3 class="collapse" data-act="toggleLeftRail">' +
+    '<span>Abilities</span><span class="chev">‹‹ Hide</span></h3>';
   ["str","dex","con","int","wis","cha"].forEach(function (k) {
     const m = CALC.mod(S.abilities[k]);
     if (E) {
@@ -740,9 +758,11 @@ function leftRail() {
     return SKILL_NAMES[a].localeCompare(SKILL_NAMES[b]);
   }).forEach(function (k) {
     const sk = CALC.skill(S, k);
-    if (!E && !sk.proficient) return; /* only show proficient skills unless editing */
+    /* Every skill is listed, proficient or not — an unproficient check is
+       still a roll you make. Non-proficient rows are dimmed so the ones
+       you're actually good at still read at a glance. */
     const dotCls = sk.expertise ? "dot exp" : (sk.proficient ? "dot" : "dot off");
-    out += '<div class="row' + (sk.proficient ? " prof" : "") + '" ' +
+    out += '<div class="row' + (sk.proficient ? " prof" : " unprof") + '" ' +
       (E ? 'data-act="toggleSkill" data-key="' + k + '"' : 'data-act="prov" data-prov="skill:' + k + '"') +
       '><span><i class="' + dotCls + '"></i>' + esc(SKILL_NAMES[k]) +
       ' <span class="sc">' + SKILL_ABILITY[k].toUpperCase() + "</span></span>" +

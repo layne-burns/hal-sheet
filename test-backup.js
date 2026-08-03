@@ -244,6 +244,8 @@ delete w.navigator.canShare;
 
 console.log("\n=== EXPORT JSON ALSO COUNTS AS A MANUAL BACKUP ===");
 w.localStorage.removeItem("hal-briarshade-last-export");
+/* Export moved behind the top bar's "More" group; the Notes tab keeps its own copy */
+if (!byAct("exportJSON")) click(byAct("expand", { id: "moreActions" }));
 click(byAct("exportJSON"));
 ok("the plain Export JSON button also records the export time", !!w.localStorage.getItem("hal-briarshade-last-export"));
 

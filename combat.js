@@ -140,11 +140,27 @@ EXT.combatBar = function () {
 };
 
 /* ---------- ACTIVE EFFECTS ---------------------------------- */
+/* Collapsible panel header — same Hide/Show mechanism as the Filter panel,
+   so every "fold this away" control in the app works the same way. A busy
+   combat can stack eight panels in one column; this lets you close the ones
+   you aren't using without losing the count in the header. */
+function panelHead(title, count, key) {
+  const collapsed = !!UI.expanded[key];
+  return {
+    collapsed: collapsed,
+    html: '<div class="pnl cut"><h3>' + title +
+      (count == null ? "" : ' <span class="cnt">' + count + "</span>") +
+      '<button class="bt cutsm" data-act="expand" data-id="' + key + '">' +
+      (collapsed ? "Show" : "Hide") + "</button></h3>"
+  };
+}
+
 EXT.effectsPanel = function () {
   if (!S.effects.length) return "";
+  const head = panelHead("Active effects", S.effects.length, "effectsCollapsed");
+  if (head.collapsed) return head.html + "</div>";
   const mods = CALC.activeMods(S);
-  let out = '<div class="pnl cut"><h3>Active effects <span class="cnt">' +
-    S.effects.length + "</span></h3>";
+  let out = head.html;
   S.effects.forEach(function (e, i) {
     const perm = e.rounds == null;
     out += '<div class="eff' + (e.conc ? " conc" : "") + '">' +
@@ -170,8 +186,9 @@ EXT.effectsPanel = function () {
 /* ---------- CREATURE TRACKER --------------------------------- */
 EXT.creaturesPanel = function () {
   if (!S.settings.creatureTracker) return "";
-  let out = '<div class="pnl cut"><h3>Creatures <span class="cnt">' +
-    (S.creatures.length || "none") + "</span></h3>";
+  const head = panelHead("Creatures", S.creatures.length || "none", "creaturesCollapsed");
+  if (head.collapsed) return head.html + "</div>";
+  let out = head.html;
   if (!S.creatures.length) {
     out += '<div class="foot" style="margin:0 0 8px">Add who you\'re fighting to track AC, hits, and repeating saves.</div>';
   }
@@ -207,9 +224,15 @@ EXT.creaturesPanel = function () {
    cycled by tapping: healthy -> bloodied (~50%) -> down -> healthy. */
 const PARTY_STATUS = ["healthy", "bloodied", "down"];
 const PARTY_STATUS_LABEL = { healthy: "Healthy", bloodied: "Bloodied", down: "Down" };
-EXT.partyPanel = function () {
+/* forceOpen: the pre-session checklist embeds this panel and collapsing it
+   there would defeat the point, so it ignores the collapse flag. */
+EXT.partyPanel = function (forceOpen) {
   const roster = S.party.roster || [];
-  let out = '<div class="pnl cut"><h3>Party <span class="cnt">' + (roster.length || "none") + "</span></h3>";
+  const head = panelHead("Party", roster.length || "none", "partyCollapsed");
+  if (head.collapsed && !forceOpen) return head.html + "</div>";
+  let out = forceOpen
+    ? '<div class="pnl cut"><h3>Party <span class="cnt">' + (roster.length || "none") + "</span></h3>"
+    : head.html;
   if (!roster.length) {
     out += '<div class="foot" style="margin:0 0 8px">Add who\'s at the table today — this feeds the turn order. We track their combat status (healthy/bloodied/down), not their exact HP.</div>';
   }
@@ -554,7 +577,7 @@ EXT.sessionNudge = function () {
 EXT.preSessionModal = function () {
   let body = "<h2>Before you start</h2>" +
     '<div class="msub">Mark who\'s here, then begin the session log.</div>';
-  body += EXT.partyPanel();
+  body += EXT.partyPanel(true);
   body += '<div class="ph2" style="margin-top:10px">Rested?</div>' +
     '<div class="mrow"><button class="bt cutsm" data-act="preSessionRest">' +
     "Long rest (new in-game day)</button></div>";
