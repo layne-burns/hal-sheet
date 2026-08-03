@@ -102,8 +102,10 @@ ok("offers a token field before connecting", !!$("#backup-token"));
 ok("no 'reopen' button exists inside the backup modal itself (it only lives in Settings)",
    !byAct("backupModal"));
 
-console.log("\n=== CONNECT: CREATES A NEW GIST ===");
-fetchQueue = [{ status: 201, body: { id: "gist-abc123" } }];
+console.log("\n=== CONNECT: LOOKS FOR AN EXISTING GIST, THEN CREATES ONE ===");
+/* First response is the gist LIST (empty — this token has no backup yet),
+   second is the create. */
+fetchQueue = [{ status: 200, body: [] }, { status: 201, body: { id: "gist-abc123" } }];
 setVal($("#backup-token"), "  ghp_faketoken123  ");
 click(byAct("backupConnect"));
 await flush();
@@ -112,10 +114,11 @@ eq("token saved (trimmed)", cfg.token, "ghp_faketoken123");
 eq("gist id captured from the create response", cfg.gistId, "gist-abc123");
 eq("sync marked ok", cfg.lastSyncOk, true);
 ok("lastSyncedAt recorded", typeof cfg.lastSyncedAt === "number");
-eq("exactly one fetch call (a POST, no existing gist yet)", fetchCalls.length, 1);
-ok("posted to the gists collection endpoint", /api\.github\.com\/gists$/.test(fetchCalls[0].url));
-eq("used the token as a Bearer header", fetchCalls[0].opts.headers.Authorization, "Bearer ghp_faketoken123");
-ok("sent private:true (never a public gist)", JSON.parse(fetchCalls[0].opts.body).public === false);
+eq("two calls: the existing-gist lookup, then the create", fetchCalls.length, 2);
+ok("looked up the token's gists first", /api\.github\.com\/gists\?/.test(fetchCalls[0].url));
+ok("posted to the gists collection endpoint", /api\.github\.com\/gists$/.test(fetchCalls[1].url));
+eq("used the token as a Bearer header", fetchCalls[1].opts.headers.Authorization, "Bearer ghp_faketoken123");
+ok("sent private:true (never a public gist)", JSON.parse(fetchCalls[1].opts.body).public === false);
 ok("the token still never leaks into the main sheet's saved JSON, even connected",
    w.localStorage.getItem("hal-briarshade-sheet-v1").indexOf("ghp_faketoken123") === -1);
 
@@ -133,6 +136,68 @@ await flush();
 eq("one PATCH call this time", fetchCalls.length, 1);
 ok("PATCHed the specific gist id, not the collection", /gists\/gist-abc123$/.test(fetchCalls[0].url));
 eq("PATCH method used", fetchCalls[0].opts.method, "PATCH");
+
+console.log("\n=== LOAD FROM CLOUD (CARRYING THE SHEET BETWEEN DEVICES) ===");
+ok("the backup modal offers a restore", !!byAct("backupLoad"));
+/* The cloud copy is a level 7 Hal — clearly distinguishable from local. */
+const remoteSheet = Object.assign({}, state(), {
+  level: 7, currentHP: 11,
+  identity: Object.assign({}, state().identity, { name: "Hal Briarshade" }),
+  calendar: { day: 42, year: 222, system: "jerbeen", timeOfDay: "evening" }
+});
+fetchCalls.length = 0;
+fetchQueue = [{ status: 200, body: {
+  id: "gist-abc123", updated_at: new Date().toISOString(),
+  files: { "hal-briarshade-backup.json": { content: JSON.stringify(remoteSheet) } }
+} }];
+click(byAct("backupLoad"));
+await flush();
+eq("fetched the gist by id", fetchCalls.length, 1);
+ok("used a plain GET (no method override)", !fetchCalls[0].opts.method);
+ok("previews what the cloud copy holds before touching anything", /The cloud copy holds/.test(text()));
+ok("preview names the level", /level 7/.test(text()));
+ok("preview shows the in-world date", /Hawk-Shadow 14/.test(text()));
+ok("preview warns it is destructive", /replaces the sheet on this device/i.test(text()));
+eq("nothing applied yet — local sheet untouched", state().level, 4);
+click(byAct("backupRestoreCancel"));
+ok("cancelling clears the preview", !/The cloud copy holds/.test(text()));
+eq("cancel really did nothing to the sheet", state().level, 4);
+
+fetchCalls.length = 0;
+fetchQueue = [{ status: 200, body: {
+  id: "gist-abc123", updated_at: new Date().toISOString(),
+  files: { "hal-briarshade-backup.json": { content: JSON.stringify(remoteSheet) } }
+} }];
+click(byAct("backupLoad"));
+await flush();
+click(byAct("backupRestoreConfirm"));
+eq("confirming replaces the local sheet", state().level, 7);
+eq("and brings the in-world date with it", state().calendar.day, 42);
+ok("the pre-restore sheet is recoverable via Undo",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-history-v1") || "[]")
+     .some(function (h) { return /Before cloud restore/.test(h.label); }));
+click(byAct("undo"));
+eq("Undo really does bring the old sheet back", state().level, 4);
+closeAnyModal();
+
+console.log("\n=== A SECOND DEVICE ADOPTS THE EXISTING GIST INSTEAD OF MAKING A RIVAL ===");
+/* Simulate a fresh browser: same token, no stored gist id. */
+w.localStorage.removeItem("hal-briarshade-backup-v1");
+openBackupModal();
+fetchCalls.length = 0;
+fetchQueue = [
+  { status: 200, body: [
+    { id: "someone-elses", updated_at: "2020-01-01T00:00:00Z", files: { "notes.txt": {} } },
+    { id: "gist-abc123", updated_at: "2024-01-01T00:00:00Z", files: { "hal-briarshade-backup.json": {} } }
+  ] },
+  { status: 200, body: { id: "gist-abc123" } }
+];
+setVal($("#backup-token"), "ghp_faketoken123");
+click(byAct("backupConnect"));
+await flush();
+eq("adopted the existing backup gist", backupCfg().gistId, "gist-abc123");
+ok("and PATCHed it rather than creating a second one",
+   fetchCalls.length === 2 && fetchCalls[1].opts.method === "PATCH");
 
 console.log("\n=== CHECKPOINT: LONG REST TRIGGERS A SYNC AUTOMATICALLY ===");
 closeAnyModal();

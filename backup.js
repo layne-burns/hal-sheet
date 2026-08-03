@@ -93,6 +93,75 @@ save = function () {
 };
 
 /* ---------- GITHUB GIST SYNC ------------------------------------ */
+function gistHeaders(token) {
+  return {
+    "Authorization": "Bearer " + token,
+    "Accept": "application/vnd.github+json",
+    "Content-Type": "application/json"
+  };
+}
+
+/* Find the backup gist this token already owns, if any.
+   Without this, every browser you connect starts its OWN gist and the
+   devices silently drift apart — the whole point of one token is that
+   they share one backup. Picks the most recently updated match. */
+function adoptExistingGist() {
+  const cfg = loadBackupCfg();
+  if (!cfg.token || cfg.gistId) return Promise.resolve(false);
+  if (typeof fetch === "undefined") return Promise.resolve(false);
+  return fetch("https://api.github.com/gists?per_page=100", { headers: gistHeaders(cfg.token) })
+    .then(function (res) { return res.ok ? res.json() : null; })
+    .then(function (list) {
+      if (!list || !list.length) return false;
+      const match = list
+        .filter(function (g) { return g.files && g.files[GIST_FILENAME]; })
+        .sort(function (a, b) { return new Date(b.updated_at) - new Date(a.updated_at); })[0];
+      if (!match) return false;
+      const c = loadBackupCfg();
+      c.gistId = match.id;
+      saveBackupCfg(c);
+      return true;
+    })
+    .catch(function () { return false; });
+}
+
+/* ---------- RESTORE (pull the cloud copy down) -------------------
+   Kept as an explicit two-step — fetch, show what's there, then let the
+   user confirm — because replacing the sheet is destructive and the
+   remote copy might be older than what's in front of them. */
+let _restore = { state: "idle", data: null, meta: null, error: "" };
+function resetRestore() { _restore = { state: "idle", data: null, meta: null, error: "" }; }
+
+function remoteBackupFetch() {
+  const cfg = loadBackupCfg();
+  if (!cfg.token) return Promise.reject(new Error("Not connected."));
+  if (typeof fetch === "undefined") return Promise.reject(new Error("This browser can't reach GitHub."));
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    return Promise.reject(new Error("Offline — reconnect and try again."));
+  }
+  const headers = gistHeaders(cfg.token);
+  return (cfg.gistId
+      ? Promise.resolve(cfg.gistId)
+      : adoptExistingGist().then(function () { return loadBackupCfg().gistId; }))
+    .then(function (id) {
+      if (!id) throw new Error("No backup found for this token yet.");
+      return fetch("https://api.github.com/gists/" + id, { headers: headers });
+    })
+    .then(function (res) {
+      if (res.status === 404) throw new Error("That backup no longer exists on GitHub.");
+      if (res.status === 401) throw new Error("Token rejected — it may be revoked or mistyped.");
+      if (!res.ok) throw new Error("GitHub returned " + res.status + ".");
+      return res.json();
+    })
+    .then(function (body) {
+      const file = body && body.files && body.files[GIST_FILENAME];
+      if (!file || !file.content) throw new Error("The backup file is empty.");
+      const parsed = JSON.parse(file.content);
+      if (!parsed.identity || !parsed.abilities) throw new Error("That gist isn't a Hal sheet.");
+      return { data: parsed, meta: { updatedAt: body.updated_at, id: body.id } };
+    });
+}
+
 let _syncing = false;
 function syncToGist() {
   const cfg = loadBackupCfg();
@@ -111,11 +180,7 @@ function syncToGist() {
     files: {}
   };
   payload.files[GIST_FILENAME] = { content: JSON.stringify(S, null, 2) };
-  const headers = {
-    "Authorization": "Bearer " + cfg.token,
-    "Accept": "application/vnd.github+json",
-    "Content-Type": "application/json"
-  };
+  const headers = gistHeaders(cfg.token);
   function fail(msg) {
     cfg.lastSyncOk = false; cfg.lastError = msg; cfg.pending = true;
     saveBackupCfg(cfg);
@@ -231,7 +296,39 @@ EXT.backupModal = function () {
         '" target="_blank" rel="noopener">gist.github.com/…/' + esc(cfg.gistId.slice(0, 8)) + "…</a></div>";
     }
     body += '<div class="mrow"><button class="bt cutsm pri" data-act="backupNow">Back up now</button>' +
+      '<button class="bt cutsm" data-act="backupLoad">Load from cloud</button>' +
       '<button class="bt cutsm dg" data-act="backupDisconnect">Disconnect</button></div>';
+    body += '<div class="foot">Same token on another device? <b>Load from cloud</b> pulls this ' +
+      "sheet down there — that's how you carry Hal between machines.</div>";
+
+    if (_restore.state === "loading") {
+      body += '<div class="foot" style="margin-top:8px">Checking GitHub…</div>';
+    } else if (_restore.state === "error") {
+      body += '<div class="warnbox" style="margin-top:8px">' + esc(_restore.error) + "</div>";
+    } else if (_restore.state === "ready" && _restore.data) {
+      /* Show what's actually in the cloud copy before overwriting, so a
+         stale backup can't quietly clobber a newer local sheet. */
+      const d = _restore.data;
+      const rows = [];
+      rows.push(["Character", (d.identity && d.identity.name ? d.identity.name : "?") +
+        ", level " + (d.level || "?")]);
+      rows.push(["Hit points", (d.currentHP == null ? "?" : d.currentHP) + " current"]);
+      if (d.calendar) {
+        rows.push(["In-world", CAL.format(d.calendar.system || "jerbeen", d.calendar.day || 1) +
+          ", Year " + (d.calendar.year || "?")]);
+      }
+      rows.push(["Saved to GitHub", _restore.meta && _restore.meta.updatedAt
+        ? timeAgo(new Date(_restore.meta.updatedAt).getTime()) : "unknown"]);
+      body += '<div class="ph2" style="margin-top:12px">The cloud copy holds</div>';
+      rows.forEach(function (r) {
+        body += '<div class="kv"><span>' + esc(r[0]) + "</span><span>" + esc(String(r[1])) + "</span></div>";
+      });
+      body += '<div class="warnbox" style="margin-top:8px">This replaces the sheet on this device. ' +
+        "Undo can bring the current one back if you change your mind.</div>";
+      body += '<div class="mrow"><button class="bt cutsm dg" data-act="backupRestoreConfirm">' +
+        "Replace this device's sheet</button>" +
+        '<button class="bt cutsm" data-act="backupRestoreCancel">Cancel</button></div>';
+    }
   }
   body += '<div class="ph2" style="margin-top:12px">Manual export</div>';
   body += '<div class="foot">Last manual export: ' + (lastExport ? timeAgo(lastExport) : "never") + "</div>";
@@ -250,11 +347,44 @@ Object.assign(ACT, {
     cfg.token = token; cfg.lastSyncOk = null; cfg.lastError = ""; cfg.pending = false;
     saveBackupCfg(cfg);
     render();
-    syncToGist();
+    /* Join the backup this token already has before pushing, so a second
+       device doesn't start a competing gist. */
+    adoptExistingGist().then(function () { syncToGist(); });
   },
   backupDisconnect() {
     saveBackupCfg(backupDefaults());
+    resetRestore();
     UI.alert = { info: "Disconnected. If you're retiring this token for good, also revoke it on GitHub." };
+    render();
+  },
+  backupLoad() {
+    _restore = { state: "loading", data: null, meta: null, error: "" };
+    render();
+    remoteBackupFetch()
+      .then(function (r) { _restore = { state: "ready", data: r.data, meta: r.meta, error: "" }; })
+      .catch(function (e) {
+        _restore = { state: "error", data: null, meta: null, error: e.message || "Could not load." };
+      })
+      .then(function () { if (UI.modal && UI.modal.type === "backup") render(); });
+  },
+  backupRestoreCancel() { resetRestore(); render(); },
+  backupRestoreConfirm() {
+    if (_restore.state !== "ready" || !_restore.data) return;
+    /* Stash what's on screen into the undo stack first — if the cloud copy
+       turns out to be the stale one, Undo gets this device back. */
+    try {
+      if (typeof histLoad === "function" && typeof histSave === "function") {
+        const h = histLoad();
+        h.push({ label: "Before cloud restore", at: Date.now(), state: JSON.parse(JSON.stringify(S)) });
+        histSave(h);
+      }
+    } catch (e) { /* never let the safety net block the restore itself */ }
+    S = migrate(_restore.data);
+    clampState(S);
+    save();
+    resetRestore();
+    UI.modal = null;
+    UI.alert = { info: "Loaded " + esc(S.identity.name) + ", level " + S.level + " from the cloud." };
     render();
   },
   backupNow() {

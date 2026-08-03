@@ -195,6 +195,10 @@ That means your character has exactly one real point of failure — the iPad its
 
 That's it. From now on, Long Rest, Level Up, and End Session each quietly push an update in the background — if you're offline at the table, it just queues and retries the next time you're back on wifi. You can also tap **Back up now** in that same screen any time, or **Disconnect** if you want to stop.
 
+**Using the same character on more than one device.** Paste the *same* token into the other browser and tap Connect — it finds the backup that token already owns and joins it, rather than starting a second, separate one. Then tap **Load from cloud** on that device to pull the sheet down.
+
+The two devices don't sync live, so treat it as "hand the sheet over" rather than "edit in both at once": back up on the device you were playing on, then load on the one you're moving to. The preview shows you what the cloud copy holds — character, level, HP, in-world date, and when it was saved — before anything is replaced, and **Undo** restores the device's previous sheet if you load the wrong one.
+
 **A couple of things worth knowing:**
 - The token is stored only on your iPad, in a separate place from your character data — it's never included in Export JSON, so sharing that file (with me, or anyone) can't leak it.
 - It's stored as plain text in the browser's local storage, not encrypted — normal for a scoped, personal-use token like this, but worth knowing. The `gist` scope can only read/write your gists, nothing else on your account.
