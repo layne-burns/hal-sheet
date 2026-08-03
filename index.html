@@ -372,6 +372,27 @@ textarea.notes{width:100%;min-height:140px;line-height:1.6;font-family:var(--f);
 .kv span:first-child{color:var(--dim)}
 .gridcols{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:0 18px}
 
+/* ---------- CALENDAR ---------- */
+.calday{font-family:var(--m);font-size:27px;color:var(--yel);letter-spacing:.04em;line-height:1.15}
+.calsub{font-family:var(--m);font-size:15.5px;color:var(--dim);letter-spacing:.08em;
+  text-transform:uppercase;margin-top:2px}
+.calalt{font-family:var(--m);font-size:15.5px;color:var(--dim);margin-top:6px}
+.calalt b{color:var(--cyan)}
+.calfeast{border-left:2px solid var(--violet);padding-left:9px;margin-top:10px}
+.calfeast .cfname{font-family:var(--m);font-size:18.5px;color:var(--violet);
+  display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:3px}
+.calmonth{border-bottom:1px solid #1A242D;padding:6px 0}
+.calmonth:last-child{border-bottom:none}
+.calmonth.now{border-left:2px solid var(--yel);padding-left:9px}
+.calmonth .cmhead{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.calmonth .cmname{font-family:var(--m);font-size:17px}
+.calmonth.now .cmname{color:var(--yel)}
+.calmonth .cmmeta{font-family:var(--m);font-size:13.5px;color:var(--dimmer);
+  letter-spacing:.08em;text-transform:uppercase;flex:none}
+.cmfeast{font-family:var(--m);font-size:15.5px;color:var(--dim);padding:2px 0 0 11px}
+.cmfeast::before{content:"› ";color:var(--violet)}
+.cmfeast.today{color:var(--violet)}
+
 @media (max-width:900px){
   .wrap,.wrap.railoff,.wrap.leftoff,.wrap.leftoff.railoff{grid-template-columns:1fr}
   /* Single column: the vertical edge tab would have nowhere to sit, so it
@@ -387,6 +408,7 @@ textarea.notes{width:100%;min-height:140px;line-height:1.6;font-family:var(--f);
 <div id="modal-root"></div>
 
 <script src="rules.js"></script>
+<script src="calendar-data.js"></script>
 <script src="combat-rules.js"></script>
 <script src="app.js"></script>
 <script src="combat.js"></script>

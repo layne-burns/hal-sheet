@@ -14,12 +14,13 @@ After that, opening Hal is one tap and works with no internet.
 
 ## Before you start
 
-You need these 17 files. They are all in the `hal-sheet` folder:
+You need these 18 files. They are all in the `hal-sheet` folder:
 
 | File | What it is |
 |---|---|
 | `index.html` | The sheet itself |
 | `rules.js` | The 2024 ruleset and all the math |
+| `calendar-data.js` | The Jerbeen and Common calendars — months, holidays, lore |
 | `combat-rules.js` | Action economy, spell effects, and the smite/cast data |
 | `app.js` | The buttons, saving, and level-up engine |
 | `combat.js` | Combat mode, casting, active effects, undo, settings |
@@ -78,7 +79,7 @@ You'll now be on a mostly empty page with setup instructions. Ignore all of it.
    - *If you can't find that link:* go to `https://github.com/YOUR-USERNAME/hal-sheet/upload/main` in your address bar, replacing `YOUR-USERNAME` with your GitHub username.
 2. You'll see a large dashed box that says **Drag files here to add them to your repository**.
 3. Open the `hal-sheet` folder on your computer.
-4. Select the 17 files listed in the table above. (Click the first, then hold **Ctrl** and click each of the others. On a Mac, hold **Cmd**.)
+4. Select the 18 files listed in the table above. (Click the first, then hold **Ctrl** and click each of the others. On a Mac, hold **Cmd**.)
 5. Drag all 17 into the dashed box on the GitHub page.
 6. Wait for all 17 filenames to appear in a list. **Check the count is 17** before continuing.
 
@@ -90,7 +91,7 @@ Scroll down to the box titled **Commit changes**.
 2. Leave **Commit directly to the `main` branch** selected.
 3. Click the green **Commit changes** button.
 
-You should now see all 17 files listed. **Part 1 is done.**
+You should now see all 18 files listed. **Part 1 is done.**
 
 ---
 
@@ -238,15 +239,15 @@ Then on the iPad: close the Hal app fully (swipe up from the bottom and flick it
 
 | Key | Does |
 |---|---|
-| `1` – `5` | Switch tabs: Combat, Spells, Features, Inventory, Notes |
+| `1` – `6` | Switch tabs: Combat, Spells, Features, Inventory, Notes, Calendar |
 | `D` | Open Take Damage |
 | `S` | Short rest |
-| `L` | Long rest |
+| `L` | Long rest (asks how many days pass) |
 | `E` | Toggle Edit mode |
 | `C` | Toggle Concentrating |
 | `Esc` | Close any dialog |
 
-The resource rail collapses by **tapping its header**, and reopens by tapping the vertical "Resources" strip.
+Both side rails collapse by **tapping their header**, and reopen by tapping the "Stats" or "Resources" strip. Edit, Export, and Import live behind the **More** button in the top bar.
 
 **Tap any number** — a save, AC, the Lay on Hands pool — to see exactly where it comes from. Yellow entries scale automatically with your level; violet entries come from a feat and stay put.
 
@@ -265,7 +266,7 @@ The resource rail collapses by **tapping its header**, and reopens by tapping th
 ## If something goes wrong
 
 **The sheet is blank or half-broken.**
-One of the `.js` files probably didn't upload. Go to the **Code** tab and confirm all 17 files are listed with sensible sizes (`rules.js` and `app.js` should each be tens of KB, not 0; each portrait should be a few hundred KB, not 0).
+One of the `.js` files probably didn't upload. Go to the **Code** tab and confirm all 18 files are listed with sensible sizes (`rules.js` and `app.js` should each be tens of KB, not 0; each portrait should be a few hundred KB, not 0).
 
 **Changes aren't saving.**
 Check you're not in Safari Private Browsing — it blocks local storage. Open Hal from the Home Screen icon instead.

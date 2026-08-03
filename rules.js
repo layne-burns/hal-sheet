@@ -830,6 +830,11 @@ const SEED = {
   },
   sessionHistory: [],
 
+  /* In-world date. `day` is the shared 1-364 global day both calendars
+     run on, so `system` only changes how it's displayed, never the date
+     itself. See calendar-data.js. */
+  calendar: { day: 1, year: 222, system: "jerbeen", timeOfDay: "morning" },
+
   settings: {
     rollPrompts: true,      /* pop a "roll this, because of that" card */
     autoApplyEffects: true, /* effects change AC / attack numbers */

@@ -58,7 +58,7 @@ mutate = function (fn, label) {
   }
   if (changed && label && S.session && S.session.active) {
     _mutate(function (st) {
-      st.session.log.push({ t: Date.now(), label: label });
+      st.session.log.push({ t: Date.now(), label: label, cal: calStamp(st) });
       if (st.session.log.length > 500) st.session.log.shift();
     });
   }
@@ -502,16 +502,50 @@ EXT.orderModal = function () {
    full breakdown. */
 function fmtTime(t) { return new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }
 function fmtDate(t) { return new Date(t).toLocaleDateString(); }
+/* Notes and flags are the story; everything else is bookkeeping the app
+   logged for you. Splitting them is what makes a recap readable. */
+function isNarrative(e) { return e.kind === "note" || e.kind === "flag"; }
+
+/* In-world date for a log entry, in whichever calendar you're reading. */
+function calLabel(e) {
+  if (!e.cal) return "";
+  return CAL.format(S.calendar.system, e.cal.day) + ", " + CAL.timeLabel(e.cal.time);
+}
+
 function sessionToMarkdown(s) {
+  const sys = S.calendar.system;
   let out = "# Session — " + fmtDate(s.startedAt) + "\n\n";
   out += "*" + fmtTime(s.startedAt) + " to " + fmtTime(s.endedAt) + "*\n\n";
   if (s.stats.highestACFaced != null) out += "- Toughest AC faced: **" + s.stats.highestACFaced + "**\n";
   if (s.stats.highestDCSet != null) out += "- Highest save DC set: **" + s.stats.highestDCSet + "**\n";
-  out += "\n## Log\n\n";
-  s.log.forEach(function (e) {
-    const tag = e.kind === "note" ? "**[Note]** " : e.kind === "flag" ? "**[!]** " : "";
-    out += "- " + fmtTime(e.t) + " — " + tag + e.label + "\n";
-  });
+
+  const story = s.log.filter(isNarrative);
+  const tech = s.log.filter(function (e) { return !isNarrative(e); });
+
+  if (story.length) {
+    out += "\n## What happened\n\n";
+    /* Grouped by in-world day so the recap reads as a journal rather than
+       a flat feed — several real-world hours can be one in-game morning. */
+    let lastKey = null;
+    story.forEach(function (e) {
+      const key = e.cal ? e.cal.year + ":" + e.cal.day : "undated";
+      if (key !== lastKey) {
+        lastKey = key;
+        out += (out.slice(-2) === "\n\n" ? "" : "\n") + "### " +
+          (e.cal ? CAL.format(sys, e.cal.day) + ", Year " + e.cal.year : "Undated") + "\n\n";
+      }
+      out += "- **" + (e.cal ? CAL.timeLabel(e.cal.time) : fmtTime(e.t)) + "** — " +
+        (e.kind === "flag" ? "⚠ " : "") + e.label + "\n";
+    });
+  }
+
+  if (tech.length) {
+    out += "\n## Technical log\n\n";
+    tech.forEach(function (e) {
+      out += "- " + fmtTime(e.t) + (e.cal ? " (" + CAL.format(sys, e.cal.day) + ")" : "") +
+        " — " + e.label + "\n";
+    });
+  }
   return out;
 }
 EXT.sessionModal = function () {
@@ -523,17 +557,39 @@ EXT.sessionModal = function () {
     if (s.stats.highestACFaced != null) stats.push("Toughest AC faced: " + s.stats.highestACFaced);
     if (s.stats.highestDCSet != null) stats.push("Highest save DC set: " + s.stats.highestDCSet);
     if (stats.length) body += '<div class="foot">' + esc(stats.join(" · ")) + "</div>";
+    body += '<div class="foot" style="margin-top:2px">In-world it is <b>' +
+      esc(CAL.stamp(S.calendar)) + "</b></div>";
     body += '<div class="mrow"><input type="text" id="session-note-in" placeholder="Add a note…" style="flex:1">' +
-      '<button class="bt cutsm" data-act="addSessionNote">Add</button></div>';
-    body += '<div class="ph2" style="margin-top:10px">Log</div>';
-    if (!s.log.length) {
-      body += '<div class="foot">Nothing logged yet — casting, attacking, resting, and creature/party changes show up here automatically.</div>';
+      '<button class="bt cutsm pri" data-act="addSessionNote">Add</button></div>';
+
+    const story = s.log.filter(isNarrative);
+    const tech = s.log.filter(function (e) { return !isNarrative(e); });
+
+    body += '<div class="ph2" style="margin-top:10px">What happened</div>';
+    if (!story.length) {
+      body += '<div class="foot">No notes yet. Anything you jot lands here, along with the moments worth flagging on their own — going down, dying, coming back.</div>';
     }
-    s.log.slice().reverse().forEach(function (e) {
-      const cls = e.kind === "note" ? "k-note" : e.kind === "flag" ? "k-flag" : "k-level";
-      const prefix = e.kind === "note" ? "Note — " : e.kind === "flag" ? "⚠ " : "";
-      body += '<div class="gain ' + cls + '"><span class="gk">' + fmtTime(e.t) + "</span><span>" + prefix + esc(e.label) + "</span></div>";
+    story.slice().reverse().forEach(function (e) {
+      const stamp = calLabel(e) || fmtTime(e.t);
+      body += '<div class="gain ' + (e.kind === "flag" ? "k-flag" : "k-note") + '">' +
+        '<span class="gk">' + esc(stamp) + "</span><span>" +
+        (e.kind === "flag" ? "⚠ " : "") + esc(e.label) + "</span></div>";
     });
+
+    /* The mechanical feed is still captured and still exported — it just
+       doesn't get to drown out the notes you actually wrote. */
+    const techHidden = !UI.expanded.sessionTechOpen;
+    body += '<div class="ph2" style="margin-top:12px">Technical log ' +
+      '<span class="sc">' + tech.length + "</span>" +
+      '<button class="bt cutsm" style="margin-left:8px" data-act="expand" data-id="sessionTechOpen">' +
+      (techHidden ? "Show" : "Hide") + "</button></div>";
+    if (!techHidden) {
+      if (!tech.length) body += '<div class="foot">Nothing mechanical logged yet.</div>';
+      tech.slice().reverse().forEach(function (e) {
+        body += '<div class="gain"><span class="gk">' + fmtTime(e.t) + "</span><span>" +
+          esc(e.label) + "</span></div>";
+      });
+    }
     body += '<div class="mfoot"><button class="bt cutsm dg" data-act="sessionEnd">End session</button>' +
       '<button class="bt cutsm" data-act="closeModal">Keep playing</button></div>';
   } else {
@@ -564,7 +620,13 @@ EXT.sessionNudge = function () {
   const notes = S.session.log.filter(function (e) { return e.kind === "note"; });
   const last = notes.length ? notes[notes.length - 1].t : S.session.startedAt;
   if (Date.now() - last < SESSION_NOTE_REMINDER_MS) return "";
-  return '<div class="strip cut"><span class="lbl">Been a while since your last note</span>' +
+  /* If today is a feast day, say so — it's usually the thing worth writing
+     down, and it saves a trip to the Calendar tab to find out. */
+  const feast = CAL.holidayFor(S.calendar.system, S.calendar.day);
+  const prompt = feast
+    ? "It's " + esc(feast.name) + " — worth a note?"
+    : "Been a while since your last note";
+  return '<div class="strip cut"><span class="lbl">' + prompt + "</span>" +
     '<input type="text" placeholder="Quick note…" style="flex:1;min-width:120px">' +
     '<button class="bt cutsm pri" data-act="addSessionNote">Add</button></div>';
 };
@@ -577,10 +639,21 @@ EXT.sessionNudge = function () {
 EXT.preSessionModal = function () {
   let body = "<h2>Before you start</h2>" +
     '<div class="msub">Mark who\'s here, then begin the session log.</div>';
+
+  /* Open on the in-world date, so the session starts anchored in the story
+     rather than only in wall-clock time. */
+  const feasts = CAL.allHolidaysFor(S.calendar.day);
+  body += '<div class="gain k-level"><span class="gk">Now</span><span>' +
+    esc(CAL.stamp(S.calendar)) + "</span></div>";
+  feasts.forEach(function (h) {
+    body += '<div class="gain k-note"><span class="gk">' + esc(h.label) +
+      "</span><span>" + esc(h.holiday.name) + "</span></div>";
+  });
+
   body += EXT.partyPanel(true);
   body += '<div class="ph2" style="margin-top:10px">Rested?</div>' +
     '<div class="mrow"><button class="bt cutsm" data-act="preSessionRest">' +
-    "Long rest (new in-game day)</button></div>";
+    "Long rest — advance the calendar</button></div>";
   const stale = [];
   if (S.effects.length) stale.push(S.effects.length + " active effect" + (S.effects.length === 1 ? "" : "s"));
   if (S.toggles.concentrating) stale.push("Concentrating" + (S.toggles.concentratingOn ? " on " + esc(S.toggles.concentratingOn) : ""));
@@ -971,7 +1044,9 @@ Object.assign(ACT, {
   /* ---- Session log ---- */
   sessionModal() { UI.modal = { type: "session" }; render(); },
   preSessionModal() { UI.modal = { type: "preSession" }; render(); },
-  preSessionRest() { ACT.longRest(); },
+  /* Carries `from` so the rest's result modal can hand you back to the
+     checklist instead of dead-ending mid-setup. */
+  preSessionRest() { UI.modal = { type: "restDays", from: "preSession" }; render(); },
   sessionStart() {
     mutate(function (st) {
       st.session.active = true;
@@ -1021,7 +1096,7 @@ Object.assign(ACT, {
     const text = input && input.value.trim();
     if (!text) return;
     mutate(function (st) {
-      st.session.log.push({ t: Date.now(), label: text, kind: "note" });
+      st.session.log.push({ t: Date.now(), label: text, kind: "note", cal: calStamp(st) });
       if (st.session.log.length > 500) st.session.log.shift();
     });
     render();

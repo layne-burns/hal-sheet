@@ -27,6 +27,7 @@ function src(f) { return fs.readFileSync(path.join(dir, f), "utf8"); }
 function inline(f) { return "<script>" + src(f) + "</script>"; }
 const html = src("index.html")
   .replace(/<script src="rules\.js"><\/script>/, inline("rules.js"))
+  .replace(/<script src="calendar-data\.js"><\/script>/, inline("calendar-data.js"))
   .replace(/<script src="combat-rules\.js"><\/script>/, inline("combat-rules.js"))
   .replace(/<script src="app\.js"><\/script>/, inline("app.js"))
   .replace(/<script src="combat\.js"><\/script>/, inline("combat.js"))
@@ -138,6 +139,7 @@ closeAnyModal();
 fetchCalls.length = 0;
 fetchQueue = [{ status: 200, body: { id: "gist-abc123" } }];
 click(byAct("tab", { tab: "combat" }));
+click(byAct("longRestPrompt"));
 click(byAct("longRest"));
 closeAnyModal();
 await flush();

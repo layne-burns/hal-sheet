@@ -54,6 +54,7 @@ function migrate(st) {
   out.session = Object.assign({}, base.session, st.session || {});
   out.session.stats = Object.assign({}, base.session.stats, (st.session || {}).stats || {});
   out.sessionHistory = st.sessionHistory || [];
+  out.calendar = Object.assign({}, base.calendar, st.calendar || {});
   out.schemaVersion = base.schemaVersion;
   return out;
 }
@@ -80,9 +81,16 @@ function save() {
    that pass a label. No-op when no session is running. */
 function logFlag(st, text) {
   if (st.session && st.session.active) {
-    st.session.log.push({ t: Date.now(), label: text, kind: "flag" });
+    st.session.log.push({ t: Date.now(), label: text, kind: "flag", cal: calStamp(st) });
     if (st.session.log.length > 500) st.session.log.shift();
   }
+}
+
+/* Where the party was in the story when something happened — the wall
+   clock says when you played, this says when it happened. */
+function calStamp(st) {
+  const c = st.calendar;
+  return c ? { day: c.day, year: c.year, time: c.timeOfDay } : null;
 }
 
 /* Keep derived caps honest after any change (level, CON, etc.) */
@@ -316,7 +324,36 @@ const ACT = {
     UI.alert = { info: "Short rest — regained 1 Channel Divinity use. Spend Hit Dice in the Combat tab if you need HP." };
     render();
   },
+  /* ---- Calendar ---- */
+  advanceTime() {
+    mutate(function (st) {
+      const n = CAL.nextTime(st.calendar.timeOfDay);
+      st.calendar.timeOfDay = n.key;
+      if (n.rolledOver) {
+        const adv = CAL.advance(st.calendar.day, st.calendar.year, 1);
+        st.calendar.day = adv.day; st.calendar.year = adv.year;
+      }
+    });
+  },
+  advanceDay(el) {
+    const d = parseInt(el.dataset.d, 10) || 0;
+    mutate(function (st) {
+      const adv = CAL.advance(st.calendar.day, st.calendar.year, d);
+      st.calendar.day = adv.day; st.calendar.year = adv.year;
+    });
+  },
+  calSystem(el) {
+    const k = el.dataset.key;
+    mutate(function (st) { st.calendar.system = k; });
+  },
+
+  /* Resting is where in-world time usually moves, so it asks rather than
+     assuming — some rests are "we camp and push on", others skip a week. */
+  longRestPrompt() { UI.modal = { type: "restDays" }; render(); },
   longRest() {
+    const el = document.getElementById("rest-days");
+    const days = el ? Math.max(0, Math.min(365, parseInt(el.value, 10) || 0)) : 0;
+    const from = UI.modal && UI.modal.from;
     mutate(function (st) {
       st.currentHP = CALC.maxHP(st).value;
       st.tempHP = 0;
@@ -332,8 +369,16 @@ const ACT = {
       st.deathSaves = { successes: 0, failures: 0 };
       st.conditions = st.conditions.filter(function (c) { return c !== "unconscious"; });
       if (st.exhaustion > 0) st.exhaustion -= 1;
-    });
-    UI.modal = { type: "longRest" };
+      if (days > 0) {
+        const adv = CAL.advance(st.calendar.day, st.calendar.year, days);
+        st.calendar.day = adv.day;
+        st.calendar.year = adv.year;
+        st.calendar.timeOfDay = "morning";
+        logFlag(st, days === 1 ? "A day passes — now " + CAL.format(st.calendar.system, st.calendar.day)
+                               : days + " days pass — now " + CAL.format(st.calendar.system, st.calendar.day));
+      }
+    }, "Long rest");
+    UI.modal = { type: "longRest", daysPassed: days, from: from };
     render();
   },
   hitDiceModal() { UI.modal = { type: "hitDice" }; render(); },
@@ -650,7 +695,7 @@ function topBar() {
     '<div class="sp"></div>' + toggles +
     '<button class="bt dg cutsm" data-act="damageModal">Damage<k>D</k></button>' +
     '<button class="bt cutsm" data-act="shortRest">Short<k>S</k></button>' +
-    '<button class="bt cutsm" data-act="longRest">Long<k>L</k></button>' +
+    '<button class="bt cutsm" data-act="longRestPrompt">Long<k>L</k></button>' +
     '<button class="bt pri cutsm" data-act="levelUpModal">Level up</button>' +
     /* Editing stays visible whenever it's ON — being in edit mode without
        an obvious way out is worse than one extra button. */
@@ -715,7 +760,7 @@ function alertBar() {
 /* ---------- TABS ---------- */
 function tabBar(active) {
   const tabs = [["combat","Combat","1"],["spells","Spells","2"],["features","Features","3"],
-                ["inventory","Inventory","4"],["notes","Notes","5"]];
+                ["inventory","Inventory","4"],["notes","Notes","5"],["calendar","Calendar","6"]];
   return '<div class="tabs">' + tabs.map(function (t) {
     return '<button class="tab" aria-selected="' + (active === t[0]) +
       '" data-act="tab" data-tab="' + t[0] + '">' + t[1] + "<k>" + t[2] + "</k></button>";
@@ -827,6 +872,7 @@ function tabContent(tab) {
   if (tab === "features") return featuresTab();
   if (tab === "inventory") return inventoryTab();
   if (tab === "notes") return notesTab();
+  if (tab === "calendar") return calendarTab();
   return combatTab();
 }
 
@@ -1196,6 +1242,97 @@ function notesTab() {
   return out;
 }
 
+/* ---------- CALENDAR ----------
+   Doubles as the at-a-glance page: today's date in both systems, what's
+   happening, and where you are in the year. The month browser underneath
+   is for looking ahead. */
+function calendarTab() {
+  const cal = S.calendar;
+  const sysKey = cal.system;
+  const sys = CAL.system(sysKey);
+  const other = CAL.system(sysKey === "jerbeen" ? "common" : "jerbeen");
+  const month = CAL.monthFor(sysKey, cal.day);
+  const holidays = CAL.allHolidaysFor(cal.day);
+  const next = CAL.nextHoliday(sysKey, cal.day);
+
+  /* ---- Today ---- */
+  let out = '<div class="pnl cut"><h3>Today <span class="cnt">Day ' + cal.day +
+    " of " + CAL.daysPerYear + "</span></h3>" +
+    '<div class="calday">' + esc(CAL.format(sysKey, cal.day)) + "</div>" +
+    '<div class="calsub">Year ' + cal.year + " · " + esc(month.season) +
+      " · " + esc(CAL.timeLabel(cal.timeOfDay)) + "</div>" +
+    '<div class="calalt">' + esc(other.label) + " reckoning: <b>" +
+      esc(CAL.format(other.key, cal.day)) + "</b></div>";
+
+  if (holidays.length) {
+    holidays.forEach(function (h) {
+      out += '<div class="calfeast"><div class="cfname">' + esc(h.holiday.name) +
+        ' <span class="bdg">' + esc(h.label) + "</span></div>" +
+        '<div class="etext">' + esc(h.holiday.lore) + "</div></div>";
+    });
+    if (holidays.length > 1) {
+      out += '<div class="seqnote">Both calendars mark this day — a rare alignment.</div>';
+    }
+  }
+
+  out += '<div class="etext" style="margin-top:9px">' + esc(month.lore) + "</div>";
+  if (next) {
+    out += '<div class="foot">' + (next.inDays === 0
+      ? "Today is " + esc(next.holiday.name) + "."
+      : "Next in the " + esc(sys.label) + " calendar: <b>" + esc(next.holiday.name) +
+        "</b> in " + next.inDays + " day" + (next.inDays === 1 ? "" : "s") + ".") + "</div>";
+  }
+
+  /* Quick note straight from here — the date you're looking at is the date
+     the note gets stamped with. */
+  if (S.session.active) {
+    out += '<div class="mrow" style="margin-top:10px">' +
+      '<input type="text" placeholder="Note for ' + esc(CAL.format(sysKey, cal.day)) + '…">' +
+      '<button class="bt cutsm pri" data-act="addSessionNote">Add note</button></div>';
+  }
+  out += "</div>";
+
+  /* ---- Controls ---- */
+  out += '<div class="pnl cut"><h3>Set the date</h3>' +
+    '<div class="mrow"><span class="lbl">Time of day</span>' +
+    '<button class="bt cutsm" data-act="advanceTime">' +
+      esc(CAL.timeLabel(cal.timeOfDay)) + " →</button>" +
+    '<span class="foot" style="margin:0">Past Night rolls into the next dawn.</span></div>' +
+    '<div class="mrow"><span class="lbl">Day</span>' +
+    '<button class="bt cutsm" data-act="advanceDay" data-d="-1">−1</button>' +
+    '<button class="bt cutsm" data-act="advanceDay" data-d="1">+1</button>' +
+    '<button class="bt cutsm" data-act="advanceDay" data-d="7">+7</button></div>' +
+    '<div class="mrow"><span class="lbl">Showing</span>' +
+    Object.keys(CAL.systems).map(function (k) {
+      return '<button class="bt cutsm' + (k === sysKey ? " pri" : "") +
+        '" data-act="calSystem" data-key="' + k + '">' + esc(CAL.systems[k].label) + "</button>";
+    }).join("") + "</div>" +
+    '<div class="foot">Both calendars count the same 364 days — switching only changes how the date reads.</div>' +
+    "</div>";
+
+  /* ---- The year ---- */
+  const yearCollapsed = !!UI.expanded.calYearCollapsed;
+  out += '<div class="pnl cut"><h3>' + esc(sys.label) + ' year' +
+    '<button class="bt cutsm" data-act="expand" data-id="calYearCollapsed">' +
+    (yearCollapsed ? "Show" : "Hide") + "</button></h3>";
+  if (!yearCollapsed) {
+    sys.months.forEach(function (m) {
+      const isNow = cal.day >= m.start && cal.day <= m.end;
+      out += '<div class="calmonth' + (isNow ? " now" : "") + '">' +
+        '<div class="cmhead"><span class="cmname">' + esc(m.name) + "</span>" +
+        '<span class="cmmeta">' + esc(m.season) + " · days " + m.start + "–" + m.end + "</span></div>";
+      sys.holidays.filter(function (h) { return h.day >= m.start && h.day <= m.end; })
+        .forEach(function (h) {
+          out += '<div class="cmfeast' + (h.day === cal.day ? " today" : "") + '">' +
+            esc(h.name) + ' <span class="sc">' + esc(CAL.format(sys.key, h.day)) + "</span></div>";
+        });
+      out += "</div>";
+    });
+  }
+  out += "</div>";
+  return out;
+}
+
 /* ---------- FILTER PANEL (collapsible) ---------- */
 function filterPanel() {
   const collapsed = !!UI.expanded.filterCollapsed;
@@ -1332,8 +1469,26 @@ function modalHTML() {
       '<button class="bt cutsm" data-act="closeModal">Cancel</button></div>';
   }
 
+  else if (t === "restDays") {
+    const cal = S.calendar;
+    body = "<h2>Long rest</h2>" +
+      '<div class="msub">Resources come back either way — this is just about the calendar. ' +
+      "It's <b>" + esc(CAL.stamp(cal)) + "</b> right now.</div>" +
+      '<div class="mrow"><label class="lbl">Days that pass</label>' +
+      '<input type="number" id="rest-days" min="0" max="365" value="1"></div>' +
+      '<div class="msub">0 rests without turning the day over. Anything more moves the ' +
+      "calendar forward and picks up the next morning.</div>" +
+      '<div class="mfoot"><button class="bt cutsm pri" data-act="longRest">Take the rest</button>' +
+      '<button class="bt cutsm" data-act="closeModal">Cancel</button></div>';
+  }
+
   else if (t === "longRest") {
+    const passed = UI.modal.daysPassed || 0;
     body = "<h2>Long rest complete</h2>" +
+      (passed > 0
+        ? '<div class="gain k-level"><span class="gk">' + passed + " day" + (passed === 1 ? "" : "s") +
+          '</span><span>It is now ' + esc(CAL.stamp(S.calendar)) + "</span></div>"
+        : '<div class="foot">The date is unchanged — still ' + esc(CAL.stamp(S.calendar)) + ".</div>") +
       '<div class="msub">HP, spell slots, Lay on Hands, Channel Divinity, the free Divine Smite, ' +
       "Find Familiar, and Detect Thoughts have all been restored. Concentration ended.</div>" +
       '<div class="warnbox">You may swap your two active weapon masteries on a long rest.</div>' +
@@ -1347,7 +1502,9 @@ function modalHTML() {
     });
     body += "</div>" +
       '<div class="msub">Active: ' + S.equipment.activeMasteries.length + " of 2</div>" +
-      '<div class="mfoot"><button class="bt cutsm pri" data-act="closeModal">Done</button></div>';
+      '<div class="mfoot"><button class="bt cutsm pri" data-act="' +
+      (UI.modal.from === "preSession" ? "preSessionModal" : "closeModal") + '">' +
+      (UI.modal.from === "preSession" ? "Back to checklist" : "Done") + "</button></div>";
   }
 
   else if (t === "levelUp") {
@@ -1513,14 +1670,14 @@ document.addEventListener("keydown", function (e) {
   }
   const k = e.key.toLowerCase();
   if (k === "escape") { UI.modal = null; UI.prov = null; UI.alert = null; render(); return; }
-  if (["1","2","3","4","5"].indexOf(k) >= 0) {
-    const tabs = ["combat","spells","features","inventory","notes"];
+  if (["1","2","3","4","5","6"].indexOf(k) >= 0) {
+    const tabs = ["combat","spells","features","inventory","notes","calendar"];
     mutate(function (st) { st.ui = st.ui || {}; st.ui.tab = tabs[parseInt(k, 10) - 1]; });
     return;
   }
   if (k === "d") { ACT.damageModal(); e.preventDefault(); }
   else if (k === "s") { ACT.shortRest(); }
-  else if (k === "l") { ACT.longRest(); }
+  else if (k === "l") { ACT.longRestPrompt(); }
   else if (k === "e") { ACT.editMode(); }
   else if (k === "c") { mutate(function (st) { st.toggles.concentrating = !st.toggles.concentrating; }); }
 });

@@ -18,6 +18,7 @@ const dir = __dirname;
 function inline(f) { return "<script>" + fs.readFileSync(path.join(dir, f), "utf8") + "</script>"; }
 const html = fs.readFileSync(path.join(dir, "index.html"), "utf8")
   .replace(/<script src="rules\.js"><\/script>/, inline("rules.js"))
+  .replace(/<script src="calendar-data\.js"><\/script>/, inline("calendar-data.js"))
   .replace(/<script src="combat-rules\.js"><\/script>/, inline("combat-rules.js"))
   .replace(/<script src="app\.js"><\/script>/, inline("app.js"))
   .replace(/<script src="combat\.js"><\/script>/, inline("combat.js"));
@@ -110,6 +111,52 @@ ok("unproficient skills still show a modifier",
    /Arcana/.test(text()) && /Stealth/.test(text()));
 ok("Athletics (unproficient, STR -1) is visible", /Athletics/.test(text()));
 
+console.log("\n=== CALENDAR: TWO SYSTEMS OVER ONE SHARED DAY ===");
+const CALe = function (expr) { return w.eval(expr); };
+eq("both calendars cover the same 364 days", CALe("CAL.daysPerYear"), 364);
+eq("Jerbeen months cover the year end to end",
+   CALe("CAL.systems.jerbeen.months.reduce(function(n,m){return n+(m.end-m.start+1)},0)"), 364);
+eq("Common months (incl. the Convergence) do too",
+   CALe("CAL.systems.common.months.reduce(function(n,m){return n+(m.end-m.start+1)},0)"), 364);
+eq("day 1 is Grub-Wake 1 in Jerbeen", CALe('CAL.format("jerbeen",1)'), "Grub-Wake 1");
+eq("day 1 is Dawnrise 1 in Common", CALe('CAL.format("common",1)'), "Dawnrise 1");
+eq("day 42 is Hawk-Shadow 14", CALe('CAL.format("jerbeen",42)'), "Hawk-Shadow 14");
+eq("day 42 is Gladmer 12", CALe('CAL.format("common",42)'), "Gladmer 12");
+eq("day 364 closes the Jerbeen year", CALe('CAL.format("jerbeen",364)'), "Still-Wood 28");
+eq("day 361 lands in the Common Convergence", CALe('CAL.format("common",361)'), "The Convergence 1");
+eq("day 42 is a feast in BOTH calendars", CALe("CAL.allHolidaysFor(42).length"), 2);
+eq("...and day 5 is a feast in neither", CALe("CAL.allHolidaysFor(5).length"), 0);
+eq("the year wraps forward", JSON.stringify(CALe("CAL.advance(364,222,1)")),
+   JSON.stringify({ day: 1, year: 223 }));
+eq("and backward", JSON.stringify(CALe("CAL.advance(1,222,-1)")),
+   JSON.stringify({ day: 364, year: 221 }));
+eq("next holiday from day 2 is The High Weave in 40 days",
+   CALe('CAL.nextHoliday("jerbeen",2).inDays'), 40);
+eq("night rolls over into the next day", CALe('CAL.nextTime("night").rolledOver'), true);
+eq("morning does not", CALe('CAL.nextTime("morning").rolledOver'), false);
+
+console.log("\n=== CALENDAR TAB ===");
+click(byAct("tab", { tab: "calendar" }));
+ok("shows the Jerbeen date by default", /Grub-Wake/.test(text()));
+ok("also shows the Common reckoning", /Dawnrise/.test(text()));
+ok("names today's holiday", /The Emergence/.test(text()));
+ok("today's feast gets its own block", !!$(".calfeast"));
+function calState() { return JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).calendar; }
+click(byAct("advanceDay", { d: "1" }));
+eq("+1 moves the day", calState().day, 2);
+ok("no feast block on an ordinary day", !$(".calfeast"));
+ok("but the year browser still lists it ahead", /The Emergence/.test(text()));
+click(byAct("advanceDay", { d: "-1" }));
+eq("−1 moves it back", calState().day, 1);
+click(byAct("calSystem", { key: "common" }));
+eq("switching system is display-only — the day is untouched", calState().day, 1);
+eq("system preference saved", calState().system, "common");
+ok("now reads in Common months", /Dawnrise 1/.test(text()));
+click(byAct("calSystem", { key: "jerbeen" }));
+click(byAct("advanceTime"));
+eq("time of day steps forward", calState().timeOfDay, "midday");
+click(byAct("tab", { tab: "combat" }));
+
 console.log("\n=== PROVENANCE ===");
 click('[data-prov="save:cha"]');
 ok("provenance panel opened", /Charisma save/.test(text()));
@@ -183,8 +230,14 @@ click(byAct("cd", { d: "-1" }));
 st = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1"));
 eq("Lay on Hands spent to 10", st.resources.layOnHands, 10);
 eq("Channel Divinity spent to 1", st.resources.channelDivinity, 1);
+eq("calendar starts on global day 1", JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).calendar.day, 1);
+click(byAct("longRestPrompt"));
+ok("long rest asks how much time passed before resting", !!$("#rest-days"));
+$("#rest-days").value = "1";
 click(byAct("longRest"));
 st = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1"));
+eq("the in-world day advanced", st.calendar.day, 2);
+eq("and picks up the next morning", st.calendar.timeOfDay, "morning");
 eq("HP restored to max", st.currentHP, 35);
 eq("Lay on Hands restored to 20", st.resources.layOnHands, 20);
 eq("Channel Divinity restored to 2", st.resources.channelDivinity, 2);

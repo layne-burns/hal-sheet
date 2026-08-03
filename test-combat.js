@@ -20,6 +20,7 @@ function src(f) { return fs.readFileSync(path.join(dir, f), "utf8"); }
 function inline(f) { return "<script>" + src(f) + "</script>"; }
 const html = src("index.html")
   .replace(/<script src="rules\.js"><\/script>/, inline("rules.js"))
+  .replace(/<script src="calendar-data\.js"><\/script>/, inline("calendar-data.js"))
   .replace(/<script src="combat-rules\.js"><\/script>/, inline("combat-rules.js"))
   .replace(/<script src="app\.js"><\/script>/, inline("app.js"))
   .replace(/<script src="combat\.js"><\/script>/, inline("combat.js"));
@@ -548,12 +549,54 @@ st = state();
 const lastEntry = st.session.log[st.session.log.length - 1];
 eq("note lands as the newest log entry", lastEntry.label, "The innkeeper seemed nervous about something.");
 eq("note is tagged kind: note", lastEntry.kind, "note");
+ok("note is stamped with the in-world date, not just the wall clock",
+   !!lastEntry.cal && typeof lastEntry.cal.day === "number" && !!lastEntry.cal.time);
+
+console.log("\n=== NARRATIVE AND TECHNICAL LOGS ARE SEPARATED ===");
+ok("the story section is shown by default", /What happened/.test(text()));
+ok("the note appears in it", /innkeeper seemed nervous/.test(text()));
+ok("the technical log is counted but collapsed", /Technical log/.test(text()));
+/* "Start session" is bookkeeping — it belongs in the technical feed, not
+   in the story the notes are telling. */
+ok("mechanical entries are hidden while collapsed", !/Start session/.test(text()));
+click(byAct("expand", { id: "sessionTechOpen" }));
+ok("expanding reveals them", /Start session/.test(text()));
+ok("and the notes are still there too", /innkeeper seemed nervous/.test(text()));
+click(byAct("expand", { id: "sessionTechOpen" }));
+ok("the in-world date is shown in the session modal", /In-world it is/.test(text()));
+
+console.log("\n=== MARKDOWN EXPORT GROUPS BY IN-WORLD DAY ===");
+const md = w.eval("sessionToMarkdown({startedAt:Date.now(),endedAt:Date.now()," +
+  "stats:{highestACFaced:null,highestDCSet:null},log:[" +
+  "{t:Date.now(),label:'Start session',cal:{day:1,year:222,time:'morning'}}," +
+  "{t:Date.now(),label:'Met the keeper',kind:'note',cal:{day:1,year:222,time:'morning'}}," +
+  "{t:Date.now(),label:'Hal is down (0 HP)',kind:'flag',cal:{day:2,year:222,time:'night'}}" +
+  "]})");
+ok("export has a story section", /## What happened/.test(md));
+ok("export has a separate technical section", /## Technical log/.test(md));
+ok("story is grouped under in-world day headings", /### Grub-Wake 1, Year 222/.test(md));
+ok("a second in-world day gets its own heading", /### Grub-Wake 2, Year 222/.test(md));
+ok("notes read by time of day", /\*\*Morning\*\* — Met the keeper/.test(md));
+ok("flags are marked", /⚠ Hal is down/.test(md));
+ok("bookkeeping stays out of the story section",
+   md.indexOf("Start session") > md.indexOf("## Technical log"));
 click(byAct("closeModal"));
 
 console.log("\n=== SESSION NOTE REMINDER NUDGE ===");
 ok("no nudge right after a fresh note", w.eval("EXT.sessionNudge()") === "");
 w.eval("S.session.log = S.session.log.filter(function(e){ return e.kind !== 'note'; }); S.session.startedAt = Date.now() - 30*60*1000;");
-ok("nudge appears once it's been a while with no note", /Been a while/.test(w.eval("EXT.sessionNudge()")));
+ok("nudge appears once it's been a while with no note",
+   /data-act="addSessionNote"/.test(w.eval("EXT.sessionNudge()")));
+/* Day 1 is The Emergence — the nudge should name the feast instead of the
+   generic prompt, so you don't have to go looking for it. */
+w.eval("S.calendar.day = 1");
+ok("nudge names the holiday when there is one",
+   /The Emergence/.test(w.eval("EXT.sessionNudge()")));
+w.eval("S.calendar.day = 5");
+const plainNudge = w.eval("EXT.sessionNudge()");
+ok("and falls back to the generic prompt on an ordinary day",
+   /Been a while/.test(plainNudge) && !/Emergence/.test(plainNudge));
+w.eval("S.calendar.day = 1");
 w.eval("render()");
 const nudgeBtn = $$('[data-act="addSessionNote"]').find(function (b) { return b.closest(".strip"); });
 ok("nudge strip is actually in the rendered DOM", !!nudgeBtn);
