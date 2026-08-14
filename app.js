@@ -14,8 +14,18 @@ let S = load();
 /* `cal` is the browsing cursor for the calendar tab — which day you're
    LOOKING at, deliberately separate from S.calendar, which is the day
    the party is actually living in. null means "follow the current date". */
+/* `map` is the map's camera and selection — how far you have zoomed and
+   panned, and which pin is open. Deliberately ephemeral, like `cal`:
+   where you are LOOKING is not part of the character.
+
+   `drag` is live pointer state during a pan, a pinch, or a pin being
+   moved. It never touches S until the gesture ends, because every write
+   to S re-renders the page and would yank the map out from under the
+   finger doing the dragging. */
 const UI = { prov: null, modal: null, alert: null, filter: [], expanded: {},
-             cal: { day: null, year: null } };
+             cal: { day: null, year: null },
+             map: { zoom: 1, x: 0, y: 0, sel: null, mode: "look", q: "" },
+             drag: null };
 
 function load() {
   try {
@@ -60,6 +70,15 @@ function migrate(st) {
   out.sessionHistory = st.sessionHistory || [];
   out.followers = st.followers || [];
   out.calendar = Object.assign({}, base.calendar, st.calendar || {});
+  /* Map edits are deltas against cyrnn-data.js ids, so they merge rather
+     than replace — a save made before the map existed simply arrives
+     empty, and one made before a place was added keeps every nudge. */
+  out.map = Object.assign({}, base.map, st.map || {});
+  out.map.edits = Object.assign({}, (st.map || {}).edits || {});
+  out.map.notes = Object.assign({}, (st.map || {}).notes || {});
+  out.map.custom = (st.map || {}).custom || [];
+  out.map.lore = (st.map || {}).lore || [];
+  out.map.off = Object.assign({}, (st.map || {}).off || {});
   out.schemaVersion = base.schemaVersion;
   return out;
 }
@@ -786,6 +805,129 @@ const ACT = {
     render();
   },
 
+  /* ---- Map ----
+     Camera and selection are UI-only and re-render without a save; the
+     things that change the world go through mutate like everything
+     else, which is what puts them in the export and the cloud backup. */
+  mapPin(el) { UI.map.sel = el.dataset.id; render(); },
+  mapMode(el) { UI.map.mode = el.dataset.mode; render(); },
+  mapLabels() { mutate(function (st) { st.map.showLabels = !st.map.showLabels; }); },
+
+  mapFilter(el) {
+    const k = el.dataset.key;
+    mutate(function (st) {
+      st.map.off = st.map.off || {};
+      if (st.map.off[k]) delete st.map.off[k]; else st.map.off[k] = true;
+    });
+  },
+  mapFilterAll() { mutate(function (st) { st.map.off = {}; }); },
+  mapSearch(el) { UI.map.q = el.value; render(); },
+  mapSearchClear() { UI.map.q = ""; render(); },
+
+  mapZoom(el) {
+    const d = parseInt(el.dataset.d, 10);
+    mapSetZoom(UI.map.zoom * (d > 0 ? 1.5 : 1 / 1.5));
+    render();
+  },
+  mapFit() { UI.map.zoom = 1; UI.map.x = 0; UI.map.y = 0; render(); },
+
+  /* Centre the view on a pin without changing the zoom — the "where is
+     that?" answer for a place you found in the atlas. */
+  mapFocus(el) {
+    const p = mapPin(el.dataset.id);
+    if (!p) return;
+    const view = document.querySelector(".mapview");
+    if (view) {
+      const w = view.clientWidth, h = view.clientHeight, z = UI.map.zoom;
+      UI.map.x = w / 2 - (p.x / 100) * w * z;
+      UI.map.y = h / 2 - (p.y / 100) * h * z;
+      mapClampPan(w, h);
+    }
+    UI.map.sel = p.id;
+    render();
+  },
+
+  mapPartyHere(el) {
+    const p = mapPin(el.dataset.id);
+    if (!p) return;
+    /* Where the party went is worth having in the session log, so the
+       export reads as a journey and not just a list of fights. */
+    mutate(function (st) {
+      st.map.party = { x: p.x, y: p.y };
+      logFlag(st, "The party is at " + p.name);
+    });
+  },
+  mapClearParty() {
+    mutate(function (st) { st.map.party = null; });
+    if (UI.map.sel === "__party") UI.map.sel = null;
+  },
+
+  mapRename(el) {
+    const id = el.dataset.id, name = el.value.trim();
+    if (!name) return;
+    mutate(function (st) {
+      const c = st.map.custom.filter(function (k) { return k.id === id; })[0];
+      if (c) { c.name = name; return; }
+      st.map.edits[id] = Object.assign({}, st.map.edits[id], { name: name });
+    });
+  },
+
+  mapHide(el) {
+    const id = el.dataset.id;
+    mutate(function (st) {
+      st.map.edits[id] = Object.assign({}, st.map.edits[id], { hidden: true });
+    });
+    if (UI.map.sel === id) UI.map.sel = null;
+    render();
+  },
+  mapRestore(el) {
+    const id = el.dataset.id;
+    mutate(function (st) {
+      if (st.map.edits[id]) delete st.map.edits[id].hidden;
+    });
+  },
+  /* Puts a canonical pin back exactly as the data file has it. */
+  mapReset(el) {
+    const id = el.dataset.id;
+    mutate(function (st) { delete st.map.edits[id]; });
+  },
+  mapDelete(el) {
+    const id = el.dataset.id;
+    mutate(function (st) {
+      st.map.custom = st.map.custom.filter(function (c) { return c.id !== id; });
+      st.map.notes[id] && delete st.map.notes[id];
+      st.map.lore = st.map.lore.filter(function (l) { return l.scope !== id; });
+    });
+    if (UI.map.sel === id) UI.map.sel = null;
+    render();
+  },
+
+  mapNote(el) {
+    const id = el.dataset.id, v = el.value;
+    mutate(function (st) {
+      if (v.trim()) st.map.notes[id] = v; else delete st.map.notes[id];
+    });
+  },
+
+  mapLoreAdd(el) {
+    const scope = el.dataset.scope;
+    const tEl = document.querySelector('[data-lore-title="' + scope + '"]');
+    const bEl = document.querySelector('[data-lore-body="' + scope + '"]');
+    const title = tEl ? tEl.value.trim() : "";
+    const body = bEl ? bEl.value.trim() : "";
+    if (!title && !body) return;
+    mutate(function (st) {
+      st.map.lore.push({ id: newPinId(), scope: scope,
+                         title: title || "Untitled", body: body });
+    });
+  },
+  mapLoreDelete(el) {
+    const id = el.dataset.id;
+    mutate(function (st) {
+      st.map.lore = st.map.lore.filter(function (l) { return l.id !== id; });
+    });
+  },
+
   /* ---- Level up ---- */
   levelUpModal() {
     const p = CALC.levelUpPreview(S);
@@ -1249,7 +1391,7 @@ function alertBar() {
 function tabBar(active) {
   const tabs = [["combat","Combat","1"],["spells","Spells","2"],["features","Features","3"],
                 ["inventory","Inventory","4"],["notes","Notes","5"],["calendar","Calendar","6"],
-                ["followers","Followers","7"]];
+                ["followers","Followers","7"],["map","Map","8"]];
   return '<div class="tabs">' + tabs.map(function (t) {
     return '<button class="tab" aria-selected="' + (active === t[0]) +
       '" data-act="tab" data-tab="' + t[0] + '">' + t[1] + "<k>" + t[2] + "</k></button>";
@@ -1370,6 +1512,7 @@ function tabContent(tab) {
   if (tab === "notes") return notesTab();
   if (tab === "calendar") return calendarTab();
   if (tab === "followers") return followersTab();
+  if (tab === "map") return mapTab();
   return combatTab();
 }
 
@@ -1912,6 +2055,478 @@ function followersTab() {
 
 /* The general rules a follower drags in with it. Verbatim from the SRD,
    because half-remembered mounted-combat rules are how a fight stalls. */
+/* ---------- MAP: RESOLVING CANON AGAINST YOUR EDITS ----------
+   cyrnn-data.js is the world as written; S.map is what you have done to
+   it. Nothing draws from either alone — everything goes through here,
+   so a pin you nudged is nudged in the atlas and the map at once, and a
+   place added to the data file later simply shows up.
+
+   A canonical place keeps its id forever, which is what lets an edit be
+   a delta rather than a copy. Your own pins take a "c-" prefix so the
+   two id spaces can never collide. */
+function mapPins() {
+  const M = S.map;
+  const out = [];
+  CYRNN.places.forEach(function (p) {
+    const e = M.edits[p.id] || {};
+    if (e.hidden) return;
+    out.push({
+      id: p.id, name: e.name || p.name, kind: p.kind, region: p.region,
+      x: e.x == null ? p.x : e.x, y: e.y == null ? p.y : e.y,
+      groups: p.groups || [], tags: p.tags || [], blurb: p.blurb, lore: p.lore,
+      approx: !!p.approx, moved: e.x != null, renamed: !!e.name, custom: false
+    });
+  });
+  M.custom.forEach(function (c) {
+    out.push({
+      id: c.id, name: c.name, kind: c.kind || "marker", region: c.region || null,
+      x: c.x, y: c.y, groups: [], tags: [], blurb: "", lore: c.note || "",
+      approx: false, moved: false, renamed: false, custom: true
+    });
+  });
+  return out;
+}
+
+function mapPin(id) {
+  const all = mapPins();
+  for (let i = 0; i < all.length; i++) if (all[i].id === id) return all[i];
+  return null;
+}
+
+/* Every scope a pin answers to, for the calendar and lore joins. Your
+   own pins answer to themselves, and to a region if you filed them
+   under one — so a marker dropped in Müür still picks up Müür's feasts. */
+function mapScopes(pin) {
+  if (!pin) return [];
+  if (!pin.custom) return CYRNN.scopesFor(pin.id);
+  return pin.region ? [pin.id, pin.region] : [pin.id];
+}
+
+/* Hidden places are recoverable, never destroyed — the count is what the
+   Atlas offers to restore. */
+function mapHiddenIds() {
+  return Object.keys(S.map.edits).filter(function (k) { return S.map.edits[k].hidden; });
+}
+
+function newPinId() { return "c-" + Date.now().toString(36) + Math.floor(Math.random() * 1e3); }
+
+/* ---------- MAP TAB ---------- */
+function mapTab() {
+  return mapPanel() + mapSelectedPanel() + atlasPanel() + worldLorePanel();
+}
+
+/* Kinds whose names the mapmaker already wrote on the paper, plus the
+   two ruins that would otherwise crowd the Fracture — they are history,
+   not somewhere you are trying to walk to. Their pins stay; only the
+   label waits for you to zoom in. */
+const MAP_QUIET_KINDS = { forest: 1, swamp: 1, hills: 1, mountains: 1, sea: 1,
+                          island: 1, road: 1, wall: 1, ruin: 1 };
+const MAP_LABEL_ZOOM = 1.8;
+
+/* The legend, and the filter, and the colour families — one list, so
+   they can never disagree. Grouped rather than one switch per kind:
+   thirteen kinds is a wall of chips, and nobody wants "hide swamps" on
+   its own. These six are the distinctions you actually make when
+   looking for something on a map. */
+const MAP_FILTERS = [
+  { id: "cities", label: "Cities", kinds: ["city"] },
+  { id: "towns",  label: "Towns",  kinds: ["town", "warren"] },
+  { id: "ruins",  label: "Ruins",  kinds: ["ruin"] },
+  { id: "wilds",  label: "Wilds",  kinds: ["forest", "swamp", "hills", "mountains", "sea", "island"] },
+  { id: "routes", label: "Routes", kinds: ["road", "wall"] },
+  { id: "mine",   label: "Yours",  kinds: ["marker"] }
+];
+
+function mapGroupOf(pin) {
+  if (pin.custom) return "mine";
+  for (let i = 0; i < MAP_FILTERS.length; i++) {
+    if (MAP_FILTERS[i].kinds.indexOf(pin.kind) >= 0) return MAP_FILTERS[i].id;
+  }
+  return "towns";   /* an unrecognised kind is still somewhere you go */
+}
+
+/* Sparse: only the groups switched OFF are stored, so a group added
+   later starts visible rather than silently absent. */
+function mapGroupOn(id) { return !(S.map.off || {})[id]; }
+
+function mapVisiblePins() {
+  return mapPins().filter(function (p) { return mapGroupOn(mapGroupOf(p)); });
+}
+
+const MAP_MODES = [
+  ["look",  "Look",       "Tap a pin to read it"],
+  ["move",  "Move pins",  "Drag any pin to correct it"],
+  ["add",   "Add pin",    "Tap the map to drop your own"],
+  ["party", "Party here", "Tap the map to move the party"]
+];
+
+function mapPanel() {
+  const m = UI.map;
+  const pins = mapPins();
+  const mode = MAP_MODES.filter(function (r) { return r[0] === m.mode; })[0] || MAP_MODES[0];
+
+  let out = '<div class="pnl cut"><h3>The Map <span class="cnt">Cyrnn</span>' +
+    '<span class="calviews">' +
+      '<button class="bt cutsm" data-act="mapZoom" data-d="-1">−</button>' +
+      '<button class="bt cutsm" data-act="mapFit">Fit</button>' +
+      '<button class="bt cutsm" data-act="mapZoom" data-d="1">+</button>' +
+    "</span></h3>";
+
+  out += '<div class="mapmodes">' + MAP_MODES.map(function (r) {
+    return '<button class="bt cutsm' + (r[0] === m.mode ? " pri" : "") +
+      '" data-act="mapMode" data-mode="' + r[0] + '">' + esc(r[1]) + "</button>";
+  }).join("") +
+    '<button class="tg' + (S.map.showLabels ? " on" : "") +
+      '" data-act="mapLabels">Labels</button>' +
+    '<span class="foot" style="margin:0">' + esc(mode[2]) + "</span></div>";
+
+  /* The legend doubles as the filter — each swatch is the pin you are
+     looking for, and switching it off takes that class off the map. */
+  const counts = {};
+  pins.forEach(function (p) {
+    const g = mapGroupOf(p);
+    counts[g] = (counts[g] || 0) + 1;
+  });
+  let anyOff = false;
+  out += '<div class="maplegend">' + MAP_FILTERS.map(function (f) {
+    const n = counts[f.id] || 0;
+    const on = mapGroupOn(f.id);
+    if (!on) anyOff = true;
+    return '<button class="lgd g-' + f.id + (on ? " on" : "") +
+      '" data-act="mapFilter" data-key="' + f.id + '"' +
+      (n ? "" : ' disabled aria-disabled="true"') + ">" +
+      '<i class="mdot"></i>' + esc(f.label) + '<b>' + n + "</b></button>";
+  }).join("") +
+    (anyOff ? '<button class="bt cutsm" data-act="mapFilterAll">Show all</button>' : "") +
+    "</div>";
+
+  /* The stage carries the camera, and --z lets each pin cancel the scale
+     so a pin stays the same size on screen however far you zoom in. */
+  out += '<div class="mapview" data-act="mapSurface">' +
+    '<div class="mapstage' + (m.zoom >= MAP_LABEL_ZOOM ? " zoomed" : "") +
+      '" style="--z:' + m.zoom +
+      ';transform:translate(' + m.x + "px," + m.y + "px) scale(" + m.zoom + ')">' +
+    '<img class="mapimg" src="map-cyrnn.jpg" alt="The world of Cyrnn" draggable="false">';
+
+  const shown = pins.filter(function (p) { return mapGroupOn(mapGroupOf(p)); });
+  shown.forEach(function (p) {
+    out += '<button class="mpin k-' + esc(p.kind) + (m.sel === p.id ? " sel" : "") +
+      (p.custom ? " own" : "") + (MAP_QUIET_KINDS[p.kind] ? " quiet" : "") +
+      '" style="left:' + p.x + "%;top:" + p.y + '%" ' +
+      'data-act="mapPin" data-id="' + esc(p.id) + '" title="' + esc(p.name) + '">' +
+      '<i class="mdot"></i>' +
+      (S.map.showLabels ? '<span class="mlab">' + esc(p.name) + "</span>" : "") +
+      "</button>";
+  });
+
+  if (S.map.party) {
+    out += '<button class="mpin party" style="left:' + S.map.party.x + "%;top:" +
+      S.map.party.y + '%" data-act="mapPin" data-id="__party" title="The party">' +
+      '<i class="mdot"></i><span class="mlab">Party</span></button>';
+  }
+
+  out += "</div></div>";
+
+  const hidden = mapHiddenIds().length;
+  out += '<div class="foot">' + shown.length +
+    (shown.length === pins.length ? " pins" : " of " + pins.length + " pins") +
+    (S.map.party ? " · party placed" : " · party not placed") +
+    (hidden ? " · " + hidden + " hidden" : "") +
+    ' · zoom <b class="mapzoom">' + Math.round(m.zoom * 100) + "%</b></div>";
+  return out + "</div>";
+}
+
+/* Lore is stored as one string with blank lines between paragraphs,
+   the way the source reads. */
+function loreHTML(text) {
+  return String(text || "").split(/\n\n+/).filter(Boolean).map(function (para) {
+    return '<div class="etext">' + esc(para) + "</div>";
+  }).join("");
+}
+
+function mapSelectedPanel() {
+  const id = UI.map.sel;
+  if (!id) return "";
+  if (id === "__party") return partyPanel();
+  const pin = mapPin(id);
+  const region = pin ? null : CYRNN.region(id);
+  if (!pin && !region) return "";
+  return pin ? placePanel(pin) : regionPanel(region);
+}
+
+function partyPanel() {
+  const p = S.map.party;
+  if (!p) return "";
+  /* Nearest pin, so "where are we?" gets an answer in place names rather
+     than in coordinates. Straight-line distance on the image is not a
+     travel time and is not offered as one. */
+  let near = null, best = Infinity;
+  mapPins().forEach(function (q) {
+    const d = Math.pow(q.x - p.x, 2) + Math.pow(q.y - p.y, 2);
+    if (d < best) { best = d; near = q; }
+  });
+  return '<div class="pnl cut"><h3>The party</h3>' +
+    '<div class="etext">Standing ' +
+      (near ? "nearest to <b>" + esc(near.name) + "</b>" : "somewhere in Cyrnn") + ".</div>" +
+    '<div class="mrow" style="margin-top:10px">' +
+      '<button class="bt cutsm" data-act="mapMode" data-mode="party">Move the party</button>' +
+      '<button class="bt cutsm dg" data-act="mapClearParty">Take the party off the map</button>' +
+    "</div></div>";
+}
+
+function placePanel(p) {
+  const scopes = mapScopes(p);
+  const region = p.region ? CYRNN.region(p.region) : null;
+  const editing = UI.map.mode === "move";
+
+  let out = '<div class="pnl cut"><h3>' + esc(p.name) +
+    '<span class="cnt">' + esc(p.kind) + (region ? " · " + esc(region.name) : "") + "</span></h3>";
+
+  if (p.custom) {
+    out += '<div class="mrow"><span class="lbl">Name</span>' +
+      '<input type="text" value="' + esc(p.name) + '" data-act="mapRename" data-id="' +
+      esc(p.id) + '" style="flex:1;min-width:160px"></div>';
+  } else if (p.blurb) {
+    out += '<div class="advice"><span class="advk">In short</span>' +
+      '<span class="advt">' + esc(p.blurb) + "</span></div>";
+  }
+
+  if (p.approx) {
+    out += '<div class="warnbox">The source describes this place but never draws it. ' +
+      'The pin is placed from its description — move it if you know better.</div>';
+  }
+
+  out += loreHTML(p.lore);
+
+  if (p.tags.length) out += '<div style="margin-top:8px">' + tagHTML(p.tags, false) + "</div>";
+
+  /* What the calendar says is kept here — the join, drawn. */
+  const feasts = CAL.holidaysForScopes(scopes);
+  const localFeasts = feasts.filter(function (f) { return f.local; });
+  if (localFeasts.length) {
+    out += '<div class="sbk">Kept here</div>';
+    localFeasts.forEach(function (f) {
+      out += calFeastRow(f);
+    });
+    const also = feasts.length - localFeasts.length;
+    if (also) {
+      out += '<div class="foot">' + also + " further pan-regional feast" +
+        (also === 1 ? " is" : "s are") + " kept here too.</div>";
+    }
+  } else if (feasts.length) {
+    out += '<div class="sbk">Kept here</div>' +
+      '<div class="foot">Only the pan-regional feasts — ' + feasts.length + " of them.</div>";
+  }
+
+  /* Powers and peoples that answer to the same scopes. */
+  const pinned = CYRNN.lorePinnedTo(scopes);
+  if (pinned.powers.length || pinned.peoples.length) {
+    out += '<div class="sbk">Of this place</div>';
+    pinned.powers.forEach(function (e) {
+      out += '<div class="entry"><div class="eh"><span class="en">' + esc(e.name) +
+        '</span><span class="emeta">' + esc(e.title) + "</span></div>" +
+        '<div class="etext">' + esc(e.blurb) + "</div></div>";
+    });
+    pinned.peoples.forEach(function (e) {
+      out += '<div class="entry"><div class="eh"><span class="en">' + esc(e.name) +
+        '</span><span class="emeta">people</span></div>' +
+        '<div class="etext">' + esc(e.blurb) + "</div></div>";
+    });
+  }
+
+  out += yourNotesHTML(p.id);
+  out += scopedLoreHTML(p.id);
+
+  /* Actions. Hiding is reversible and says so; only your own pins can
+     actually be deleted, because a canonical one would come straight
+     back the next time the data file loads. */
+  out += '<div class="mrow" style="margin-top:12px;padding-top:11px;border-top:1px solid var(--line)">' +
+    '<button class="bt cutsm" data-act="mapPartyHere" data-id="' + esc(p.id) +
+      '">Party is here</button>' +
+    '<button class="bt cutsm" data-act="mapFocus" data-id="' + esc(p.id) + '">Centre on it</button>' +
+    (editing ? "" : '<button class="bt cutsm" data-act="mapMode" data-mode="move">Move pins</button>') +
+    (p.custom
+      ? '<button class="bt cutsm dg" data-act="mapDelete" data-id="' + esc(p.id) + '">Delete</button>'
+      : '<button class="bt cutsm dim" data-act="mapHide" data-id="' + esc(p.id) + '">Hide</button>') +
+    (p.moved || p.renamed
+      ? '<button class="bt cutsm dim" data-act="mapReset" data-id="' + esc(p.id) +
+        '">Undo my changes</button>' : "") +
+    "</div>";
+
+  return out + "</div>";
+}
+
+function calFeastRow(f) {
+  const sysKey = S.calendar.system;
+  return '<div class="entry"><div class="eh">' +
+    '<span class="en">' + esc(f.holiday.name) + "</span>" +
+    '<span class="emeta">' + esc(CAL.format(sysKey, f.holiday.day)) +
+      " · day " + f.holiday.day + "</span>" +
+    '<span class="esrc">' + esc(f.holiday.regionLabel) + "</span></div>" +
+    '<div class="etext">' + esc(f.holiday.lore) + "</div></div>";
+}
+
+function regionPanel(r) {
+  const scopes = CYRNN.scopesForRegion(r.id);
+  let out = '<div class="pnl cut"><h3>' + esc(r.name) + '<span class="cnt">region</span></h3>' +
+    '<div class="advice"><span class="advk">In short</span>' +
+    '<span class="advt">' + esc(r.blurb) + "</span></div>" +
+    loreHTML(r.lore);
+
+  const places = CYRNN.placesIn(r.id);
+  if (places.length) {
+    out += '<div class="sbk">Places</div>';
+    places.forEach(function (p) {
+      const live = mapPin(p.id);
+      out += '<div class="row" data-act="mapPin" data-id="' + esc(p.id) + '">' +
+        "<span>" + esc(live ? live.name : p.name) + "</span>" +
+        '<span class="sc">' + esc(p.kind) + (live ? "" : " · hidden") + "</span></div>";
+    });
+  }
+
+  const feasts = CAL.holidaysForScopes(scopes).filter(function (f) { return f.local; });
+  if (feasts.length) {
+    out += '<div class="sbk">Kept in ' + esc(r.name) + "</div>";
+    feasts.forEach(function (f) { out += calFeastRow(f); });
+  }
+
+  const pinned = CYRNN.lorePinnedTo(scopes);
+  if (pinned.powers.length || pinned.peoples.length) {
+    out += '<div class="sbk">Of this region</div>';
+    pinned.powers.concat(pinned.peoples).forEach(function (e) {
+      out += '<div class="entry"><div class="eh"><span class="en">' + esc(e.name) +
+        "</span>" + (e.title ? '<span class="emeta">' + esc(e.title) + "</span>" : "") +
+        "</div><div class=\"etext\">" + esc(e.blurb) + "</div></div>";
+    });
+  }
+
+  out += yourNotesHTML(r.id);
+  out += scopedLoreHTML(r.id);
+  return out + "</div>";
+}
+
+/* Your own text sits under the source's, never over it — so an update to
+   cyrnn-data.js can never overwrite something you wrote. */
+function yourNotesHTML(id) {
+  const val = S.map.notes[id] || "";
+  return '<div class="sbk">Your notes</div>' +
+    '<textarea class="notes" style="min-height:80px" placeholder="What your table knows about this place…" ' +
+    'data-act="mapNote" data-id="' + esc(id) + '">' + esc(val) + "</textarea>";
+}
+
+function scopedLoreHTML(id) {
+  const mine = S.map.lore.filter(function (l) { return l.scope === id; });
+  let out = "";
+  if (mine.length) {
+    out += '<div class="sbk">Your lore</div>';
+    mine.forEach(function (l) {
+      out += '<div class="entry"><div class="eh"><span class="en">' + esc(l.title) +
+        '</span><span class="hb">yours</span>' +
+        '<button class="x bt cutsm dim" data-act="mapLoreDelete" data-id="' + esc(l.id) +
+        '" style="margin-left:auto">Remove</button></div>' + loreHTML(l.body) + "</div>";
+    });
+  }
+  out += '<div class="daypadd">' +
+    '<input type="text" placeholder="Title" data-lore-title="' + esc(id) + '">' +
+    '<button class="bt cutsm pri" data-act="mapLoreAdd" data-scope="' + esc(id) +
+    '">Add lore</button></div>' +
+    '<textarea class="notes" style="min-height:70px;margin-top:6px" placeholder="The entry itself…" ' +
+    'data-lore-body="' + esc(id) + '"></textarea>';
+  return out;
+}
+
+function atlasPanel() {
+  const q = UI.map.q || "";
+  let out = '<div class="pnl cut"><h3>Atlas <span class="cnt">' +
+    CYRNN.places.length + " places · " + CYRNN.regions.length + " regions</span></h3>" +
+    '<div class="mrow"><input type="text" placeholder="Search the world…" value="' + esc(q) +
+    '" data-act="mapSearch" style="flex:1;min-width:180px">' +
+    (q ? '<button class="bt cutsm" data-act="mapSearchClear">Clear</button>' : "") + "</div>";
+
+  if (q) {
+    const hits = CYRNN.search(q);
+    if (!hits.length) return out + '<div class="foot">Nothing in the world matches that.</div></div>';
+    out += '<div class="foot">' + hits.length + " match" + (hits.length === 1 ? "" : "es") + "</div>";
+    hits.forEach(function (h) {
+      out += '<div class="row" data-act="mapPin" data-id="' + esc(h.entry.id) + '">' +
+        "<span>" + esc(h.entry.name) + "</span>" +
+        '<span class="sc">' + esc(h.type) + "</span></div>";
+    });
+    return out + "</div>";
+  }
+
+  CYRNN.regions.forEach(function (r) {
+    const places = CYRNN.placesIn(r.id);
+    out += '<div class="grp">' + esc(r.name) + "</div>" +
+      '<div class="row" data-act="mapPin" data-id="' + esc(r.id) + '">' +
+      '<span><i class="dot exp"></i>About ' + esc(r.name) + "</span>" +
+      '<span class="sc">' + places.length + " place" + (places.length === 1 ? "" : "s") + "</span></div>";
+    places.forEach(function (p) {
+      const live = mapPin(p.id);
+      out += '<div class="row' + (live ? "" : " unprof") + '" data-act="mapPin" data-id="' +
+        esc(p.id) + '"><span>' + esc(live ? live.name : p.name) + "</span>" +
+        '<span class="sc">' + esc(p.kind) + (live ? "" : " · hidden") + "</span></div>";
+    });
+  });
+
+  const own = S.map.custom;
+  if (own.length) {
+    out += '<div class="grp">Your markers</div>';
+    own.forEach(function (c) {
+      out += '<div class="row prof" data-act="mapPin" data-id="' + esc(c.id) + '">' +
+        "<span>" + esc(c.name) + '</span><span class="sc">yours</span></div>';
+    });
+  }
+
+  const hidden = mapHiddenIds();
+  if (hidden.length) {
+    out += '<div class="grp">Hidden</div>';
+    hidden.forEach(function (id) {
+      const p = CYRNN.place(id);
+      if (!p) return;
+      out += '<div class="row unprof" data-act="mapRestore" data-id="' + esc(id) + '">' +
+        "<span>" + esc(p.name) + '</span><span class="sc">restore</span></div>';
+    });
+  }
+
+  return out + "</div>";
+}
+
+function worldLorePanel() {
+  let out = '<div class="pnl cut"><h3>The world <span class="cnt">gods, devils, history</span></h3>';
+
+  out += '<div class="sbk">History</div>';
+  CYRNN.eras.forEach(function (e) {
+    out += '<div class="entry"><div class="eh"><span class="en">' + esc(e.name) +
+      '</span><span class="emeta">' + esc(e.when) + "</span></div>" +
+      loreHTML(e.lore) + "</div>";
+  });
+
+  ["divine", "lesser", "devil"].forEach(function (rank) {
+    const list = CYRNN.powers.filter(function (p) { return p.rank === rank; });
+    if (!list.length) return;
+    out += '<div class="sbk">' +
+      (rank === "divine" ? "Divine gods" : rank === "lesser" ? "Lesser gods" : "Devils of Cyrnn") +
+      "</div>";
+    list.forEach(function (p) {
+      out += '<div class="entry"><div class="eh"><span class="en">' + esc(p.name) +
+        '</span><span class="emeta">' + esc(p.title) + "</span>" +
+        '<span class="esrc">' + esc(p.status) + "</span></div>" +
+        loreHTML(p.lore) + "</div>";
+    });
+  });
+
+  out += '<div class="sbk">Peoples</div>';
+  CYRNN.peoples.forEach(function (p) {
+    out += '<div class="entry"><div class="eh"><span class="en">' + esc(p.name) + "</span></div>" +
+      loreHTML(p.lore) + "</div>";
+  });
+
+  /* World-level lore: yours, filed under nothing in particular. */
+  out += '<div class="sbk">Your lore</div>' + scopedLoreHTML("__world");
+  return out + "</div>";
+}
+
 function combatRulesPanel() {
   let out = "";
   COMBAT_RULES.sections.forEach(function (sec) {
@@ -2682,6 +3297,220 @@ function levelUpModal() {
 /* ============================================================
    EVENT WIRING
    ============================================================ */
+/* ---------- MAP CAMERA ----------
+   Zoom 1 means "the map fits the panel", so the stage is exactly the
+   width of the view and panning at zoom 1 is meaningless — which is why
+   the clamp collapses to zero there rather than being a special case. */
+const MAP_ZOOM_MIN = 1, MAP_ZOOM_MAX = 8;
+
+function mapSetZoom(z, anchorX, anchorY) {
+  const view = document.querySelector(".mapview");
+  const next = Math.max(MAP_ZOOM_MIN, Math.min(MAP_ZOOM_MAX, z));
+  if (view) {
+    const w = view.clientWidth, h = view.clientHeight, prev = UI.map.zoom;
+    /* Keep the point under the fingers (or the centre) still while the
+       scale changes, which is what makes zooming feel attached to the
+       map rather than to the window. */
+    const ax = anchorX == null ? w / 2 : anchorX;
+    const ay = anchorY == null ? h / 2 : anchorY;
+    const k = next / prev;
+    UI.map.x = ax - (ax - UI.map.x) * k;
+    UI.map.y = ay - (ay - UI.map.y) * k;
+    UI.map.zoom = next;
+    mapClampPan(w, h);
+  } else {
+    UI.map.zoom = next;
+  }
+  return UI.map.zoom;
+}
+
+/* The map may never be dragged off its own frame. */
+function mapClampPan(w, h) {
+  const z = UI.map.zoom;
+  UI.map.x = Math.min(0, Math.max(w * (1 - z), UI.map.x));
+  UI.map.y = Math.min(0, Math.max(h * (1 - z), UI.map.y));
+}
+
+function mapApplyCamera() {
+  const stage = document.querySelector(".mapstage");
+  if (!stage) return;
+  stage.style.setProperty("--z", UI.map.zoom);
+  stage.style.transform = "translate(" + UI.map.x + "px," + UI.map.y +
+    "px) scale(" + UI.map.zoom + ")";
+  /* Gestures move the camera without a re-render, so everything that
+     reads off the zoom has to be maintained here too, not only at
+     render time -- the label threshold and the readout both. */
+  stage.classList.toggle("zoomed", UI.map.zoom >= MAP_LABEL_ZOOM);
+  const out = document.querySelector(".mapzoom");
+  if (out) out.textContent = Math.round(UI.map.zoom * 100) + "%";
+}
+
+/* Where a screen point falls on the map, as the percentages the data
+   uses. Read off the stage's own rect, which already has the transform
+   baked into it, so no camera arithmetic is repeated here. */
+function mapPct(clientX, clientY) {
+  const stage = document.querySelector(".mapstage");
+  if (!stage) return null;
+  const r = stage.getBoundingClientRect();
+  if (!r.width || !r.height) return null;
+  return {
+    x: Math.max(0, Math.min(100, ((clientX - r.left) / r.width) * 100)),
+    y: Math.max(0, Math.min(100, ((clientY - r.top) / r.height) * 100))
+  };
+}
+
+/* ---------- MAP GESTURES ----------
+   Drag and pinch cannot go through mutate on every frame: mutate
+   re-renders the whole page, which would replace the element under the
+   finger mid-gesture. So a gesture moves the DOM directly and only
+   writes to state when it ends. UI.drag holds the in-flight gesture and
+   is never persisted.
+
+   The click handler below is told to swallow the click that follows a
+   drag, otherwise dragging a pin would also "tap" it. */
+const MAP_TAP_SLOP = 6;   /* px of movement still counted as a tap */
+const mapPointers = {};
+
+function mapPinEl(id) {
+  return document.querySelector('.mpin[data-id="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]');
+}
+
+document.addEventListener("pointerdown", function (e) {
+  /* A pending swallow belongs to the gesture that just ended. If a new
+     one starts, the click it was waiting for is never coming — a pinch
+     or a cancelled drag often ends without one — so drop it here rather
+     than let it eat an unrelated tap later. */
+  UI.mapSwallowClick = false;
+  const view = e.target.closest && e.target.closest(".mapview");
+  if (!view) return;
+  mapPointers[e.pointerId] = { x: e.clientX, y: e.clientY };
+  const ids = Object.keys(mapPointers);
+
+  if (ids.length === 2) {
+    /* Second finger down: whatever was happening becomes a pinch. */
+    const a = mapPointers[ids[0]], b = mapPointers[ids[1]];
+    UI.drag = { kind: "pinch", moved: true,
+                dist: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+                zoom: UI.map.zoom };
+    return;
+  }
+
+  const pinEl = e.target.closest(".mpin");
+  if (pinEl && UI.map.mode === "move") {
+    UI.drag = { kind: "pin", id: pinEl.dataset.id, el: pinEl,
+                sx: e.clientX, sy: e.clientY, moved: false };
+    return;
+  }
+  UI.drag = { kind: "pan", sx: e.clientX, sy: e.clientY,
+              ox: UI.map.x, oy: UI.map.y, moved: false };
+}, true);
+
+document.addEventListener("pointermove", function (e) {
+  const d = UI.drag;
+  if (!d) return;
+  if (mapPointers[e.pointerId]) { mapPointers[e.pointerId] = { x: e.clientX, y: e.clientY }; }
+
+  if (d.kind === "pinch") {
+    const ids = Object.keys(mapPointers);
+    if (ids.length < 2) return;
+    const a = mapPointers[ids[0]], b = mapPointers[ids[1]];
+    const view = document.querySelector(".mapview");
+    const r = view ? view.getBoundingClientRect() : null;
+    const now = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+    mapSetZoom(d.zoom * (now / d.dist),
+               r ? (a.x + b.x) / 2 - r.left : null,
+               r ? (a.y + b.y) / 2 - r.top : null);
+    mapApplyCamera();
+    e.preventDefault();
+    return;
+  }
+
+  if (d.kind === "pin") {
+    if (Math.abs(e.clientX - d.sx) + Math.abs(e.clientY - d.sy) > MAP_TAP_SLOP) d.moved = true;
+    if (!d.moved) return;
+    const p = mapPct(e.clientX, e.clientY);
+    if (!p || !d.el) return;
+    d.at = p;
+    d.el.style.left = p.x + "%";
+    d.el.style.top = p.y + "%";
+    e.preventDefault();
+    return;
+  }
+
+  if (d.kind === "pan") {
+    const dx = e.clientX - d.sx, dy = e.clientY - d.sy;
+    if (Math.abs(dx) + Math.abs(dy) > MAP_TAP_SLOP) d.moved = true;
+    if (!d.moved) return;
+    const view = document.querySelector(".mapview");
+    UI.map.x = d.ox + dx;
+    UI.map.y = d.oy + dy;
+    if (view) mapClampPan(view.clientWidth, view.clientHeight);
+    mapApplyCamera();
+    e.preventDefault();
+  }
+}, true);
+
+document.addEventListener("pointerup", function (e) {
+  delete mapPointers[e.pointerId];
+  const d = UI.drag;
+  if (!d) return;
+  UI.drag = null;
+
+  if (d.kind === "pinch") { UI.mapSwallowClick = true; return; }
+
+  if (d.kind === "pin") {
+    if (!d.moved) return;                 /* a tap: let the click select it */
+    UI.mapSwallowClick = true;
+    const at = d.at;
+    if (!at) return;
+    const id = d.id;
+    mutate(function (st) {
+      const c = st.map.custom.filter(function (k) { return k.id === id; })[0];
+      if (c) { c.x = at.x; c.y = at.y; return; }
+      if (id === "__party") { st.map.party = { x: at.x, y: at.y }; return; }
+      st.map.edits[id] = Object.assign({}, st.map.edits[id], { x: at.x, y: at.y });
+    });
+    return;
+  }
+
+  if (d.kind === "pan") {
+    if (d.moved) { UI.mapSwallowClick = true; return; }
+    /* A tap on open map. In the two placing modes that means "here". */
+    const at = mapPct(e.clientX, e.clientY);
+    if (!at) return;
+    if (UI.map.mode === "add") {
+      const id = newPinId();
+      mutate(function (st) {
+        st.map.custom.push({ id: id, name: "New marker", kind: "marker",
+                             x: at.x, y: at.y, note: "" });
+      });
+      UI.map.sel = id;
+      render();
+    } else if (UI.map.mode === "party") {
+      mutate(function (st) { st.map.party = { x: at.x, y: at.y }; });
+    }
+  }
+}, true);
+
+document.addEventListener("pointercancel", function (e) {
+  delete mapPointers[e.pointerId];
+  UI.drag = null;
+});
+
+/* Wheel/trackpad zoom, anchored where the cursor is. */
+document.addEventListener("wheel", function (e) {
+  const view = e.target.closest && e.target.closest(".mapview");
+  if (!view) return;
+  e.preventDefault();
+  const r = view.getBoundingClientRect();
+  mapSetZoom(UI.map.zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12),
+             e.clientX - r.left, e.clientY - r.top);
+  mapApplyCamera();
+  /* The readout in the footer is the only other thing that moves. */
+  const foot = view.parentNode.querySelector(".foot");
+  if (foot) foot.innerHTML = foot.innerHTML.replace(/zoom \d+%/, "zoom " + Math.round(UI.map.zoom * 100) + "%");
+}, { passive: false });
+
 /* Form controls are driven by the change handler below, never by this
    one. A SELECT in particular must be left alone: preventDefault stops
    iOS from opening the picker at all, and firing the action on the tap
@@ -2689,6 +3518,10 @@ function levelUpModal() {
    it — which looks exactly like a dead control. */
 const FORM_TAGS = { INPUT: 1, TEXTAREA: 1, SELECT: 1, OPTION: 1 };
 document.addEventListener("click", function (e) {
+  /* A drag on the map ends in a click the browser still delivers. It
+     must not also count as a tap, or moving a pin would re-open it and
+     panning would select whatever ended up under the finger. */
+  if (UI.mapSwallowClick) { UI.mapSwallowClick = false; return; }
   const el = e.target.closest("[data-act]");
   if (!el) return;
   const fn = ACT[el.dataset.act];
@@ -2727,8 +3560,8 @@ document.addEventListener("keydown", function (e) {
   }
   const k = e.key.toLowerCase();
   if (k === "escape") { UI.modal = null; UI.prov = null; UI.alert = null; render(); return; }
-  if (["1","2","3","4","5","6","7"].indexOf(k) >= 0) {
-    const tabs = ["combat","spells","features","inventory","notes","calendar","followers"];
+  if (["1","2","3","4","5","6","7","8"].indexOf(k) >= 0) {
+    const tabs = ["combat","spells","features","inventory","notes","calendar","followers","map"];
     mutate(function (st) { st.ui = st.ui || {}; st.ui.tab = tabs[parseInt(k, 10) - 1]; });
     return;
   }

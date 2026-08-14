@@ -1236,6 +1236,25 @@ const SEED = {
   calendar: { day: 1, year: 2022, system: "jerbeen", timeOfDay: "morning",
               view: "month", events: [], acked: [] },
 
+  /* The world map. Nothing here is a copy of cyrnn-data.js — that file
+     stays canonical and this holds only what the player has done to it,
+     keyed by the ids it defines:
+
+       edits   { placeId: {x,y,name,hidden} } — a nudged pin, a renamed
+               one, one taken off the map. Sparse: only what changed.
+       notes   { placeId: "..." } — your own text under the source's.
+       custom  [ {id,name,x,y,kind,note} ] — pins with no canonical
+               entry. Ids are prefixed "c-" so they can never collide.
+       lore    [ {id,title,body,scope} ] — your own articles, scoped to
+               a place, a region, or nothing at all (world-level).
+       party   {x,y} or null — where the party is standing.
+
+     Storing deltas rather than a snapshot is what lets the world grow:
+     new places added to cyrnn-data.js simply appear, and nothing you
+     have written or moved is disturbed. */
+  map: { edits: {}, notes: {}, custom: [], lore: [], party: null,
+         showLabels: true, off: {} },
+
   settings: {
     rollPrompts: true,      /* pop a "roll this, because of that" card */
     autoApplyEffects: true, /* effects change AC / attack numbers */

@@ -359,6 +359,96 @@ input[type=number]{width:88px}
 .daypadd input[type=text]{flex:1;min-width:180px}
 .daypadd select{font-size:16px;padding:6px 8px}
 
+/* ---------- MAP ----------
+   The map is a photograph of pencil on paper — nearly white — dropped
+   into a very dark app. Inverting it outright would read as a negative,
+   so instead it is darkened and tinted toward the panel colour, which
+   keeps the drawing's own tones and lets the pins sit on top as the
+   only saturated thing on screen. */
+.mapview{position:relative;overflow:hidden;background:var(--panel2);
+  border:1px solid var(--line2);aspect-ratio:1138/897;touch-action:none;
+  cursor:grab;user-select:none;-webkit-user-select:none}
+.mapview:active{cursor:grabbing}
+.mapstage{position:absolute;inset:0;transform-origin:0 0;will-change:transform}
+.mapimg{width:100%;display:block;pointer-events:none;
+  filter:invert(1) hue-rotate(180deg) saturate(.35) brightness(.92) contrast(1.15)}
+.mapmodes{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-bottom:9px}
+
+/* The legend IS the filter, so each entry carries the actual pin it
+   switches — you match the swatch to the map rather than reading a
+   colour key and translating. Off reads as genuinely off: the swatch
+   goes grey and the text dims, no relying on the border alone. */
+.maplegend{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-bottom:9px}
+.lgd{display:flex;align-items:center;gap:6px;font-family:var(--m);font-size:13px;
+  letter-spacing:.08em;text-transform:uppercase;padding:3px 9px;
+  border:1px solid var(--line2);color:var(--dimmer);background:transparent}
+.lgd .mdot{width:8px;height:8px;background:var(--line2);flex:none;display:block}
+.lgd b{font-weight:400;color:var(--dimmer);font-size:12px}
+.lgd.on{color:var(--txt);border-color:var(--line2)}
+.lgd.on b{color:var(--dim)}
+.lgd[disabled]{opacity:.35}
+.lgd.on.g-cities .mdot{background:transparent;border:2px solid var(--cyan);
+  border-radius:50%;width:11px;height:11px}
+.lgd.on.g-towns .mdot{background:var(--cyan)}
+.lgd.on.g-ruins .mdot{background:var(--mag)}
+.lgd.on.g-wilds .mdot{background:var(--dim)}
+.lgd.on.g-routes .mdot{background:var(--mag)}
+.lgd.on.g-mine .mdot{background:var(--violet)}
+.lgd.on:hover,.lgd:hover{border-color:var(--cyan);color:var(--cyan)}
+
+/* Each pin cancels the stage's scale, so it stays the same size on
+   screen however far in you zoom. --z is set on the stage. */
+.mpin{position:absolute;padding:0;background:none;border:none;
+  transform:translate(-50%,-50%) scale(calc(1 / var(--z,1)));
+  transform-origin:50% 50%;display:flex;flex-direction:column;align-items:center;
+  gap:2px;z-index:2}
+.mpin .mdot{width:9px;height:9px;background:var(--cyan);display:block;
+  border:1px solid #04141A;box-shadow:0 0 0 1px var(--cyan)}
+.mpin .mlab{font-family:var(--m);font-size:11px;letter-spacing:.06em;color:var(--txt);
+  background:rgba(5,8,11,.82);padding:0 4px;white-space:nowrap;max-width:150px;
+  overflow:hidden;text-overflow:ellipsis}
+/* The scan already letters its own geography — ranges, forests, moors,
+   the wall — and printing our labels over the mapmaker's doubles them
+   and buries the towns, which are what you actually navigate by. So
+   those pins keep the dot and drop the label until you zoom in, where
+   there is room for both. The selected pin always says its name. */
+.mpin.quiet .mlab{display:none}
+.mapstage.zoomed .mpin.quiet .mlab,.mpin.quiet.sel .mlab{display:block}
+.mpin:hover{z-index:4}
+.mpin:hover .mlab,.mpin.sel .mlab{color:var(--cyan)}
+.mpin.sel{z-index:5}
+.mpin.sel .mdot{background:var(--yel);box-shadow:0 0 0 1px var(--yel),0 0 9px 2px rgba(252,238,10,.55)}
+/* The legend's own vocabulary: a city is the circled dot, a town the
+   plain one. Everything the map draws but does not mark reads quieter. */
+.mpin.k-city .mdot{width:12px;height:12px;border-radius:50%;background:transparent;
+  border:2px solid var(--cyan);box-shadow:0 0 0 1px #04141A}
+.mpin.k-city.sel .mdot{border-color:var(--yel);box-shadow:0 0 9px 2px rgba(252,238,10,.55)}
+.mpin.k-ruin .mdot,.mpin.k-wall .mdot,.mpin.k-road .mdot{background:var(--mag);
+  box-shadow:0 0 0 1px var(--mag)}
+.mpin.k-forest .mdot,.mpin.k-swamp .mdot,.mpin.k-hills .mdot,
+.mpin.k-mountains .mdot,.mpin.k-sea .mdot,.mpin.k-island .mdot{background:var(--dim);
+  box-shadow:0 0 0 1px var(--dim);width:7px;height:7px}
+.mpin.k-forest .mlab,.mpin.k-swamp .mlab,.mpin.k-hills .mlab,
+.mpin.k-mountains .mlab,.mpin.k-sea .mlab,.mpin.k-island .mlab,
+.mpin.k-road .mlab,.mpin.k-wall .mlab{color:var(--dim)}
+.mpin.k-warren .mdot{background:var(--grn);box-shadow:0 0 0 1px var(--grn)}
+/* Yours, so you can tell at a glance what the book gave you and what
+   you added yourself. */
+.mpin.own .mdot{background:var(--violet);box-shadow:0 0 0 1px var(--violet)}
+.mpin.own .mlab{color:var(--violet)}
+/* The party outranks everything and is meant to be found instantly. */
+.mpin.party{z-index:6}
+.mpin.party .mdot{width:14px;height:14px;background:var(--yel);
+  clip-path:polygon(50% 0,100% 100%,0 100%);box-shadow:none;border:none;
+  filter:drop-shadow(0 0 5px rgba(252,238,10,.85))}
+.mpin.party .mlab{color:var(--yel);border:1px solid var(--yel)}
+
+@media (max-width:900px){
+  /* One column: the map gets the full width, and labels would crowd it,
+     so they shrink rather than being dropped — position still reads. */
+  .mpin .mlab{font-size:10px;max-width:84px}
+}
+
 /* ---------- TAGS ---------- */
 /* Three hue families plus gray. Shade carries the distinction
    inside a family, so the eye sorts by meaning first. */

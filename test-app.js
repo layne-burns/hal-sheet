@@ -238,6 +238,113 @@ ok("no lore still claims the round 2000 years",
      CALe("CYRNN.regions.concat(CYRNN.places).map(function(e){return e.lore}).join(' ')") +
      CALe("CAL.systems.common.holidays.map(function(h){return h.lore}).join(' ')")));
 
+console.log("\n=== MAP TAB ===");
+click(byAct("tab", { tab: "map" }));
+function mapState() { return JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).map; }
+ok("the map is drawn", !!$(".mapimg"));
+eq("every visible place has a pin", $$(".mpin").length, CALe("CYRNN.places.length"));
+ok("the atlas lists the regions", /The Hearthlands/.test(text()) && /Kel'dorel/.test(text()));
+ok("the world panel carries the history", /The Great Fracture/.test(text()));
+ok("...the gods", /Lyestra/.test(text()) && /Boralius/.test(text()));
+ok("...and the devils", /Azar'och/.test(text()) && /Yamuuk/.test(text()));
+
+console.log("\n=== MAP: FILTERING BY WHAT A PIN IS ===");
+eq("the legend offers one switch per family", $$(".lgd").length, 6);
+ok("every family starts switched on", $$(".lgd.on").length === 6);
+eq("every pin belongs to exactly one family",
+   CALe("mapPins().filter(function(p){return !MAP_FILTERS.some(function(f){" +
+        "return f.id===mapGroupOf(p)})}).length"), 0);
+const allPins = $$(".mpin").length;
+click(byAct("mapFilter", { key: "wilds" }));
+ok("switching a family off takes it off the map", $$(".mpin").length < allPins);
+eq("...and nothing of that family is left drawn",
+   $$(".mpin.k-forest, .mpin.k-swamp, .mpin.k-hills, .mpin.k-mountains, .mpin.k-sea, .mpin.k-island").length, 0);
+ok("...while the towns are untouched", $$(".mpin.k-town").length > 0);
+ok("the atlas still lists what the map is hiding", /Highwood/.test(text()));
+ok("the footer says it is showing a subset", /of \d+ pins/.test(text()));
+eq("only the switched-off family is stored",
+   JSON.stringify(mapState().off), JSON.stringify({ wilds: true }));
+click(byAct("mapFilter", { key: "wilds" }));
+eq("switching it back on restores every pin", $$(".mpin").length, allPins);
+eq("...and stores nothing at all", JSON.stringify(mapState().off), "{}");
+click(byAct("mapFilter", { key: "cities" }));
+click(byAct("mapFilter", { key: "ruins" }));
+ok("Show all appears once anything is hidden", !!byAct("mapFilterAll"));
+click(byAct("mapFilterAll"));
+eq("Show all clears every filter at once", $$(".mpin").length, allPins);
+
+console.log("\n=== MAP: A PLACE READS ITS OWN CALENDAR ===");
+click($('.mpin[data-id="gorns-rest"]'));
+ok("selecting a pin opens its article", /Dwarven free state/.test(text()));
+ok("the article names its own feast", /Lyestra's Fall/.test(text()));
+ok("...its region's", /The All-Forge/.test(text()));
+ok("...and its garrison's", /Isenbyr's Lament/.test(text()));
+ok("the god who died for it is surfaced too", /mother of the mountains/.test(text()));
+ok("a place with no local feast says so plainly",
+   (function () { click($('.mpin[data-id="whispering-hills"]')); return /pan-regional/.test(text()); })());
+
+console.log("\n=== MAP: YOUR EDITS ARE DELTAS, NOT A COPY ===");
+/* The whole design rests on this: cyrnn-data.js stays canonical, state
+   holds only what changed, so the world can grow under your edits. */
+const canonX = CALe('CYRNN.place("gorns-rest").x');
+CALe('mutate(function(st){ st.map.edits["gorns-rest"] = {x:52,y:39.5}; })');
+eq("a moved pin resolves to the new position", CALe('mapPin("gorns-rest").x'), 52);
+eq("...and the data file is untouched", CALe('CYRNN.place("gorns-rest").x'), canonX);
+eq("only the delta is stored",
+   JSON.stringify(Object.keys(mapState().edits)), JSON.stringify(["gorns-rest"]));
+CALe('mutate(function(st){ st.map.edits["corisport"] = {name:"Corisport (burned)"}; })');
+eq("a rename resolves too", CALe('mapPin("corisport").name'), "Corisport (burned)");
+CALe('mutate(function(st){ st.map.edits["frozen-sea"] = {hidden:true}; })');
+eq("a hidden place leaves the map", CALe('mapPin("frozen-sea")'), null);
+eq("...but is recoverable, not destroyed", CALe("mapHiddenIds().length"), 1);
+ok("...and the source still has it", CALe('!!CYRNN.place("frozen-sea")'));
+
+console.log("\n=== MAP: THE WORLD CAN GROW UNDER YOUR EDITS ===");
+const pinsBefore = CALe("mapPins().length");
+CALe('CYRNN.places.push({id:"new-town",name:"Newly Written Town",kind:"town",' +
+     'region:"muur",x:44,y:34,tags:[],blurb:"b",lore:"l"})');
+eq("a place added to the data file simply appears", CALe("mapPins().length"), pinsBefore + 1);
+eq("your nudge survived it", CALe('mapPin("gorns-rest").x'), 52);
+eq("your rename survived it", CALe('mapPin("corisport").name'), "Corisport (burned)");
+eq("your hide survived it", CALe('mapPin("frozen-sea")'), null);
+ok("and the new place inherits its region's feasts with no wiring",
+   CALe('CAL.holidaysForScopes(CYRNN.scopesFor("new-town")).filter(function(f){return f.local}).length') > 0);
+CALe("CYRNN.places.pop()");
+
+console.log("\n=== MAP: YOUR OWN PINS AND LORE ===");
+CALe('mutate(function(st){ st.map.custom.push(' +
+     '{id:"c-test",name:"The missing caravan",kind:"marker",x:48,y:49,note:"Three wagons, no bodies."}) })');
+ok("your own pin is drawn", !!$('.mpin[data-id="c-test"]'));
+ok("...and marked as yours, not the book's", !!$(".mpin.own"));
+eq("your pin answers only to itself unless filed under a region",
+   JSON.stringify(CALe('mapScopes(mapPin("c-test"))')), JSON.stringify(["c-test"]));
+CALe('mutate(function(st){ st.map.notes["gloomwood"]="Caravans stopped arriving."; })');
+click($('.mpin[data-id="gloomwood"]'));
+ok("your notes sit under the source's text, not over it",
+   /formal request/.test(text()) && /Caravans stopped arriving/.test(text()));
+CALe('mutate(function(st){ st.map.lore.push(' +
+     '{id:"L1",scope:"gloomwood",title:"Rumour at the Ghost Moors",body:"A vengeful demon."}) })');
+click($('.mpin[data-id="gloomwood"]'));
+ok("your own lore shows on the place it belongs to", /Rumour at the Ghost Moors/.test(text()));
+ok("...badged as yours", !!$(".hb"));
+
+console.log("\n=== MAP: THE PARTY ===");
+click($('.mpin[data-id="gloomwood"]'));
+click(byAct("mapPartyHere", { id: "gloomwood" }));
+eq("the party stands where you put it",
+   JSON.stringify(mapState().party),
+   JSON.stringify({ x: CALe('CYRNN.place("gloomwood").x'), y: CALe('CYRNN.place("gloomwood").y') }));
+ok("the party gets its own pin", !!$(".mpin.party"));
+click($('.mpin[data-id="__party"]'));
+ok("and the party panel names where it is", /nearest to/.test(text()));
+
+console.log("\n=== MAP: THE CAMERA IS NOT PART OF THE CHARACTER ===");
+ok("zoom and selection are not persisted",
+   !("zoom" in mapState()) && !("sel" in mapState()));
+eq("zoom will not go below fit", CALe("mapSetZoom(0.2)"), 1);
+eq("...nor past the cap", CALe("mapSetZoom(999)"), 8);
+CALe("UI.map.zoom=1;UI.map.x=0;UI.map.y=0");
+
 console.log("\n=== CALENDAR TAB ===");
 click(byAct("tab", { tab: "calendar" }));
 ok("shows the Jerbeen date by default", /Grub-Wake/.test(text()));
