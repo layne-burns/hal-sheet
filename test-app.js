@@ -157,6 +157,103 @@ click(byAct("advanceTime"));
 eq("time of day steps forward", calState().timeOfDay, "midday");
 click(byAct("tab", { tab: "combat" }));
 
+console.log("\n=== CALENDAR: WEEKS AND GRIDS ===");
+eq("the year is a whole number of weeks", CALe("CAL.daysPerYear % 7"), 0);
+eq("day 1 opens the week", CALe('CAL.weekdayName("jerbeen",1)'), "Tunnel-Tend");
+eq("the Common calendar names that same day too", CALe('CAL.weekdayName("common",1)'), "Firstlight");
+eq("both cultures go quiet on the seventh", CALe('CAL.weekdayName("jerbeen",7)'), "Deep-Still");
+eq("the year ends on week 52", CALe("CAL.weekIndex(364)"), 52);
+eq("a Jerbeen month is exactly four weeks", CALe('CAL.monthWeeks("jerbeen",1).length'), 4);
+eq("...so it has no empty cells",
+   CALe('CAL.monthWeeks("jerbeen",1).reduce(function(n,r){' +
+        'return n+r.filter(function(d){return d==null}).length},0)'), 0);
+eq("a 30-day Common month starts mid-week instead",
+   CALe('CAL.monthWeeks("common",31)[0].indexOf(31)'), 2);
+eq("...and needs five rows to hold 30 days", CALe('CAL.monthWeeks("common",31).length'), 5);
+eq("paging back from a month start lands in the month before",
+   CALe('CAL.monthFor("jerbeen", CAL.monthStep("jerbeen",29,-1)).name'), "Grub-Wake");
+
+console.log("\n=== CALENDAR VIEWS ===");
+click(byAct("tab", { tab: "calendar" }));
+click(byAct("calView", { view: "month" }));
+ok("month view draws a grid", !!$(".calgrid"));
+eq("seven named columns", $$(".cghead span").length, 7);
+ok("today's cell is picked out", !!$(".cgcell.today"));
+ok("the day page names the weekday", /Tunnel-Tend, Grub-Wake 1/.test(text()));
+eq("the grid marks the day the holiday falls on", $$(".cgcell .dm.hol").length, 1);
+click(byAct("calView", { view: "week" }));
+eq("week view lists seven days", $$(".wkday").length, 7);
+ok("week view shows both reckonings", /Grub-Wake 1/.test(text()) && /Dawnrise 1/.test(text()));
+click(byAct("calView", { view: "day" }));
+ok("day view keeps the day page", !!$(".dayp"));
+eq("the view choice is remembered", calState().view, "day");
+
+console.log("\n=== BROWSING IS NOT TIME PASSING ===");
+click(byAct("calStep", { d: "1" }));
+eq("paging the cursor leaves the party's date alone", calState().day, 1);
+ok("but the page follows the cursor", /Grub-Wake 2/.test(text()));
+ok("and says so, in as many words", /the party's date has not moved/.test(text()));
+
+console.log("\n=== DATED NOTES AND REMINDERS ===");
+function remindText() { const r = $(".remind"); return r ? r.textContent.replace(/\s+/g, " ") : ""; }
+$("#cal-note").value = "Tribute due to the Warden";
+$("#cal-note-time").value = "evening";
+$("#cal-note-lead").value = "1";
+click(byAct("calAddNote"));
+eq("the note lands on the day being browsed", calState().events[0].day, 2);
+eq("...at the hour chosen", calState().events[0].timeOfDay, "evening");
+ok("and appears on that day's page", /Tribute due to the Warden/.test(text()));
+const evId = calState().events[0].id;
+click(byAct("calView", { view: "month" }));
+eq("the grid now marks the note's day too", $$(".cgcell .dm:not(.hol)").length, 1);
+click(byAct("calView", { view: "day" }));
+click(byAct("calToday"));
+ok("the lead warning shows the day before", /In 1 day: Tribute due to the Warden/.test(remindText()));
+click(byAct("advanceDay", { d: "1" }));
+ok("on the day but before the hour it is still only a warning",
+   /Later today: Tribute due to the Warden/.test(remindText()));
+ok("it has not come due yet", !$('[data-act="calAck"][data-key="222:2:' + evId + '"]'));
+click(byAct("advanceTime"));
+click(byAct("advanceTime"));
+eq("the hour arrives", calState().timeOfDay, "evening");
+ok("and the reminder fires", !!$('[data-act="calAck"][data-key="222:2:' + evId + '"]'));
+ok("naming the note", /Tribute due to the Warden/.test(remindText()));
+click($('[data-act="calAck"][data-key="222:2:' + evId + '"]'));
+ok("acknowledging silences it", !$('[data-act="calAck"][data-key="222:2:' + evId + '"]'));
+ok("the note itself survives being acknowledged", calState().events.length === 1);
+
+console.log("\n=== A DAY YOU SKIPPED STILL REPORTS IN ===");
+click(byAct("calStep", { d: "1" }));
+click(byAct("calStep", { d: "1" }));
+click(byAct("calStep", { d: "1" }));
+$("#cal-note").value = "Feed the burrow-hounds";
+$("#cal-note-repeat").value = "yearly";
+click(byAct("calAddNote"));
+eq("a yearly note is stored without a year", calState().events[1].year, null);
+eq("...on day 5", calState().events[1].day, 5);
+click(byAct("calToday"));
+click(byAct("advanceDay", { d: "7" }));
+eq("a week passes in one step", calState().day, 9);
+ok("the day jumped clean over still reports in", /Feed the burrow-hounds/.test(remindText()));
+ok("...and owns up to how late it is", /4 days ago/.test(remindText()));
+const evId2 = calState().events[1].id;
+click(byAct("calStep", { d: "-1" }));
+click(byAct("calStep", { d: "-1" }));
+click(byAct("calStep", { d: "-1" }));
+click(byAct("calStep", { d: "-1" }));
+ok("back on the day that holds it", /Feed the burrow-hounds/.test(text()));
+click($('[data-act="calDeleteNote"][data-id="' + evId2 + '"]'));
+eq("deleting removes the note", calState().events.length, 1);
+ok("and its reminder goes with it", !/Feed the burrow-hounds/.test(remindText()));
+click(byAct("calStep", { d: "1" }));
+click(byAct("calSetDate"));
+eq("'set the date to this day' is what actually moves the party", calState().day, 6);
+/* Leave the calendar as the rest of the suite expects to find it. */
+w.eval("mutate(function (st) { st.calendar = Object.assign(st.calendar, " +
+       "{ day: 1, year: 222, timeOfDay: 'midday', view: 'month', events: [], acked: [] }); })");
+eq("reset to day 1 for the tests that follow", calState().day, 1);
+click(byAct("tab", { tab: "combat" }));
+
 console.log("\n=== PROVENANCE ===");
 click('[data-prov="save:cha"]');
 ok("provenance panel opened", /Charisma save/.test(text()));

@@ -11,7 +11,11 @@ let S = load();
 
 /* Ephemeral UI state — deliberately NOT persisted, except the rail
    collapse and tab which live on S.toggles / S.ui for convenience. */
-const UI = { prov: null, modal: null, alert: null, filter: [], expanded: {} };
+/* `cal` is the browsing cursor for the calendar tab — which day you're
+   LOOKING at, deliberately separate from S.calendar, which is the day
+   the party is actually living in. null means "follow the current date". */
+const UI = { prov: null, modal: null, alert: null, filter: [], expanded: {},
+             cal: { day: null, year: null } };
 
 function load() {
   try {
@@ -126,6 +130,106 @@ function clampState(st) {
   if (!Array.isArray(st.session.log)) st.session.log = [];
   if (!Array.isArray(st.sessionHistory)) st.sessionHistory = [];
   if (!Array.isArray(st.party.roster)) st.party.roster = [];
+  if (!Array.isArray(st.calendar.events)) st.calendar.events = [];
+  if (!Array.isArray(st.calendar.acked)) st.calendar.acked = [];
+  /* Acknowledgements are write-once bookkeeping — keep the newest and
+     let the rest go, so a long campaign never bloats the save. */
+  if (st.calendar.acked.length > 300) {
+    st.calendar.acked = st.calendar.acked.slice(-300);
+  }
+}
+
+/* ============================================================
+   CALENDAR EVENTS & REMINDERS
+   A dated note fires once, when the party's date reaches it — including
+   dates you jumped clean over with a week-long rest, which is exactly
+   when you'd otherwise forget the tribute was due. Acknowledging is
+   what silences it, not merely seeing it go by.
+   ============================================================ */
+
+/* How far back an un-acknowledged reminder keeps asking. Your own notes
+   are worth chasing for a while; a holiday you rode past two months ago
+   is just history, and the year browser still lists it. */
+const REMIND_LOOKBACK_NOTE = 60;
+const REMIND_LOOKBACK_HOLIDAY = 7;
+/* Holidays have no per-note lead field, so they get a standing one. */
+const HOLIDAY_LEAD = 3;
+
+function calNow(st) {
+  const c = st.calendar;
+  return { day: c.day, year: c.year, time: c.timeOfDay };
+}
+
+/* Where the calendar tab is pointed. Falls back to the live date. */
+function calCursor() {
+  return {
+    day: UI.cal.day == null ? S.calendar.day : UI.cal.day,
+    year: UI.cal.year == null ? S.calendar.year : UI.cal.year
+  };
+}
+function cursorIsToday() {
+  const c = calCursor();
+  return c.day === S.calendar.day && c.year === S.calendar.year;
+}
+
+function ackKey(year, day, id) { return year + ":" + day + ":" + id; }
+function holidayId(systemKey, holiday) { return "holiday:" + systemKey + ":" + holiday.name; }
+
+/* Everything dated, as one list: the player's own notes plus both
+   calendars' holidays, normalized to the same shape so the reminder
+   engine doesn't care which is which. */
+function calAllDated(st) {
+  const out = (st.calendar.events || []).map(function (ev) {
+    return { id: ev.id, day: ev.day, year: ev.year, timeOfDay: ev.timeOfDay || null,
+             title: ev.title, lead: ev.lead || 0, kind: "note", event: ev };
+  });
+  Object.keys(CAL.systems).forEach(function (k) {
+    CAL.systems[k].holidays.forEach(function (h) {
+      out.push({ id: holidayId(k, h), day: h.day, year: null, timeOfDay: null,
+                 title: h.name, lore: h.lore, lead: HOLIDAY_LEAD,
+                 kind: "holiday", system: k, systemLabel: CAL.systems[k].label });
+    });
+  });
+  return out;
+}
+
+/* Notes and holidays landing on one specific day, sorted by time of day
+   (all-day entries first). Used by every view that draws a day. */
+function calEntriesFor(st, day, year) {
+  const d = CAL.normalizeDay(day);
+  return calAllDated(st).filter(function (e) {
+    return CAL.normalizeDay(e.day) === d && (e.year == null || e.year === year);
+  }).sort(function (a, b) {
+    return CAL.timeIndex(a.timeOfDay) - CAL.timeIndex(b.timeOfDay);
+  });
+}
+
+/* The two halves of the reminder banner: what has come due and not been
+   acknowledged, and what is close enough ahead to warn about. */
+function calReminders(st) {
+  const now = calNow(st);
+  const acked = st.calendar.acked || [];
+  const due = [], soon = [];
+  calAllDated(st).forEach(function (e) {
+    const p = CAL.placeEvent(e, now);
+    const lookback = e.kind === "holiday" ? REMIND_LOOKBACK_HOLIDAY : REMIND_LOOKBACK_NOTE;
+    /* "Evening, today" hasn't arrived at Midday — it's still a warning,
+       not yet a reminder. A note with no time arrives with the day. */
+    const arrived = p.past ||
+      (p.inDays === 0 && CAL.timeIndex(e.timeOfDay) <= CAL.timeIndex(now.time));
+    if (arrived) {
+      if (p.inDays < -lookback) return;
+      if (acked.indexOf(ackKey(p.stamp.year, p.stamp.day, e.id)) >= 0) return;
+      due.push({ entry: e, stamp: p.stamp, inDays: p.inDays });
+    } else if (p.inDays === 0 || (e.lead > 0 && p.untilNext <= e.lead)) {
+      soon.push({ entry: e, stamp: p.stamp, inDays: p.untilNext });
+    }
+  });
+  /* Oldest first — the thing you rode past longest ago is the thing
+     most likely to have been missed. */
+  due.sort(function (a, b) { return a.inDays - b.inDays; });
+  soon.sort(function (a, b) { return a.inDays - b.inDays; });
+  return { due: due, soon: soon };
 }
 
 /* ---------- SMALL HELPERS ----------------------------------- */
@@ -345,6 +449,105 @@ const ACT = {
   calSystem(el) {
     const k = el.dataset.key;
     mutate(function (st) { st.calendar.system = k; });
+  },
+
+  /* ---- Calendar browsing (the cursor, not the date) ---- */
+  calView(el) {
+    const v = el.dataset.view;
+    mutate(function (st) { st.calendar.view = v; });
+  },
+  /* Step the cursor by whole days. */
+  calStep(el) {
+    const d = parseInt(el.dataset.d, 10) || 0;
+    const c = calCursor();
+    const adv = CAL.advance(c.day, c.year, d);
+    UI.cal.day = adv.day; UI.cal.year = adv.year;
+    render();
+  },
+  /* Step whole months, whose length varies by system (28, 30, or the
+     Convergence's 4) — so ask the calendar rather than assuming. */
+  calStepMonth(el) {
+    const dir = parseInt(el.dataset.d, 10) || 1;
+    const c = calCursor();
+    const target = CAL.monthStep(S.calendar.system, c.day, dir);
+    /* Landing before where we started means the year rolled. */
+    const wrapped = dir < 0 ? target > c.day : target < c.day;
+    UI.cal.day = target;
+    UI.cal.year = c.year + (wrapped ? dir : 0);
+    render();
+  },
+  calGoto(el) {
+    UI.cal.day = parseInt(el.dataset.day, 10);
+    UI.cal.year = parseInt(el.dataset.year, 10);
+    render();
+  },
+  /* From a reminder anywhere in the app straight to that day's page. */
+  calOpen(el) {
+    UI.cal.day = parseInt(el.dataset.day, 10);
+    UI.cal.year = parseInt(el.dataset.year, 10);
+    mutate(function (st) {
+      st.ui = st.ui || {};
+      st.ui.tab = "calendar";
+      st.calendar.view = "day";
+    });
+  },
+  calToday() { UI.cal.day = null; UI.cal.year = null; render(); },
+
+  /* Move the party's actual date to the day being browsed. The one place
+     browsing turns into time passing, so it's an explicit button. */
+  calSetDate() {
+    const c = calCursor();
+    mutate(function (st) { st.calendar.day = c.day; st.calendar.year = c.year; });
+    UI.cal.day = null; UI.cal.year = null;
+    render();
+  },
+
+  /* ---- Dated notes ---- */
+  calAddNote() {
+    const title = (document.getElementById("cal-note").value || "").trim();
+    if (!title) return;
+    const time = document.getElementById("cal-note-time").value;
+    const repeat = document.getElementById("cal-note-repeat").value;
+    const lead = Math.max(0, Math.min(60, parseInt(document.getElementById("cal-note-lead").value, 10) || 0));
+    const c = calCursor();
+    mutate(function (st) {
+      st.calendar.events.push({
+        id: "ev" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        day: c.day,
+        year: repeat === "yearly" ? null : c.year,
+        timeOfDay: time || null,
+        title: title,
+        lead: lead
+      });
+    });
+  },
+  calDeleteNote(el) {
+    const id = el.dataset.id;
+    mutate(function (st) {
+      st.calendar.events = st.calendar.events.filter(function (e) { return e.id !== id; });
+      /* Its acknowledgements are dead weight once the note is gone. */
+      st.calendar.acked = st.calendar.acked.filter(function (k) {
+        return k.slice(k.indexOf(":", k.indexOf(":") + 1) + 1) !== id;
+      });
+    });
+  },
+
+  /* Acknowledging is per occurrence, so a yearly note comes back around
+     next year rather than being silenced forever. */
+  calAck(el) {
+    const key = el.dataset.key;
+    mutate(function (st) {
+      if (st.calendar.acked.indexOf(key) < 0) st.calendar.acked.push(key);
+    });
+  },
+  calAckAll() {
+    const r = calReminders(S);
+    mutate(function (st) {
+      r.due.forEach(function (d) {
+        const key = ackKey(d.stamp.year, d.stamp.day, d.entry.id);
+        if (st.calendar.acked.indexOf(key) < 0) st.calendar.acked.push(key);
+      });
+    });
   },
 
   /* Resting is where in-world time usually moves, so it asks rather than
@@ -621,6 +824,7 @@ function render() {
     topBar() +
     conditionStrip() +
     alertBar() +
+    reminderBar() +
     tabBar(tab) +
     '<div class="wrap' + (S.toggles.railCollapsed ? " railoff" : "") +
       (S.toggles.leftRailCollapsed ? " leftoff" : "") + '">' +
@@ -738,6 +942,47 @@ function conditionStrip() {
   if (S.exhaustion) out += '<span class="cond">Exhaustion ' + S.exhaustion + "</span>";
   out += '<span class="lbl" style="margin-left:auto">Details in the Combat tab</span></div>';
   return out;
+}
+
+/* ---------- REMINDERS ----------
+   Sits under the alert bar on every tab, because the whole point is that
+   you find out about the tithe without having opened the calendar. */
+function reminderBar() {
+  const r = calReminders(S);
+  if (!r.due.length && !r.soon.length) return "";
+  const sysKey = S.calendar.system;
+
+  let out = '<div class="remind cut">';
+  r.due.slice(0, 4).forEach(function (d) {
+    const e = d.entry;
+    const when = CAL.format(sysKey, d.stamp.day) +
+      (e.timeOfDay ? ", " + CAL.timeLabel(e.timeOfDay) : "") +
+      (d.inDays < 0 ? " · " + (-d.inDays) + " day" + (d.inDays === -1 ? "" : "s") + " ago" : "");
+    out += '<div class="rmrow' + (e.kind === "holiday" ? " hol" : "") + '">' +
+      '<span class="rmflag">' + (e.kind === "holiday" ? "❖" : "⚑") + "</span>" +
+      '<span class="rmname" data-act="calOpen" data-day="' + d.stamp.day +
+        '" data-year="' + d.stamp.year + '">' + esc(e.title) +
+        (e.kind === "holiday" ? ' <span class="bdg">' + esc(e.systemLabel) + "</span>" : "") +
+        '<span class="rmwhen">' + esc(when) + "</span></span>" +
+      '<button class="bt cutsm" data-act="calAck" data-key="' +
+        esc(ackKey(d.stamp.year, d.stamp.day, e.id)) + '">Acknowledge</button></div>';
+  });
+  if (r.due.length > 4) {
+    out += '<div class="rmmore">…and ' + (r.due.length - 4) + " more waiting on the calendar.</div>";
+  }
+  if (r.due.length > 1) {
+    out += '<div class="rmall"><button class="bt cutsm" data-act="calAckAll">' +
+      "Acknowledge all " + r.due.length + "</button></div>";
+  }
+  r.soon.slice(0, 3).forEach(function (s) {
+    const e = s.entry;
+    out += '<div class="rmsoon" data-act="calOpen" data-day="' + s.stamp.day +
+      '" data-year="' + s.stamp.year + '">' +
+      (s.inDays === 0 ? "Later today" : "In " + s.inDays + " day" + (s.inDays === 1 ? "" : "s")) +
+      ": <b>" + esc(e.title) + "</b> · " + esc(CAL.format(sysKey, s.stamp.day)) +
+      (e.timeOfDay ? ", " + esc(CAL.timeLabel(e.timeOfDay)) : "") + "</div>";
+  });
+  return out + "</div>";
 }
 
 /* ---------- ALERT ---------- */
@@ -1250,9 +1495,10 @@ function notesTab() {
 }
 
 /* ---------- CALENDAR ----------
-   Doubles as the at-a-glance page: today's date in both systems, what's
-   happening, and where you are in the year. The month browser underneath
-   is for looking ahead. */
+   Two things at once, kept deliberately separate: the date the party is
+   living in (S.calendar — only the "Set the date" controls move it), and
+   the date you're looking at (UI.cal — the browsing cursor, which paging
+   around the month never confuses with time actually passing). */
 function calendarTab() {
   const cal = S.calendar;
   const sysKey = cal.system;
@@ -1317,27 +1563,206 @@ function calendarTab() {
     '<div class="foot">Both calendars count the same 364 days — switching only changes how the date reads.</div>' +
     "</div>";
 
-  /* ---- The year ---- */
-  const yearCollapsed = !!UI.expanded.calYearCollapsed;
-  out += '<div class="pnl cut"><h3>' + esc(sys.label) + ' year' +
-    '<button class="bt cutsm" data-act="expand" data-id="calYearCollapsed">' +
-    (yearCollapsed ? "Show" : "Hide") + "</button></h3>";
-  if (!yearCollapsed) {
-    sys.months.forEach(function (m) {
-      const isNow = cal.day >= m.start && cal.day <= m.end;
-      out += '<div class="calmonth' + (isNow ? " now" : "") + '">' +
-        '<div class="cmhead"><span class="cmname">' + esc(m.name) + "</span>" +
-        '<span class="cmmeta">' + esc(m.season) + " · days " + m.start + "–" + m.end + "</span></div>";
-      sys.holidays.filter(function (h) { return h.day >= m.start && h.day <= m.end; })
-        .forEach(function (h) {
-          out += '<div class="cmfeast' + (h.day === cal.day ? " today" : "") + '">' +
-            esc(h.name) + ' <span class="sc">' + esc(CAL.format(sys.key, h.day)) + "</span></div>";
-        });
-      out += "</div>";
-    });
-  }
-  out += "</div>";
+  /* ---- The browser: day / week / month / year ---- */
+  out += calBrowser();
   return out;
+}
+
+/* Month, week and day all draw the same underlying thing at different
+   zooms, so they share the cursor, the marks, and the day editor. */
+function calBrowser() {
+  const cal = S.calendar;
+  const sysKey = cal.system;
+  const sys = CAL.system(sysKey);
+  const view = cal.view || "month";
+  const cur = calCursor();
+  const month = CAL.monthFor(sysKey, cur.day);
+
+  let title, nav;
+  if (view === "day") {
+    title = CAL.weekdayName(sysKey, cur.day) + " · " + CAL.format(sysKey, cur.day);
+    nav = calNavRow(-1, 1, "calStep", "Today");
+  } else if (view === "week") {
+    title = "Week " + CAL.weekIndex(cur.day) + " · days " +
+      CAL.weekStart(cur.day) + "–" + (CAL.weekStart(cur.day) + 6);
+    nav = calNavRow(-7, 7, "calStep", "This week");
+  } else if (view === "month") {
+    title = month.name + " · " + month.season;
+    nav = calNavRow(-1, 1, "calStepMonth", "This month");
+  } else {
+    title = sys.label + " year " + cur.year;
+    nav = calNavRow(-CAL.daysPerYear, CAL.daysPerYear, "calStep", "This year");
+  }
+
+  let out = '<div class="pnl cut"><h3>' + esc(title) +
+    '<span class="calviews">' +
+    [["day", "Day"], ["week", "Week"], ["month", "Month"], ["year", "Year"]].map(function (v) {
+      return '<button class="bt cutsm' + (view === v[0] ? " pri" : "") +
+        '" data-act="calView" data-view="' + v[0] + '">' + v[1] + "</button>";
+    }).join("") + "</span></h3>" + nav;
+
+  if (view === "month") out += calMonthGrid(cur);
+  else if (view === "week") out += calWeekList(cur);
+  else if (view === "year") out += calYearList(cur);
+
+  /* Every view except the year overview ends on the selected day's
+     page — the grid is for finding a day, this is for using it. */
+  if (view !== "year") out += calDayPanel(cur);
+  return out + "</div>";
+}
+
+function calNavRow(back, fwd, act, todayLabel) {
+  const cur = calCursor();
+  const onToday = cursorIsToday();
+  return '<div class="calnav">' +
+    '<button class="bt cutsm" data-act="' + act + '" data-d="' + back + '">‹</button>' +
+    '<button class="bt cutsm' + (onToday ? "" : " pri") + '" data-act="calToday">' +
+      esc(todayLabel) + "</button>" +
+    '<button class="bt cutsm" data-act="' + act + '" data-d="' + fwd + '">›</button>' +
+    (onToday ? '<span class="foot" style="margin:0">You are looking at the current date.</span>'
+             : '<span class="calaway">Browsing ' + esc(CAL.format(S.calendar.system, cur.day)) +
+               ", Year " + cur.year + " — the party's date has not moved." +
+               '<button class="bt cutsm" data-act="calSetDate">Set the date to this day</button></span>') +
+    "</div>";
+}
+
+/* Small marks under a day number: what's on it, without the words. */
+function calMarks(day, year) {
+  const entries = calEntriesFor(S, day, year);
+  if (!entries.length) return "";
+  return '<span class="dmarks">' + entries.slice(0, 4).map(function (e) {
+    return '<i class="dm' + (e.kind === "holiday" ? " hol" : "") + '"></i>';
+  }).join("") + "</span>";
+}
+
+function calMonthGrid(cur) {
+  const sysKey = S.calendar.system;
+  const rows = CAL.monthWeeks(sysKey, cur.day);
+  let out = '<div class="calgrid"><div class="cghead">';
+  for (let i = 0; i < 7; i++) out += "<span>" + esc(CAL.weekdayShort(sysKey, i)) + "</span>";
+  out += "</div>";
+  rows.forEach(function (row) {
+    out += '<div class="cgrow">';
+    row.forEach(function (d) {
+      if (d == null) { out += '<span class="cgcell empty"></span>'; return; }
+      const isToday = d === S.calendar.day && cur.year === S.calendar.year;
+      const isSel = d === cur.day;
+      out += '<span class="cgcell' + (isToday ? " today" : "") + (isSel ? " sel" : "") +
+        '" data-act="calGoto" data-day="' + d + '" data-year="' + cur.year + '">' +
+        '<span class="cgnum">' + CAL.dayOfMonth(sysKey, d) + "</span>" +
+        calMarks(d, cur.year) + "</span>";
+    });
+    out += "</div>";
+  });
+  return out + "</div>";
+}
+
+function calWeekList(cur) {
+  const sysKey = S.calendar.system;
+  const other = sysKey === "jerbeen" ? "common" : "jerbeen";
+  let out = '<div class="calweek">';
+  CAL.weekDays(cur.day).forEach(function (d) {
+    const isToday = d === S.calendar.day && cur.year === S.calendar.year;
+    const entries = calEntriesFor(S, d, cur.year);
+    out += '<div class="wkday' + (isToday ? " today" : "") + (d === cur.day ? " sel" : "") +
+      '" data-act="calGoto" data-day="' + d + '" data-year="' + cur.year + '">' +
+      '<div class="wkhead"><span class="wkname">' + esc(CAL.weekdayName(sysKey, d)) + "</span>" +
+      '<span class="wkdate">' + esc(CAL.format(sysKey, d)) + ' <span class="sc">' +
+        esc(CAL.format(other, d)) + "</span></span></div>";
+    if (entries.length) {
+      out += '<div class="wkitems">' + entries.map(function (e) {
+        return '<span class="wkitem' + (e.kind === "holiday" ? " hol" : "") + '">' +
+          (e.timeOfDay ? '<b>' + esc(CAL.timeLabel(e.timeOfDay)) + "</b> " : "") +
+          esc(e.title) + "</span>";
+      }).join("") + "</div>";
+    }
+    out += "</div>";
+  });
+  return out + "</div>";
+}
+
+function calYearList(cur) {
+  const sysKey = S.calendar.system;
+  const sys = CAL.system(sysKey);
+  let out = "";
+  sys.months.forEach(function (m) {
+    const isNow = S.calendar.day >= m.start && S.calendar.day <= m.end &&
+                  cur.year === S.calendar.year;
+    let noteCount = 0;
+    for (let d = m.start; d <= m.end; d++) {
+      noteCount += calEntriesFor(S, d, cur.year).filter(function (e) {
+        return e.kind === "note";
+      }).length;
+    }
+    out += '<div class="calmonth' + (isNow ? " now" : "") + '" data-act="calGoto" data-day="' +
+      m.start + '" data-year="' + cur.year + '">' +
+      '<div class="cmhead"><span class="cmname">' + esc(m.name) + "</span>" +
+      '<span class="cmmeta">' + esc(m.season) + " · days " + m.start + "–" + m.end +
+      (noteCount ? " · " + noteCount + " note" + (noteCount === 1 ? "" : "s") : "") +
+      "</span></div>";
+    sys.holidays.filter(function (h) { return h.day >= m.start && h.day <= m.end; })
+      .forEach(function (h) {
+        out += '<div class="cmfeast' + (h.day === S.calendar.day ? " today" : "") + '">' +
+          esc(h.name) + ' <span class="sc">' + esc(CAL.format(sys.key, h.day)) + "</span></div>";
+      });
+    out += "</div>";
+  });
+  return out;
+}
+
+/* The selected day, in full: what the world says about it, what you've
+   written on it, and the form for writing more. */
+function calDayPanel(cur) {
+  const sysKey = S.calendar.system;
+  const other = sysKey === "jerbeen" ? "common" : "jerbeen";
+  const entries = calEntriesFor(S, cur.day, cur.year);
+  const holidayEntries = entries.filter(function (e) { return e.kind === "holiday"; });
+  const notes = entries.filter(function (e) { return e.kind === "note"; });
+
+  let out = '<div class="dayp"><div class="dayphead">' +
+    '<span class="dayptitle">' + esc(CAL.weekdayName(sysKey, cur.day)) + ", " +
+      esc(CAL.format(sysKey, cur.day)) + "</span>" +
+    '<span class="daypalt">' + esc(CAL.system(other).label) + ": " +
+      esc(CAL.format(other, cur.day)) + " · Year " + cur.year + "</span></div>";
+
+  holidayEntries.forEach(function (e) {
+    out += '<div class="calfeast"><div class="cfname">' + esc(e.title) +
+      ' <span class="bdg">' + esc(e.systemLabel) + "</span></div>" +
+      '<div class="etext">' + esc(e.lore) + "</div></div>";
+  });
+
+  if (notes.length) {
+    out += '<div class="daynotes">' + notes.map(function (e) {
+      const ev = e.event;
+      return '<div class="daynote"><span class="dnwhen">' +
+        (e.timeOfDay ? esc(CAL.timeLabel(e.timeOfDay)) : "All day") + "</span>" +
+        '<span class="dntitle">' + esc(e.title) + "</span>" +
+        '<span class="dnmeta">' + (ev.year == null ? "every year" : "once") +
+          (ev.lead ? " · warns " + ev.lead + "d ahead" : "") + "</span>" +
+        '<button class="x" data-act="calDeleteNote" data-id="' + esc(ev.id) +
+        '" title="Delete this note">×</button></div>';
+    }).join("") + "</div>";
+  } else {
+    out += '<div class="foot">Nothing written on this day yet.</div>';
+  }
+
+  /* Add form. Fields are read at click time, so a re-render never
+     interrupts typing — same contract as the damage box. */
+  out += '<div class="daypadd">' +
+    '<input type="text" id="cal-note" placeholder="Note for ' +
+      esc(CAL.format(sysKey, cur.day)) + '…">' +
+    '<select id="cal-note-time"><option value="">All day</option>' +
+      CAL.timesOfDay().map(function (t) {
+        return '<option value="' + t.key + '">' + esc(t.label) + "</option>";
+      }).join("") + "</select>" +
+    '<select id="cal-note-repeat"><option value="once">Once</option>' +
+      '<option value="yearly">Every year</option></select>' +
+    '<span class="lbl">Warn</span>' +
+    '<input type="number" id="cal-note-lead" value="0" min="0" max="60" style="width:58px">' +
+    '<span class="lbl">days ahead</span>' +
+    '<button class="bt cutsm pri" data-act="calAddNote">Add note</button></div>';
+
+  return out + "</div>";
 }
 
 /* ---------- FILTER PANEL (collapsible) ---------- */

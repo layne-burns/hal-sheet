@@ -832,8 +832,15 @@ const SEED = {
 
   /* In-world date. `day` is the shared 1-364 global day both calendars
      run on, so `system` only changes how it's displayed, never the date
-     itself. See calendar-data.js. */
-  calendar: { day: 1, year: 222, system: "jerbeen", timeOfDay: "morning" },
+     itself. See calendar-data.js.
+
+     `events` are dated notes: { id, day, year, timeOfDay, title, lead }.
+     A null `year` repeats every year; a null `timeOfDay` means any time
+     that day; `lead` is how many days early to start warning.
+     `acked` holds "<year>:<day>:<id>" keys for reminders already seen,
+     so a note fires once and then stays quiet. */
+  calendar: { day: 1, year: 222, system: "jerbeen", timeOfDay: "morning",
+              view: "month", events: [], acked: [] },
 
   settings: {
     rollPrompts: true,      /* pop a "roll this, because of that" card */

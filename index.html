@@ -192,6 +192,86 @@ input[type=number]{width:88px}
 .alert .sub{opacity:.85;text-transform:none;letter-spacing:0;font-size:15.5px}
 .alert .x{margin-left:auto;font-size:20px;padding:0 5px}
 
+/* ---------- REMINDERS ----------
+   Lives under the alert bar on every tab. Violet = the world's holidays,
+   yellow = something you wrote down yourself. */
+.remind{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--yel);
+  padding:9px 13px;margin-bottom:7px}
+.rmrow{display:flex;align-items:center;gap:11px;padding:5px 0;border-bottom:1px solid #1A242D}
+.rmrow:last-child{border-bottom:none}
+.rmflag{font-size:19px;color:var(--yel);flex:none;line-height:1}
+.rmrow.hol .rmflag{color:var(--violet)}
+.rmname{flex:1;font-size:19px;cursor:pointer;min-width:0}
+.rmname:hover{color:var(--cyan)}
+.rmwhen{display:block;font-family:var(--m);font-size:14.5px;color:var(--dim);letter-spacing:.06em}
+.rmmore,.rmall{font-family:var(--m);font-size:14px;color:var(--dimmer);letter-spacing:.08em;
+  margin-top:7px}
+.rmall{margin-top:8px}
+.rmsoon{font-family:var(--m);font-size:15px;color:var(--dim);margin-top:7px;padding-top:7px;
+  border-top:1px solid #1A242D;cursor:pointer}
+.rmsoon:hover{color:var(--cyan)}
+.rmsoon b{color:var(--txt);font-weight:400}
+
+/* ---------- CALENDAR BROWSER ---------- */
+/* Sits after the h3's hairline rule, same as every other panel button. */
+.calviews{display:flex;gap:5px;flex:none}
+.calnav{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:10px}
+.calaway{font-family:var(--m);font-size:14px;letter-spacing:.06em;color:var(--yel);
+  display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.calgrid{font-family:var(--m)}
+.cghead,.cgrow{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+.cghead{font-size:12.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dimmer);
+  margin-bottom:4px}
+.cghead span{padding:0 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cgrow{margin-bottom:3px}
+.cgcell{position:relative;min-height:52px;background:var(--panel2);border:1px solid var(--line);
+  padding:4px 5px;cursor:pointer;display:flex;flex-direction:column;justify-content:space-between}
+.cgcell.empty{background:transparent;border-color:transparent;cursor:default}
+.cgcell:hover{border-color:var(--cyan)}
+.cgcell.empty:hover{border-color:transparent}
+.cgnum{font-size:16px;color:var(--dim);font-variant-numeric:tabular-nums}
+.cgcell.sel{border-color:var(--cyan)}
+.cgcell.sel .cgnum{color:var(--cyan)}
+.cgcell.today{background:var(--panel3);border-color:var(--yel)}
+.cgcell.today .cgnum{color:var(--yel)}
+.dmarks{display:flex;gap:3px}
+.dm{width:6px;height:6px;background:var(--yel);display:block}
+.dm.hol{background:var(--violet)}
+
+.calweek .wkday{border-bottom:1px solid #1A242D;padding:7px 0;cursor:pointer}
+.calweek .wkday:last-child{border-bottom:none}
+.calweek .wkday:hover .wkname{color:var(--cyan)}
+.calweek .wkday.sel{border-left:2px solid var(--cyan);padding-left:9px}
+.calweek .wkday.today{border-left:2px solid var(--yel);padding-left:9px}
+.wkhead{display:flex;justify-content:space-between;align-items:baseline;gap:12px;font-family:var(--m)}
+.wkname{font-size:17px}
+.wkday.today .wkname{color:var(--yel)}
+.wkdate{font-size:15px;color:var(--dim)}
+.wkitems{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px}
+.wkitem{font-family:var(--m);font-size:14.5px;color:var(--yel);border:1px solid var(--line2);
+  padding:1px 8px}
+.wkitem.hol{color:var(--violet);border-color:var(--violet)}
+.wkitem b{color:var(--dim);font-weight:400}
+
+/* ---------- DAY PAGE ---------- */
+.dayp{margin-top:12px;padding-top:11px;border-top:1px solid var(--line)}
+.dayphead{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+.dayptitle{font-family:var(--m);font-size:19px;color:var(--cyan);letter-spacing:.04em}
+.daypalt{font-family:var(--m);font-size:14.5px;color:var(--dim)}
+.daynotes{margin-top:9px}
+.daynote{display:flex;align-items:center;gap:11px;padding:5px 0;border-bottom:1px solid #1A242D}
+.daynote:last-child{border-bottom:none}
+.dnwhen{font-family:var(--m);font-size:13.5px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--yel);width:92px;flex:none}
+.dntitle{flex:1;font-size:18.5px;min-width:0}
+.dnmeta{font-family:var(--m);font-size:13.5px;color:var(--dimmer);letter-spacing:.06em}
+.daynote .x{font-size:19px;padding:0 5px;color:var(--dim)}
+.daynote .x:hover{color:var(--mag)}
+.daypadd{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:11px;
+  padding-top:10px;border-top:1px solid #1A242D}
+.daypadd input[type=text]{flex:1;min-width:180px}
+.daypadd select{font-size:16px;padding:6px 8px}
+
 /* ---------- TAGS ---------- */
 /* Three hue families plus gray. Shade carries the distinction
    inside a family, so the eye sorts by meaning first. */

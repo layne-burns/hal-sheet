@@ -24,6 +24,29 @@ const TIMES_OF_DAY = [
   { key: "night",     label: "Night" }
 ];
 
+/* 364 = 52 x 7 exactly, so the seven-day cycle never drifts: a given
+   global day is the same weekday every year, in both systems. A Jerbeen
+   month is exactly four weeks; Common months of 30 straddle them, which
+   is why the month grid aligns to columns rather than starting each
+   month at column 1.
+
+   The two cultures name the same seven days for their own labour cycle,
+   and land on the same conclusion about the seventh — the burrow goes
+   quiet, the guildhalls close. */
+const WEEKDAY_NAMES = {
+  jerbeen: ["Tunnel-Tend", "Cord-Count", "Forage-Wide", "Thorn-Weave",
+            "Ear-Turn", "Kin-Gather", "Deep-Still"],
+  common:  ["Firstlight", "Ledgerday", "Anvilday", "Crossway",
+            "Hearthday", "Marketmoot", "Stillwane"]
+};
+
+/* Column headings have to fit seven across on a phone, so each name
+   also carries the short form the grid actually draws. */
+const WEEKDAY_ABBR = {
+  jerbeen: ["Tunnel", "Cord", "Forage", "Thorn", "Ear", "Kin", "Deep"],
+  common:  ["First", "Ledger", "Anvil", "Cross", "Hearth", "Market", "Still"]
+};
+
 const JERBEEN_MONTHS = [
   { name: "Grub-Wake",    start: 1,   end: 28,  season: "Spring",
     lore: "The month of the thaw. Specialized foraging teams break winter rationing to harvest subterranean insects." },
@@ -194,6 +217,103 @@ const CAL = {
       if (diff < bestIn) { bestIn = diff; best = h; }
     });
     return best ? { holiday: best, inDays: bestIn } : null;
+  },
+
+  /* ---- Weeks and grids ---------------------------------------
+     Everything here is derived from the global day, so the two systems
+     share one week structure and only the labels differ. */
+
+  weekdayIndex(day) { return (CAL.normalizeDay(day) - 1) % 7; },
+
+  weekdayName(systemKey, day) {
+    return WEEKDAY_NAMES[CAL.system(systemKey).key][CAL.weekdayIndex(day)];
+  },
+
+  weekdayShort(systemKey, index) {
+    return WEEKDAY_ABBR[CAL.system(systemKey).key][index];
+  },
+
+  /* 1-52. */
+  weekIndex(day) { return Math.floor((CAL.normalizeDay(day) - 1) / 7) + 1; },
+
+  weekStart(day) { return (CAL.weekIndex(day) - 1) * 7 + 1; },
+
+  /* The seven global days of the week containing `day`. */
+  weekDays(day) {
+    const start = CAL.weekStart(day);
+    const out = [];
+    for (let i = 0; i < 7; i++) out.push(start + i);
+    return out;
+  },
+
+  /* Rows of seven for the month containing `day`, aligned to weekday
+     columns. Cells outside the month are null so the grid keeps its
+     shape — a Common month can start mid-week, and the Convergence is
+     only four days long. */
+  monthWeeks(systemKey, day) {
+    const m = CAL.monthFor(systemKey, day);
+    const rows = [];
+    let row = new Array(7).fill(null);
+    let col = CAL.weekdayIndex(m.start);
+    for (let d = m.start; d <= m.end; d++) {
+      row[col] = d;
+      col++;
+      if (col === 7) { rows.push(row); row = new Array(7).fill(null); col = 0; }
+    }
+    if (col !== 0) rows.push(row);
+    return rows;
+  },
+
+  /* First global day of the month before/after the one holding `day`.
+     Wraps the year at both ends, so paging never dead-ends. */
+  monthStep(systemKey, day, dir) {
+    const m = CAL.monthFor(systemKey, day);
+    return CAL.normalizeDay(dir < 0 ? m.start - 1 : m.end + 1);
+  },
+
+  timeIndex(key) {
+    if (!key) return -1;              /* "any time" sorts before Dawn */
+    for (let i = 0; i < TIMES_OF_DAY.length; i++) {
+      if (TIMES_OF_DAY[i].key === key) return i;
+    }
+    return -1;
+  },
+
+  timesOfDay() { return TIMES_OF_DAY.slice(); },
+
+  /* ---- Point-in-time arithmetic ------------------------------
+     A "stamp" is { year, day, time } — the same shape session log
+     entries already carry. Signed day distance, so a negative result
+     means the moment is behind you. */
+  diffDays(from, to) {
+    return (to.year - from.year) * CAL_DAYS_PER_YEAR + (to.day - from.day);
+  },
+
+  /* <0 if a is earlier than b, 0 if the same moment, >0 if later. */
+  compare(a, b) {
+    const d = CAL.diffDays(a, b);
+    if (d !== 0) return -d;
+    return CAL.timeIndex(a.time) - CAL.timeIndex(b.time);
+  },
+
+  /* Where a dated thing sits relative to `now`. `ev.year == null` means
+     it repeats every year (holidays, and any note marked yearly);
+     `ev.timeOfDay` null means "any time that day", which is why it sorts
+     ahead of Dawn. Returns the occurrence in the current year — which
+     may already be behind you — plus the distance to the NEXT one, so a
+     lead-up warning counts toward the one still coming. */
+  placeEvent(ev, now) {
+    const day = CAL.normalizeDay(ev.day);
+    const time = ev.timeOfDay || null;
+    const annual = ev.year == null;
+    const stamp = { day: day, year: annual ? now.year : ev.year, time: time };
+    const past = CAL.compare(stamp, now) < 0;
+    const upcoming = (past && annual) ? { day: day, year: stamp.year + 1, time: time } : stamp;
+    return {
+      stamp: stamp, past: past,
+      inDays: CAL.diffDays(now, stamp),
+      untilNext: CAL.diffDays(now, upcoming)
+    };
   },
 
   timeLabel(key) {
