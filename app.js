@@ -2648,11 +2648,17 @@ function levelUpModal() {
 /* ============================================================
    EVENT WIRING
    ============================================================ */
+/* Form controls are driven by the change handler below, never by this
+   one. A SELECT in particular must be left alone: preventDefault stops
+   iOS from opening the picker at all, and firing the action on the tap
+   would re-render the dropdown out from under the finger that opened
+   it — which looks exactly like a dead control. */
+const FORM_TAGS = { INPUT: 1, TEXTAREA: 1, SELECT: 1, OPTION: 1 };
 document.addEventListener("click", function (e) {
   const el = e.target.closest("[data-act]");
   if (!el) return;
   const fn = ACT[el.dataset.act];
-  if (typeof fn === "function" && el.tagName !== "INPUT" && el.tagName !== "TEXTAREA") {
+  if (typeof fn === "function" && !FORM_TAGS[el.tagName]) {
     e.preventDefault();
     fn(el);
   }

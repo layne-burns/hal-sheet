@@ -503,6 +503,14 @@ click(byAct("tab", { tab: "spells" }));
 click(byAct("use", { kind: "spell", id: "findFamiliar" }));
 ok("casting it asks first", !!$("#summon-form"));
 eq("every CR 0 beast is offered", $$("#summon-form option").length, 35);
+/* Tapping a dropdown must reach the browser. The global click handler
+   used to call preventDefault on it and re-render, which on iOS meant
+   the picker never opened and the control looked dead. */
+const selNode = $("#summon-form");
+const tap = new w.MouseEvent("click", { bubbles: true, cancelable: true });
+selNode.dispatchEvent(tap);
+ok("tapping the dropdown is not swallowed", !tap.defaultPrevented);
+ok("...and doesn't re-render the dropdown out from under you", $("#summon-form") === selNode);
 ok("no free-text form — it must be a real Beast", !$("#summon-custom"));
 ok("a ritual option is offered", /Ritual — no slot/.test(text()));
 const slot1Before = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).resources.slots["1"].used;
