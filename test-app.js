@@ -20,6 +20,7 @@ const html = fs.readFileSync(path.join(dir, "index.html"), "utf8")
   .replace(/<script src="beasts-data\.js"><\/script>/, inline("beasts-data.js"))
   .replace(/<script src="rules\.js"><\/script>/, inline("rules.js"))
   .replace(/<script src="calendar-data\.js"><\/script>/, inline("calendar-data.js"))
+  .replace(/<script src="cyrnn-data\.js"><\/script>/, inline("cyrnn-data.js"))
   .replace(/<script src="combat-rules\.js"><\/script>/, inline("combat-rules.js"))
   .replace(/<script src="app\.js"><\/script>/, inline("app.js"))
   .replace(/<script src="combat\.js"><\/script>/, inline("combat.js"));
@@ -131,10 +132,111 @@ eq("the year wraps forward", JSON.stringify(CALe("CAL.advance(364,222,1)")),
    JSON.stringify({ day: 1, year: 223 }));
 eq("and backward", JSON.stringify(CALe("CAL.advance(1,222,-1)")),
    JSON.stringify({ day: 364, year: 221 }));
-eq("next holiday from day 2 is The High Weave in 40 days",
-   CALe('CAL.nextHoliday("jerbeen",2).inDays'), 40);
+eq("next holiday from day 2 is The Bedrock-Listen in 12 days",
+   CALe('CAL.nextHoliday("jerbeen",2).inDays'), 12);
 eq("night rolls over into the next day", CALe('CAL.nextTime("night").rolledOver'), true);
 eq("morning does not", CALe('CAL.nextTime("morning").rolledOver'), false);
+
+console.log("\n=== CALENDAR: WHO KEEPS WHICH FEAST ===");
+eq("the campaign sheet's 36 holidays are all here",
+   CALe("CAL.systems.jerbeen.holidays.length + CAL.systems.common.holidays.length"), 36);
+ok("every holiday says who observes it",
+   CALe('CAL.systems.jerbeen.holidays.concat(CAL.systems.common.holidays)' +
+        '.every(function(h){return h.regionLabel && h.scopes && h.scopes.length})'));
+
+/* The source spreadsheet states a weekday for every holiday. It is derivable
+   from the day number, so we re-derive all 36 and check them: a disagreement
+   means either the sheet or the 7-day cycle is wrong. */
+eq("every stated weekday agrees with the seven-day cycle",
+   CALe('CAL.systems.jerbeen.holidays.concat(CAL.systems.common.holidays)' +
+        '.filter(function(h){' +
+        '  return CAL.weekdayName("jerbeen",h.day)!==' +
+        '    ["Tunnel-Tend","Cord-Count","Forage-Wide","Thorn-Weave",' +
+        '     "Ear-Turn","Kin-Gather","Deep-Still"][(h.day-1)%7]}).length'), 0);
+
+/* The join the Map tab runs on: a place asks with every scope it answers to
+   and gets its feasts without anyone maintaining that list by hand. */
+const gorns = 'CAL.holidaysForScopes(["gorns-rest","muur","perimeter"])';
+ok("Gorns Rest keeps its own feast — Lyestra's Fall names the town",
+   CALe(gorns + '.some(function(e){return e.holiday.name==="Lyestra\'s Fall" && e.local})'));
+ok("...its region's feast, via the Muur scope",
+   CALe(gorns + '.some(function(e){return e.holiday.name==="The All-Forge" && e.local})'));
+ok("...and its group's, via the Fracture-perimeter scope",
+   CALe(gorns + '.some(function(e){return e.holiday.name==="Isenbyr\'s Lament" && e.local})'));
+ok("pan-regional feasts reach it too, but marked as such",
+   CALe(gorns + '.some(function(e){return e.holiday.name==="The Remembrance" && !e.local})'));
+ok("local feasts lead the list", CALe(gorns + "[0].local"), true);
+eq("a place with no scopes still keeps the pan-regional ones",
+   CALe('CAL.holidaysForScopes([]).every(function(e){return e.panRegional && !e.local})'), true);
+ok("the Shade Briar's calendar is its own — the Jerbeen feasts are all its",
+   CALe('CAL.holidaysForScopes(["shade-briar"]).filter(function(e){return e.local}).length') === 14);
+ok("Isenbyr's Lament is observed on day 14 in Muur",
+   CALe('CAL.observedOn(["muur"],14).length') > 0);
+ok("...but the Red Desert only sees the pan-regional part of that day",
+   CALe('CAL.observedOn(["red-desert"],14).length') === 0);
+
+console.log("\n=== THE COMMON CALENDAR RECKONS FROM THE FRACTURE ===");
+eq("the Common calendar carries the PF era", CALe('CAL.system("common").era'), "PF");
+eq("a Common year reads as Post Fracture", CALe("CAL.yearLabel('common',2022)"), "2022 PF");
+eq("the Shade Briar counts the same year without the era",
+   CALe("CAL.yearLabel('jerbeen',2022)"), "Year 2022");
+eq("the party starts in 2022 PF", calState().year, 2022);
+
+console.log("\n=== CYRNN: THE WORLD ===");
+eq("every region the source names", CALe("CYRNN.regions.length"), 9);
+ok("every place sits in a region that exists",
+   CALe("CYRNN.places.every(function(p){return !!CYRNN.region(p.region)})"));
+ok("every place is pinned inside the map",
+   CALe("CYRNN.places.concat(CYRNN.regions).every(function(p){" +
+        "return p.x>=0&&p.x<=100&&p.y>=0&&p.y<=100})"));
+ok("no two places share an id",
+   CALe("new Set(CYRNN.places.map(function(p){return p.id})).size") === CALe("CYRNN.places.length"));
+ok("every group a place claims is a real group",
+   CALe("CYRNN.places.every(function(p){return (p.groups||[]).every(function(g){return !!CYRNN.group(g)})})"));
+eq("the three perimeter towns are the three the source names",
+   CALe('CYRNN.places.filter(function(p){return (p.groups||[]).indexOf("perimeter")>=0})' +
+        '.map(function(p){return p.id}).sort().join(",")'),
+   "gorns-rest,hacketts-watch,telrens-ridge");
+ok("the perimeter spans three different kingdoms",
+   CALe('new Set(CYRNN.places.filter(function(p){return (p.groups||[]).indexOf("perimeter")>=0})' +
+        '.map(function(p){return p.region})).size') === 3);
+ok("Gloomwood is on the map, southwest of Gorns Rest",
+   CALe('CYRNN.place("gloomwood").x') < CALe('CYRNN.place("gorns-rest").x') &&
+   CALe('CYRNN.place("gloomwood").y') > CALe('CYRNN.place("gorns-rest").y'));
+ok("the Shade Briar is a place in the world, not just a calendar",
+   CALe('!!CYRNN.place("shade-briar")'));
+
+console.log("\n=== CYRNN: THE MAP/CALENDAR JOIN ===");
+/* The whole point of the scope vocabulary: a place asks the calendar
+   what it keeps, and neither file maintains a list about the other. */
+eq("a place's scopes are itself, its region, and its groups",
+   CALe('CYRNN.scopesFor("gorns-rest").sort().join(",")'), "gorns-rest,muur,perimeter");
+ok("so Gorns Rest can find its own feasts through the calendar",
+   CALe('CAL.holidaysForScopes(CYRNN.scopesFor("gorns-rest"))' +
+        '.some(function(e){return e.holiday.name==="Lyestra\'s Fall"})'));
+ok("every scope the calendar names is something the world defines",
+   CALe('CAL.systems.jerbeen.holidays.concat(CAL.systems.common.holidays)' +
+        '.every(function(h){return h.scopes.every(function(s){' +
+        '  return s==="pan-regional"||!!CYRNN.region(s)||!!CYRNN.place(s)||!!CYRNN.group(s)})})'));
+ok("the Ghost Moors surface the devil who cursed them",
+   CALe('CYRNN.lorePinnedTo(["ghost-moors","hearthlands"]).powers' +
+        '.some(function(p){return p.id==="thraazipan"})'));
+ok("...and the people that curse created",
+   CALe('CYRNN.lorePinnedTo(["ghost-moors"]).peoples.some(function(p){return p.id==="wulven"})'));
+ok("search finds a place by its prose, not just its name",
+   CALe('CYRNN.search("wyvern").some(function(r){return r.entry.id==="silver-grove"})'));
+
+console.log("\n=== CYRNN: THE HISTORY AGREES WITH 2022 PF ===");
+eq("the timeline runs in order",
+   CALe("CYRNN.eras.filter(function(e){return e.year!=null}).map(function(e){return e.year})" +
+        ".every(function(y,i,a){return i===0||a[i-1]<=y})"), true);
+eq("the Fracture is year zero", CALe('CYRNN.eras.filter(function(e){return e.id==="fracture"})[0].year'), 0);
+eq("the war ends in 20 PF", CALe('CYRNN.eras.filter(function(e){return e.id==="gorns-triumph"})[0].year'), 20);
+eq("and the present is 2022 PF", CALe('CYRNN.eras.filter(function(e){return e.id==="now"})[0].year'), 2022);
+ok("no lore still claims the round 2000 years",
+   !/2000 years|2,000 years/.test(
+     CALe("CYRNN.regions.concat(CYRNN.places).map(function(e){return e.lore}).join(' ')") +
+     CALe("CAL.systems.common.holidays.map(function(h){return h.lore}).join(' ')")));
 
 console.log("\n=== CALENDAR TAB ===");
 click(byAct("tab", { tab: "calendar" }));
@@ -181,7 +283,9 @@ ok("month view draws a grid", !!$(".calgrid"));
 eq("seven named columns", $$(".cghead span").length, 7);
 ok("today's cell is picked out", !!$(".cgcell.today"));
 ok("the day page names the weekday", /Tunnel-Tend, Grub-Wake 1/.test(text()));
-eq("the grid marks the day the holiday falls on", $$(".cgcell .dm.hol").length, 1);
+/* Grub-Wake is days 1-28: The Emergence on 1, and day 14 carries two --
+   The Bedrock-Listen and Isenbyr's Lament -- which is one mark each. */
+eq("the grid marks every day a holiday falls on", $$(".cgcell .dm.hol").length, 3);
 click(byAct("calView", { view: "week" }));
 eq("week view lists seven days", $$(".wkday").length, 7);
 ok("week view shows both reckonings", /Grub-Wake 1/.test(text()) && /Dawnrise 1/.test(text()));
@@ -213,14 +317,14 @@ ok("the lead warning shows the day before", /In 1 day: Tribute due to the Warden
 click(byAct("advanceDay", { d: "1" }));
 ok("on the day but before the hour it is still only a warning",
    /Later today: Tribute due to the Warden/.test(remindText()));
-ok("it has not come due yet", !$('[data-act="calAck"][data-key="222:2:' + evId + '"]'));
+ok("it has not come due yet", !$('[data-act="calAck"][data-key="2022:2:' + evId + '"]'));
 click(byAct("advanceTime"));
 click(byAct("advanceTime"));
 eq("the hour arrives", calState().timeOfDay, "evening");
-ok("and the reminder fires", !!$('[data-act="calAck"][data-key="222:2:' + evId + '"]'));
+ok("and the reminder fires", !!$('[data-act="calAck"][data-key="2022:2:' + evId + '"]'));
 ok("naming the note", /Tribute due to the Warden/.test(remindText()));
-click($('[data-act="calAck"][data-key="222:2:' + evId + '"]'));
-ok("acknowledging silences it", !$('[data-act="calAck"][data-key="222:2:' + evId + '"]'));
+click($('[data-act="calAck"][data-key="2022:2:' + evId + '"]'));
+ok("acknowledging silences it", !$('[data-act="calAck"][data-key="2022:2:' + evId + '"]'));
 ok("the note itself survives being acknowledged", calState().events.length === 1);
 
 console.log("\n=== A DAY YOU SKIPPED STILL REPORTS IN ===");
@@ -251,7 +355,7 @@ click(byAct("calSetDate"));
 eq("'set the date to this day' is what actually moves the party", calState().day, 6);
 /* Leave the calendar as the rest of the suite expects to find it. */
 w.eval("mutate(function (st) { st.calendar = Object.assign(st.calendar, " +
-       "{ day: 1, year: 222, timeOfDay: 'midday', view: 'month', events: [], acked: [] }); })");
+       "{ day: 1, year: 2022, timeOfDay: 'midday', view: 'month', events: [], acked: [] }); })");
 eq("reset to day 1 for the tests that follow", calState().day, 1);
 click(byAct("tab", { tab: "combat" }));
 

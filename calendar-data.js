@@ -76,25 +76,75 @@ const JERBEEN_MONTHS = [
     lore: "Deep winter quiet. Strict caloric conservation and interior communal labor." }
 ];
 
+/* Holidays carry the region that observes them, straight from the campaign
+   sheet. Two fields, because they answer different questions: regionLabel is
+   the phrasing as written and is what gets shown, while scopes is what the
+   code joins on. A scope matches a region id, a single place id, or a group
+   tag ("perimeter" = the three towns founded to watch the Fracture), and
+   "pan-regional" means everywhere. So a place can ask "which feasts are kept
+   here?" without anyone maintaining that list by hand.
+
+   The sheet also states each holiday's weekday. It is derivable from the day
+   number, so it is not stored -- test-app.js re-derives all 36 and checks
+   them, which makes the spreadsheet a proof of the calendar math.
+   ------------------------------------------------------------ */
 const JERBEEN_HOLIDAYS = [
   { name: "The Emergence", day: 1,
-    lore: "Following the strict 5-day cycle of cultivating and rinsing subterranean sprout mixes during winter, this day marks a return to high-protein surface foraging. A communal meal restores muscle mass for the upcoming season's labor." },
+    regionLabel: "The Shade Briar",
+    scopes: ["shade-briar"],
+    lore: "Following the strict 5-day cycle of cultivating and rinsing subterranean sprout mixes during winter, this day marks a return to high-protein surface foraging in the lower brush. Burrowers harvest fresh beetle grubs and tender shoots, sharing a communal meal in the central warren to restore muscle mass for spring tunnel-boring." },
+  { name: "The Bedrock-Listen", day: 14,
+    regionLabel: "The Shade Briar",
+    scopes: ["shade-briar"],
+    lore: "A mandatory defensive audit where listeners place their ears directly against deep tunnel stone to detect seismic fracturing or clawing vibrations from the abyss. Galleries showing stress fractures or rock shifts are immediately reinforced with cured greenwood braces." },
   { name: "The High Weave", day: 42,
-    lore: "A mandatory day of communal labor commemorating the 9th Shift. Adult Jerbeens interlock new briar growth. Aligns perfectly with the Common calendar's Gladmer's Stand." },
+    regionLabel: "The Shade Briar",
+    scopes: ["shade-briar"],
+    lore: "A mandatory day of communal labor commemorating the 9th Shift when raptors breached the outer thickets. Adult Jerbeens interlock fresh thorny hawthorn runners into the canopy to bolster structural integrity against nesting predators. Aligns directly with the Common calendar's Gladmer's Stand." },
   { name: "The Proving", day: 77,
-    lore: "Maturity rite for 5-year-olds. Initiates must map the outer perimeter with absolute efficiency, carefully managing their stamina to avoid passive exhaustion while evading territorial predators." },
+    regionLabel: "The Shade Briar",
+    scopes: ["shade-briar"],
+    lore: "Maturity rite for five-year-old Jerbeens. Initiates must map the outer perimeter thickets with absolute stealth and speed, avoiding predator dens and managing stamina to evade hunting foxes; those returning before nightfall receive their first carved cord-bead." },
   { name: "The Still-Tread", day: 98,
-    lore: "Structural vibrations are monitored; movement is restricted to prevent cave-ins from heavy migration overhead." },
+    regionLabel: "The Shade Briar",
+    scopes: ["shade-briar"],
+    lore: "Observed during heavy surface herbivore migrations overhead. Structural vibrations are monitored continuously and all non-essential movement and heavy digging are forbidden for 24 hours to prevent cave-ins and avoid acoustic detection." },
+  { name: "The Root-Chill", day: 126,
+    regionLabel: "The Shade Briar",
+    scopes: ["shade-briar"],
+    lore: "Peak summer heat drives cold-blooded reptiles downward toward cool burrow roots. Jerbeen crews pump damp bog-clay through ceiling vents and burn dried bitter-leaf to smoke basking vipers out of primary living galleries." },
   { name: "The Cinder Feast", day: 168,
-    lore: "Commemorates the 4th Shift. The community inspects broad-leaf water-catchment basins and feasts on final summer yields before tightening the perimeter." },
+    regionLabel: "The Shade Briar",
+    scopes: ["shade-briar"],
+    lore: "Commemorates the 4th Shift preservation of burrow cisterns. The community inspects broad-leaf water-catchment basins, dries late-summer berries over smothered hearth embers, and trims perimeter briars before nocturnal owl populations reach peak hunting efficiency." },
+  { name: "The Horn-Brace", day: 182,
+    regionLabel: "The Shade Briar",
+    scopes: ["shade-briar"],
+    lore: "Clashing rutting stags in the brush above threaten shallow tunnel ceilings. Jerbeen digging crews drive dense hardwood reinforcement stakes into perimeter roofs and pack clay-bound gravel over high-stress support arches to absorb violent ground shocks." },
+  { name: "The Iron-Break", day: 196,
+    regionLabel: "The Shade Briar",
+    scopes: ["shade-briar"],
+    lore: "Commemorates the historical cessation of upper surface quakes caused by the war against the Black Castle. Burrow artisans re-carve worn directional glyphs into bedrock passageways and distribute an extra ladle of roasted root mash." },
   { name: "The Deep Harvest", day: 206,
-    lore: "A highly coordinated agricultural effort to extract cultivated roots before rooting boars destroy the yield." },
+    regionLabel: "The Shade Briar",
+    scopes: ["shade-briar"],
+    lore: "A highly coordinated round-the-clock agricultural effort to extract cultivated tubers and roots from outer plots before rooting boar packs destroy the yield; crops are cleaned and packed in dry sand within deep storage vaults." },
   { name: "The Barricade", day: 252,
-    lore: "The outer entrances to the Shade Briar are physically sealed with woven thorns and packed earth." },
+    regionLabel: "The Shade Briar",
+    scopes: ["shade-briar"],
+    lore: "As winter predator packs begin roving, outer entrances to the Shade Briar are physically sealed with woven thorn-faggots and packed clay; the warren enters seasonal isolation, maintaining only concealed watch-holes." },
   { name: "The Silent Vigil", day: 287,
-    lore: "A solemn 24-hour period of absolute silence memorializing the 1st Shift and avoiding acoustic detection by weasels." },
+    regionLabel: "The Shade Briar",
+    scopes: ["shade-briar"],
+    lore: "A solemn 24-hour period of absolute acoustic silence memorializing the lost warrens of the 1st Shift and evading detection by winter-stalking ermines; all forge work and speaking are suspended in favor of paw-sign communication." },
+  { name: "The Echo-Listen", day: 322,
+    regionLabel: "The Shade Briar",
+    scopes: ["shade-briar"],
+    lore: "Lookouts sit at hollowed root trumpets to listen for scavenger birds in the frozen canopy above. Jerbeen scout masters transcribe raven flocking patterns to pinpoint where wolf packs and wandering beasts are moving on the snowpack." },
   { name: "The Ceding", day: 364,
-    lore: "Administrative planning for the Spring. Once every 40 years, this date concludes the Elder Shift. The central Briar Cord is updated with a carved, dense wooden bead summarizing the era's critical structural or survival achievements." }
+    regionLabel: "The Shade Briar",
+    scopes: ["shade-briar"],
+    lore: "Administrative planning for Spring where elders balance winter stores and assign tunnel shifts. Once every 40 years on the Elder Shift, a master-carver attaches a dense ironwood bead to the Great Briar Cord summarizing four decades of communal survival." }
 ];
 
 const COMMON_MONTHS = [
@@ -127,27 +177,104 @@ const COMMON_MONTHS = [
 ];
 
 const COMMON_HOLIDAYS = [
+  { name: "Isenbyr's Lament", day: 14,
+    regionLabel: "Müür & Fracture Perimeter",
+    scopes: ["muur", "perimeter"],
+    lore: "Marks the catastrophic tearing of the Great Fracture at the dwarven settlement of Isenbyr 2,022 years ago. Dwarven citadels ring solemn low-register bells and inspect deep structural bedrock anchors, while perimeter garrisons at Hackett's Watch, Gorns Rest, and Tel'ren's Ridge hold silent roll calls for fallen settlements." },
   { name: "Gladmer's Stand", day: 42,
-    lore: "Commemorates a historic victory over monstrous incursions. Lore dictates the victory was secured through rigid cooperative party tactics and the strategic use of throwing weapons to break enemy frontlines from a distance. Celebrated with militia drills and heavily spiced foods." },
+    regionLabel: "The Hearthlands & Kurst",
+    scopes: ["hearthlands", "kurst"],
+    lore: "Commemorates a historic victory over monstrous incursions on the Gladmer floodplains through rigid cooperative militia tactics and long-range throwing spears. Celebrated with disciplined spear drills in municipal plazas followed by feasts of heavily spiced roasted mutton and peppered river-pike." },
+  { name: "Lyestra's Fall", day: 56,
+    regionLabel: "Müür & Gorns Rest",
+    scopes: ["muur", "gorns-rest"],
+    lore: "Commemorates the descent and sacrifice of the dwarven mother-goddess Lyestra in the Black Castle during the fourth year of the Demon War. Citadels extinguish all forge fires for 24 hours in cold mourning, whereas in secular Gorns Rest, smiths present polished unworked iron ingots at open-air memorial plinths." },
   { name: "The Canopy Chorus", day: 75,
-    lore: "An ancient elven tradition marking the day ancestral forests were sung into existence. Celebrants hang enchanted glass chimes. Felling timber on this day carries heavy social stigma and, in some districts, legal fines." },
+    regionLabel: "Kel'dorel",
+    scopes: ["keldorel"],
+    lore: "An ancient elven tradition centered in Salins Cove and Silver Grove marking the day ancestral forests were sung into existence. Minstrels and bards from the Emerald Palace suspend enchanted glass chimes from elder branches to harmonize with dawn breezes; felling living timber on this day carries severe legal fines." },
+  { name: "Watcher's Muster", day: 84,
+    regionLabel: "Kurst",
+    scopes: ["kurst"],
+    lore: "Marks the historical banishment of High Priest Corvaunus Hackett and the garrisoning of Hackett's Line. Magistrates across Kurst audit penal registers in Kurstenport, marching newly sentenced convicts to Hackett's Watch to work off sentences at triple speed in indentured frontline companies against Fracture fiends." },
+  { name: "The Silver Ascent", day: 106,
+    regionLabel: "Kel'dorel",
+    scopes: ["keldorel"],
+    lore: "The wood elves of Silver Grove inaugurate the summer hunting season with a mass aerial muster of the Silver Riders. Mounted handlers cast silver pollen across the 150-foot canopy of the Highwood to ward against arboreal predators and bless young wyvern clutches." },
+  { name: "The Triad Conclave", day: 132,
+    regionLabel: "The Eye of Evil",
+    scopes: ["eye-of-evil"],
+    lore: "Storms Rift commemorates the rule of its governing dragon triad—metallic, chromatic, and gem. Dragonborn mercenary companies muster in public arenas to renew corporate contracts, while arcane academies host resonance trials to test innate sorcerous lineages." },
+  { name: "The Obsidian Accord", day: 154,
+    regionLabel: "The Eye of Evil",
+    scopes: ["eye-of-evil"],
+    lore: "Commemorates the emergence of the archdemon Yamuuk at the Eye of Evil crater and his defection against Azar'och. Sangromancers of Maelstrom Keep drink consecrated spiced vitriol before obsidian shrines, while neighboring trade caravans double their outrider escorts and bypass the eastern crater road." },
+  { name: "The Opal Bout", day: 174,
+    regionLabel: "Kurst",
+    scopes: ["kurst"],
+    lore: "The Opal Conservatoire in Kurstenport hosts its annual graduation martial tourney. Elite duelists and master tacticians compete in public amphitheaters while noble houses, merchant cartels, and mercenary captains bid heavily on officer retainer commissions." },
+  { name: "Gorn's Triumph", day: 196,
+    regionLabel: "Pan-Regional & Frontier",
+    scopes: ["pan-regional", "perimeter"],
+    lore: "Celebrates the slaying of Azar'och and the apotheosis of Gorn Shattersteel at the Black Castle, ending the twenty-year Demon War. In Gorns Rest and frontier settlements, citizens shatter symbolic iron chains, hold weapon-blessing tournaments, and tap barrels of dark stout." },
   { name: "The Grand Bake", day: 210,
-    lore: "A massive, cross-cultural feasting day originating from halfling traditions. Public thoroughfares host 24-hour continuous ovens. It acts as a socio-economic reset; food is freely distributed, minimizing regional hoarding before winter." },
+    regionLabel: "The Hearthlands & Pan-Regional",
+    scopes: ["hearthlands", "pan-regional"],
+    lore: "Originating from halfling agrarian traditions in the Hearthlands, public thoroughfares host continuous 24-hour communal brick ovens. Neighborhoods freely bake and distribute breads, pastries, and hardtack, acting as a regional economic reset to eliminate food hoarding before winter." },
+  { name: "Strider's Rite", day: 231,
+    regionLabel: "Kurst",
+    scopes: ["kurst"],
+    lore: "Frost elf initiates in Korin'bel plunge into glacial melt pools under elder incantations to affirm cold-hardened vitality before taking their oaths as Strider rangers. Human lords send recruitment envoys bearing silver and high-grade steel to contract elite winter scouts." },
   { name: "The All-Forge", day: 241,
-    lore: "Marks the dwarven sealing of mountain-holds and the ignition of deep-magma forges. Surface cities honor this by simultaneously extinguishing and reigniting all public hearths. Regional infrastructural energy networks are rigorously inspected and recalibrated on this day." },
+    regionLabel: "Müür & Pan-Regional",
+    scopes: ["muur", "pan-regional"],
+    lore: "Marks the dwarven sealing of mountain citadels and the rekindling of subterranean deep-magma crucibles. Surface cities honor this by simultaneously extinguishing and reigniting public hearths from smithy coals, followed by municipal heating inspections." },
+  { name: "The Blood Crusade", day: 263,
+    regionLabel: "The Eye of Evil & Fracture",
+    scopes: ["eye-of-evil", "fracture"],
+    lore: "Maelstrom Keep dispatches its triennial capture-companies into the Fracture to hunt live fiends for sacrificial offering to Yamuuk. Surrounding farming hamlets bolt their shutters and hold livestock within inner enclosures until the black-armored crusaders return westward." },
+  { name: "The Free Charter", day: 294,
+    regionLabel: "The Hearthlands",
+    scopes: ["hearthlands"],
+    lore: "Towns along Moonlit Harbour hold open municipal elections, casting colored porcelain tokens into public urns to seat town councils free from kingdom authority. Veteran coastal militias muster at the piers, firing signal flares over the bay to deter offshore pirate syndicates." },
+  { name: "Westfall", day: 314,
+    regionLabel: "Western Sea",
+    scopes: ["western-sea"],
+    lore: "Free ports across Last Light Island throw raucous open-cask carnivals to celebrate the final rays of winter sun touching Cyrnn's westernmost cliffs. Deep within the island's interior jungles, Yuan-Ti temple-keepers conduct quiet obsidian-blade rituals in total isolation from the revelry." },
+  { name: "The Sapphire Concourse", day: 336,
+    regionLabel: "Frostlands",
+    scopes: ["frostlands"],
+    lore: "Gnomes, Goliaths, and Orcs gather at Cobalt Citadel to commemorate their unified founding. Arcane academies illuminate the city's sapphire-tipped silver spires with synced magical beacons, while guilds unveil new civic engineering mechanisms." },
+  { name: "The Absent Vigil", day: 350,
+    regionLabel: "Kurst & Pan-Regional",
+    scopes: ["kurst", "pan-regional"],
+    lore: "Human clerics and paladins of Boralius douse all altar flames and conduct silent, unguided meditation to reflect upon their god's intentional absence during the Demon War. Communities focus entirely on present worldly responsibilities, repairing municipal tools and settling neighborhood disputes without invoking divine aid." },
   { name: "The Remembrance", day: 361,
-    lore: "Convergence Day 1. A somber day dedicated to settling ledgers and honoring ancestors. All debts accumulated over the 360-day year must be cleared before sundown." },
+    regionLabel: "Pan-Regional",
+    scopes: ["pan-regional"],
+    lore: "Convergence Day 1. A somber day dedicated to settling ledgers and honoring ancestors. All debts accumulated over the 360-day year must be legally cleared or renegotiated before sundown, while memorial lanterns are placed on ancestral graves." },
   { name: "The Revelry", day: 362,
-    lore: "Convergence Day 2. A day of absolute, legally sanctioned excess. Public intoxication laws are suspended, sharply contrasting with the quiet conservation occurring simultaneously in the Shade Briar." },
+    regionLabel: "Pan-Regional",
+    scopes: ["pan-regional"],
+    lore: "Convergence Day 2. A day of absolute, legally sanctioned civic excess where public intoxication and sumptuary laws are temporarily suspended, sharply contrasting with the quiet caloric conservation occurring simultaneously in the Shade Briar." },
   { name: "The Concord", day: 363,
-    lore: "Convergence Day 3. Celebrates the historical signing of the Concordant Treaty. Treaties are formally renewed, and guild leadership structures are finalized for the new year." },
+    regionLabel: "Pan-Regional",
+    scopes: ["pan-regional"],
+    lore: "Convergence Day 3. Celebrates the historic signing of the Concordant Treaty between humans, elves, and dwarves. Treaties are formally renewed, guild leadership structures are finalized, and civic oaths are administered for the upcoming year." },
   { name: "The Dawning Eve", day: 364,
-    lore: "Convergence Day 4. A transitional day of preparation. Structures are rigorously cleaned. At midnight, synchronized bells launch the new year, directly paralleling the Jerbeen administrative Ceding." }
+    regionLabel: "Pan-Regional",
+    scopes: ["pan-regional"],
+    lore: "Convergence Day 4. A transitional day of thorough purification and sweeping of homes and municipal halls. At midnight, synchronized bells, horns, and temple carillons sound across all surface settlements to welcome the new year." }
 ];
 
+/* Both systems count the same year, because they count the same days —
+   only the naming differs. The Common calendar reckons from the Great
+   Fracture and says so out loud ("2022 PF", Post Fracture); the Shade
+   Briar keeps the count without the era, its history being told in
+   Shifts rather than in years since somebody else's disaster. */
 const CAL_SYSTEMS = {
-  jerbeen: { key: "jerbeen", label: "Jerbeen", months: JERBEEN_MONTHS, holidays: JERBEEN_HOLIDAYS },
-  common:  { key: "common",  label: "Common",  months: COMMON_MONTHS,  holidays: COMMON_HOLIDAYS }
+  jerbeen: { key: "jerbeen", label: "Jerbeen", era: "",   months: JERBEEN_MONTHS, holidays: JERBEEN_HOLIDAYS },
+  common:  { key: "common",  label: "Common",  era: "PF", months: COMMON_MONTHS,  holidays: COMMON_HOLIDAYS }
 };
 
 const CAL = {
@@ -217,6 +344,58 @@ const CAL = {
       if (diff < bestIn) { bestIn = diff; best = h; }
     });
     return best ? { holiday: best, inDays: bestIn } : null;
+  },
+
+  /* How a year reads in a given system: "2022 PF" in the Common
+     reckoning, "Year 2022" in the Jerbeen, which counts the same year
+     but does not date itself from somebody else's disaster.
+
+     This returns the whole phrase, prefix included, so callers never
+     concatenate a "Year " of their own -- that is how one screen ends
+     up saying "Year 2022 PF" and another just "2022". */
+  yearLabel(systemKey, year) {
+    const era = CAL.system(systemKey).era;
+    return era ? year + " " + era : "Year " + year;
+  },
+
+  /* ---- Who keeps which feast ---------------------------------
+     The map's side of the join. Hand it every scope a place answers to
+     -- its own id, its region, any group it belongs to -- and get back
+     the feasts kept there, in day order across both calendars.
+
+     Pan-regional holidays are included, because "what is observed here"
+     truthfully includes the ones observed everywhere, but each result
+     says which kind of match it was so the caller can group them. A
+     local feast is the interesting one and should be able to lead. */
+  holidaysForScopes(scopes) {
+    const want = {};
+    (scopes || []).forEach(function (s) { want[s] = true; });
+    const out = [];
+    Object.keys(CAL_SYSTEMS).forEach(function (k) {
+      CAL_SYSTEMS[k].holidays.forEach(function (h) {
+        const local = (h.scopes || []).some(function (s) { return want[s]; });
+        const everywhere = (h.scopes || []).indexOf("pan-regional") >= 0;
+        if (!local && !everywhere) return;
+        out.push({ system: k, label: CAL_SYSTEMS[k].label, holiday: h,
+                   local: local, panRegional: everywhere });
+      });
+    });
+    /* Local first, then by day, so a place's own feasts lead its list. */
+    out.sort(function (a, b) {
+      if (a.local !== b.local) return a.local ? -1 : 1;
+      return a.holiday.day - b.holiday.day;
+    });
+    return out;
+  },
+
+  /* Does this scope set keep the feast falling on `day`? Used to mark the
+     map when the party is somewhere that observes today. */
+  observedOn(scopes, day) {
+    return CAL.allHolidaysFor(day).filter(function (e) {
+      const sc = e.holiday.scopes || [];
+      return sc.indexOf("pan-regional") >= 0 ||
+        (scopes || []).some(function (s) { return sc.indexOf(s) >= 0; });
+    });
   },
 
   /* ---- Weeks and grids ---------------------------------------

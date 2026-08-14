@@ -1901,7 +1901,7 @@ function followersTab() {
 
     if (f.summoned) {
       out += '<div class="seqnote">Summoned ' + esc(CAL.format(S.calendar.system, f.summoned.day)) +
-        ", Year " + f.summoned.year + ". <em>" + esc(b.ends) + "</em></div>";
+        ", " + CAL.yearLabel(S.calendar.system, f.summoned.year) + ". <em>" + esc(b.ends) + "</em></div>";
     }
     out += "</div>";
   });
@@ -1951,7 +1951,7 @@ function calendarTab() {
   let out = '<div class="pnl cut"><h3>Today <span class="cnt">Day ' + cal.day +
     " of " + CAL.daysPerYear + "</span></h3>" +
     '<div class="calday">' + esc(CAL.format(sysKey, cal.day)) + "</div>" +
-    '<div class="calsub">Year ' + cal.year + " · " + esc(month.season) +
+    '<div class="calsub">' + esc(CAL.yearLabel(sysKey, cal.year)) + " · " + esc(month.season) +
       " · " + esc(CAL.timeLabel(cal.timeOfDay)) + "</div>" +
     '<div class="calalt">' + esc(other.label) + " reckoning: <b>" +
       esc(CAL.format(other.key, cal.day)) + "</b></div>";
@@ -2060,7 +2060,7 @@ function calNavRow(back, fwd, act, todayLabel) {
     '<button class="bt cutsm" data-act="' + act + '" data-d="' + fwd + '">›</button>' +
     (onToday ? '<span class="foot" style="margin:0">You are looking at the current date.</span>'
              : '<span class="calaway">Browsing ' + esc(CAL.format(S.calendar.system, cur.day)) +
-               ", Year " + cur.year + " — the party's date has not moved." +
+               ", " + CAL.yearLabel(S.calendar.system, cur.year) + " — the party's date has not moved." +
                '<button class="bt cutsm" data-act="calSetDate">Set the date to this day</button></span>') +
     "</div>";
 }
@@ -2162,7 +2162,7 @@ function calDayPanel(cur) {
     '<span class="dayptitle">' + esc(CAL.weekdayName(sysKey, cur.day)) + ", " +
       esc(CAL.format(sysKey, cur.day)) + "</span>" +
     '<span class="daypalt">' + esc(CAL.system(other).label) + ": " +
-      esc(CAL.format(other, cur.day)) + " · Year " + cur.year + "</span></div>";
+      esc(CAL.format(other, cur.day)) + " · " + esc(CAL.yearLabel(other, cur.year)) + "</span></div>";
 
   holidayEntries.forEach(function (e) {
     out += '<div class="calfeast"><div class="cfname">' + esc(e.title) +

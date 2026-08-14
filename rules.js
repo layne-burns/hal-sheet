@@ -1233,7 +1233,7 @@ const SEED = {
      that day; `lead` is how many days early to start warning.
      `acked` holds "<year>:<day>:<id>" keys for reminders already seen,
      so a note fires once and then stays quiet. */
-  calendar: { day: 1, year: 222, system: "jerbeen", timeOfDay: "morning",
+  calendar: { day: 1, year: 2022, system: "jerbeen", timeOfDay: "morning",
               view: "month", events: [], acked: [] },
 
   settings: {

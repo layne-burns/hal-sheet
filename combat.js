@@ -566,7 +566,7 @@ function sessionToMarkdown(s) {
       if (key !== lastKey) {
         lastKey = key;
         out += (out.slice(-2) === "\n\n" ? "" : "\n") + "### " +
-          (e.cal ? CAL.format(sys, e.cal.day) + ", Year " + e.cal.year : "Undated") + "\n\n";
+          (e.cal ? CAL.format(sys, e.cal.day) + ", " + CAL.yearLabel(sys, e.cal.year) : "Undated") + "\n\n";
       }
       out += "- **" + (e.cal ? CAL.timeLabel(e.cal.time) : fmtTime(e.t)) + "** — " +
         (e.kind === "flag" ? "⚠ " : "") + e.label + "\n";
