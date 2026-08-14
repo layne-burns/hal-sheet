@@ -87,6 +87,9 @@ const JERBEEN_MONTHS = [
    The sheet also states each holiday's weekday. It is derivable from the day
    number, so it is not stored -- test-app.js re-derives all 36 and checks
    them, which makes the spreadsheet a proof of the calendar math.
+
+   GENERATED from tools/cyrnn-calendar.csv by tools/gen-calendar.py.
+   Edit the sheet and re-run rather than editing the arrays below.
    ------------------------------------------------------------ */
 const JERBEEN_HOLIDAYS = [
   { name: "The Emergence", day: 1,
