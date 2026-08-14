@@ -378,15 +378,16 @@ input[type=number]{width:88px}
 /* Both: cyan on the outside, red hugged just inside it */
 .glow-both{box-shadow:inset 0 0 10px 2px rgba(0,229,255,.75),inset 0 0 34px 10px rgba(255,0,60,.5),
   inset 0 0 70px 22px rgba(255,0,60,.22);animation:pulseB 2.2s ease-in-out infinite}
-/* Inspiration: a standing reminder. Dimmer and much slower than the
-   warnings, so it reads as "you still have this" rather than "act now",
-   and never buries the red. */
-.glow-insp{box-shadow:inset 0 0 44px 5px rgba(252,238,10,.16),inset 0 0 11px 1px rgba(252,238,10,.34);
-  animation:pulseI 5.6s ease-in-out infinite}
+/* Inspiration: an unspent resource is easy to forget, so this is meant
+   to be noticed — a bright gold rim, brighter than the concentration
+   cyan, breathing fast enough to catch the eye. It still sits under the
+   red low-HP rim, which has to stay the loudest thing on screen. */
+.glow-insp{box-shadow:inset 0 0 78px 12px rgba(252,238,10,.40),inset 0 0 20px 3px rgba(252,238,10,.88);
+  animation:pulseI 2.4s ease-in-out infinite}
 @keyframes pulseC{0%,100%{opacity:.75}50%{opacity:1}}
 @keyframes pulseR{0%,100%{opacity:.7}50%{opacity:1}}
 @keyframes pulseB{0%,100%{opacity:.78}50%{opacity:1}}
-@keyframes pulseI{0%,100%{opacity:.55}50%{opacity:.9}}
+@keyframes pulseI{0%,100%{opacity:.6}50%{opacity:1}}
 @media (prefers-reduced-motion:reduce){.glow-conc,.glow-low,.glow-both,.glow-insp{animation:none}}
 
 /* ---------- COMBAT BAR ---------- */
@@ -584,11 +585,35 @@ textarea.notes{width:100%;min-height:140px;line-height:1.6;font-family:var(--f);
 <script src="combat.js"></script>
 <script src="backup.js"></script>
 <script>
+/* Ask the worker that is actually controlling this page which build it
+   is, so Settings can say so. Best-effort: no worker, or an old one that
+   predates the message handler, simply leaves the readout alone. Called
+   again whenever Settings opens, because the worker can change under a
+   page that's been open a while. */
+window.askSWVersion = function () {
+  if (!("serviceWorker" in navigator) || typeof MessageChannel !== "function") return;
+  navigator.serviceWorker.ready.then(function (reg) {
+    var w = navigator.serviceWorker.controller || reg.active;
+    if (!w) return;
+    var ch = new MessageChannel();
+    var timer = setTimeout(function () { ch.port1.close(); }, 3000);
+    ch.port1.onmessage = function (ev) {
+      clearTimeout(timer);
+      if (typeof UI !== "undefined" && ev.data && ev.data !== UI.swVersion) {
+        UI.swVersion = ev.data;
+        if (UI.modal && UI.modal.type === "settings") render();
+      }
+    };
+    w.postMessage("version", [ch.port2]);
+  }).catch(function () {});
+};
+
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", function () {
     navigator.serviceWorker.register("sw.js").catch(function (e) {
       console.warn("Service worker registration failed:", e);
     });
+    window.askSWVersion();
   });
 }
 </script>

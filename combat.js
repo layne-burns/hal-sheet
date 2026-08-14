@@ -324,6 +324,14 @@ EXT.settingsModal = function () {
       '<div class="pn">' + r[1] + " — " + (on ? "on" : "off") + "</div>" +
       '<div class="pt">' + r[2] + "</div></button>";
   });
+  /* Which build is actually running. The offline cache is the reason an
+     update can seem not to have landed, so say so plainly rather than
+     leaving you to guess. */
+  body += '<div class="seqnote">Running <b>' + esc(UI.swVersion || "checking…") + "</b>. " +
+    "The app fetches its code from the network whenever you have signal, so an update arrives " +
+    "as soon as you open it. With no signal it falls back to the copy it already has." +
+    '<div class="mrow" style="margin-top:9px"><button class="bt cutsm" data-act="forceUpdate">' +
+    "Force an update now</button></div></div>";
   body += '<div class="mfoot"><button class="bt cutsm pri" data-act="closeModal">Done</button></div>';
   return body;
 };
@@ -1067,7 +1075,13 @@ Object.assign(ACT, {
   },
 
   /* ---- Settings ---- */
-  settingsModal() { UI.modal = { type: "settings" }; render(); },
+  settingsModal() {
+    UI.modal = { type: "settings" };
+    /* Re-ask rather than trust what was true at page load — the worker
+       can be replaced under a page that has been open a while. */
+    if (typeof window.askSWVersion === "function") window.askSWVersion();
+    render();
+  },
   setting(el) {
     const k = el.dataset.key;
     mutate(function (st) { st.settings[k] = !st.settings[k]; });
@@ -1135,6 +1149,27 @@ Object.assign(ACT, {
   },
 
   /* ---- Undo ---- */
+  /* The escape hatch for when the offline copy is stubborn: throw away
+     every cache, drop the worker, and reload from the network. Nothing
+     of the sheet lives in there — the character is in localStorage. */
+  forceUpdate() {
+    UI.modal = null;
+    render();
+    UI.alert = { info: "Fetching a fresh copy…" };
+    render();
+    const done = function () { location.reload(); };
+    if (!("caches" in window)) { done(); return; }
+    caches.keys()
+      .then(function (keys) { return Promise.all(keys.map(function (k) { return caches.delete(k); })); })
+      .then(function () {
+        if (!navigator.serviceWorker) return null;
+        return navigator.serviceWorker.getRegistrations().then(function (rs) {
+          return Promise.all(rs.map(function (r) { return r.unregister(); }));
+        });
+      })
+      .then(done, done);
+  },
+
   /* Back out of the cast you just made: the slot, the action, the
      concentration and any effect all go back where they were. */
   cancelCast() {

@@ -216,22 +216,26 @@ If I send you changed files, or you edit something yourself:
 3. Drag in the new versions of the changed files.
 4. Scroll down and click **Commit changes**. Uploading a file with the same name replaces the old one.
 
-### The one gotcha: the cache version
+### How updates reach the iPad
 
-The offline system deliberately caches everything, so an updated file may not appear on your iPad — you'll keep seeing the old version.
+The app asks the network for its code every time you open it with a signal, so **an update arrives the next time you open the app**. Close it fully (swipe up from the bottom and flick it away) and open it again.
 
-To force the update through, **`sw.js` must also change**:
+If you have no signal, it opens instantly from the copy it already has, and picks the update up the next time you're online. A bad connection costs about two and a half seconds before it gives up and uses the stored copy.
+
+**Checking which version you're running:** Settings shows it — `Running hal-v22`. That's the same number in `sw.js`, so you can compare against the repository.
+
+**If it's ever stubborn:** Settings → **Force an update now** throws away the stored copy and re-downloads everything. Your character is stored separately and is not touched.
+
+Bump `CACHE_VERSION` in `sw.js` whenever you upload changed files anyway — it's what clears out the old stored copies, and it's how the version readout tells you anything useful:
 
 1. In your repository, click on **`sw.js`**.
 2. Click the **pencil icon** (Edit this file) in the top-right of the file view.
-3. Find line 7 or so:
+3. Find line 6 or so:
    ```
-   const CACHE_VERSION = "hal-v1";
+   const CACHE_VERSION = "hal-v22";
    ```
-4. Change the number: `"hal-v2"`, then `"hal-v3"` next time, and so on.
+4. Change the number: `"hal-v23"`, then `"hal-v24"` next time, and so on.
 5. Scroll down, click **Commit changes**.
-
-Then on the iPad: close the Hal app fully (swipe up from the bottom and flick it away), wait a few seconds, and open it again. You may need to open it twice — the first launch downloads the update, the second one shows it.
 
 > **Your character data survives updates.** It's stored separately from the app files. Updating the code never touches your HP, spells, or level.
 
@@ -279,7 +283,7 @@ Check you're not in Safari Private Browsing — it blocks local storage. Open Ha
 You're not in Safari. Chrome and Firefox on iPad can't do this.
 
 **Everything looks wrong after an update.**
-Bump `CACHE_VERSION` in `sw.js` as described above, then force-close and reopen the app twice.
+Settings → **Force an update now**. That clears the stored copy and re-downloads everything from GitHub. Your character survives it.
 
 **You want to start over from the original PDF values.**
 Notes tab → **Reset to Hal.pdf**. Export first if you might want your current state back.
