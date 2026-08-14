@@ -799,19 +799,26 @@ function leftRail() {
   out += "</div>";
 
   out += '<div class="pnl cut"><h3>Skills</h3>';
-  Object.keys(SKILL_NAMES).sort(function (a, b) {
-    return SKILL_NAMES[a].localeCompare(SKILL_NAMES[b]);
-  }).forEach(function (k) {
-    const sk = CALC.skill(S, k);
-    /* Every skill is listed, proficient or not — an unproficient check is
-       still a roll you make. Non-proficient rows are dimmed so the ones
-       you're actually good at still read at a glance. */
-    const dotCls = sk.expertise ? "dot exp" : (sk.proficient ? "dot" : "dot off");
-    out += '<div class="row' + (sk.proficient ? " prof" : " unprof") + '" ' +
-      (E ? 'data-act="toggleSkill" data-key="' + k + '"' : 'data-act="prov" data-prov="skill:' + k + '"') +
-      '><span><i class="' + dotCls + '"></i>' + esc(SKILL_NAMES[k]) +
-      ' <span class="sc">' + SKILL_ABILITY[k].toUpperCase() + "</span></span>" +
-      "<span>" + sign(sk.value) + "</span></div>";
+  /* Grouped by governing ability in ability order, alphabetical within each
+     group — the way you actually reach for one ("best WIS check?"). The
+     group heading carries the ability, so rows don't repeat it. */
+  ["str","dex","con","int","wis","cha"].forEach(function (ab) {
+    const keys = Object.keys(SKILL_NAMES).filter(function (k) {
+      return SKILL_ABILITY[k] === ab;
+    }).sort(function (a, b) { return SKILL_NAMES[a].localeCompare(SKILL_NAMES[b]); });
+    if (!keys.length) return;
+    out += '<div class="grp">' + ab.toUpperCase() + "</div>";
+    keys.forEach(function (k) {
+      const sk = CALC.skill(S, k);
+      /* Every skill is listed, proficient or not — an unproficient check is
+         still a roll you make. Non-proficient rows are dimmed so the ones
+         you're actually good at still read at a glance. */
+      const dotCls = sk.expertise ? "dot exp" : (sk.proficient ? "dot" : "dot off");
+      out += '<div class="row' + (sk.proficient ? " prof" : " unprof") + '" ' +
+        (E ? 'data-act="toggleSkill" data-key="' + k + '"' : 'data-act="prov" data-prov="skill:' + k + '"') +
+        '><span><i class="' + dotCls + '"></i>' + esc(SKILL_NAMES[k]) + "</span>" +
+        "<span>" + sign(sk.value) + "</span></div>";
+    });
   });
   if (!E) out += '<div class="foot">Tap Edit to change proficiencies</div>';
   out += "</div>";
