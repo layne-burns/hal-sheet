@@ -498,6 +498,44 @@ ok("each carries a full ability spread",
 eq("the owl is the owl", CALe("CR0_BEASTS.owl.ac + '/' + CR0_BEASTS.owl.hp + '/' + CR0_BEASTS.owl.speed"),
    "11/1 (1d4 - 1)/5 ft., fly 60 ft.");
 
+console.log("\n=== FAMILIAR TABLE NOTES MATCH THE STAT BLOCKS ===");
+/* The notes make checkable claims about the beasts. If a claim and the
+   scraped block ever disagree, that's a bug in the advice, not a
+   difference of opinion — so check them. */
+function beast(k, expr) { return CALe("CR0_BEASTS." + k + "." + expr); }
+ok("every recommended form is a real CR 0 beast",
+   CALe("FAMILIAR_GUIDE.categories.every(function(c){return c.picks.every(function(p){return !!CR0_BEASTS[p.form]})})"));
+eq("three categories, three picks each",
+   CALe("FAMILIAR_GUIDE.categories.map(function(c){return c.picks.length}).join(',')"), "3,3,3");
+eq("the owl really is the only Flyby",
+   CALe("Object.keys(CR0_BEASTS).filter(function(k){return (CR0_BEASTS[k].traits||[]).some(function(t){return /Flyby/.test(t.name)})}).join(',')"),
+   "owl");
+eq("the weasel really is tied for top Stealth",
+   CALe("Math.max.apply(null, Object.keys(CR0_BEASTS).map(function(k){var m=(CR0_BEASTS[k].skills||'').match(/Stealth \\+(\\d+)/); return m?+m[1]:0}))"),
+   5);
+ok("...and it is one of the ties", /Stealth \+5/.test(beast("weasel", "skills")));
+ok("the cat's +4 is what the note says", /Stealth \+4/.test(beast("cat", "skills")));
+ok("the badger burrows", /burrow/.test(beast("badger", "speed")));
+eq("three CR 0 beasts burrow, exactly as the note says",
+   CALe("Object.keys(CR0_BEASTS).filter(function(k){return /burrow/i.test(CR0_BEASTS[k].speed)}).sort().join(',')"),
+   "badger,fox,hare");
+ok("...and the note is right that the fox out-statlines it",
+   /Stealth \+5/.test(beast("fox", "skills")) && /darkvision 60/i.test(beast("fox", "senses")) &&
+   parseInt(beast("fox", "speed"), 10) > parseInt(beast("badger", "speed"), 10));
+ok("the bat has the blindsight the note sells it on", /Blindsight 60/i.test(beast("bat", "senses")));
+ok("the raven has Mimicry",
+   CALe("CR0_BEASTS.raven.traits.some(function(t){return t.name==='Mimicry'})"));
+ok("the spider has Spider Climb",
+   CALe("CR0_BEASTS.spider.traits.some(function(t){return t.name==='Spider Climb'})"));
+ok("the octopus really has Ink Cloud",
+   CALe("CR0_BEASTS.octopus.actions.some(function(a){return /Ink Cloud/.test(a.name)})"));
+ok("...and the block keeps the underwater caveat the note points at",
+   CALe("CR0_BEASTS.octopus.actions.filter(function(a){return /Ink Cloud/.test(a.name)})[0].text").indexOf("underwater") >= 0);
+ok("the baboon is big enough to have hands and can climb",
+   beast("baboon", "size") === "Small" && /climb/.test(beast("baboon", "speed")));
+eq("Skills are captured now, not dropped",
+   CALe("Object.keys(CR0_BEASTS).filter(function(k){return CR0_BEASTS[k].skills}).length > 10"), true);
+
 console.log("\n=== THE FAMILIAR ===");
 click(byAct("tab", { tab: "spells" }));
 click(byAct("use", { kind: "spell", id: "findFamiliar" }));
@@ -514,9 +552,15 @@ ok("...and doesn't re-render the dropdown out from under you", $("#summon-form")
 /* A select is as wide as its widest option, so stat lines in the option
    text made the control 700px and pushed the modal sideways. Names only;
    the stats for the selected one are previewed underneath. */
-eq("options are bare names", $$("#summon-form option")[0].textContent, "Almiraj");
+eq("options are bare names", $$("#summon-form option")[0].textContent, "Owl");
 ok("no option carries a stat line",
    $$("#summon-form option").every(function (o) { return o.textContent.length < 24; }));
+/* Grouped by role, so the useful nine are reachable without hunting
+   through 35 — and the rest are still all there. */
+eq("the list is grouped", $$("#summon-form optgroup").length, 4);
+eq("the recommended nine come first",
+   $$("#summon-form optgroup")[0].label, "Aerial scouts & harassers");
+eq("and every beast is still offered", $$("#summon-form option").length, 35);
 ok("the selected beast's stats show below instead", /Passive Perception/.test(text()));
 ok("no free-text form — it must be a real Beast", !$("#summon-custom"));
 ok("a ritual option is offered", /Ritual — no slot/.test(text()));

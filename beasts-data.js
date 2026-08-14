@@ -21,6 +21,7 @@ const CR0_BEASTS = {
     "ac": "13",
     "hp": "3 (1d6)",
     "speed": "50 ft.",
+    "skills": "Perception +4, Stealth +5",
     "senses": "darkvision 30 ft., passive Perception 14",
     "languages": "—",
     "cr": "0 (0 or 10 XP)",
@@ -241,6 +242,7 @@ const CR0_BEASTS = {
     "ac": "12",
     "hp": "2 (1d4)",
     "speed": "40 ft., climb 30 ft.",
+    "skills": "Perception +3, Stealth +4",
     "senses": "Passive Perception 13",
     "languages": "—",
     "cr": "0 (10 XP)",
@@ -294,6 +296,7 @@ const CR0_BEASTS = {
     "ac": "11 (Natural Armor)",
     "hp": "2 (1d4)",
     "speed": "20 ft., swim 20 ft.",
+    "skills": "Stealth +2",
     "senses": "Blindsight 30 ft., Passive Perception 9",
     "languages": "—",
     "cr": "0 (10 XP)",
@@ -463,6 +466,7 @@ const CR0_BEASTS = {
     "ac": "12",
     "hp": "3 (1d6)",
     "speed": "10 ft., fly 60 ft.",
+    "skills": "Perception +4",
     "senses": "Passive Perception 14",
     "languages": "—",
     "cr": "0 (10 XP)",
@@ -516,6 +520,7 @@ const CR0_BEASTS = {
     "ac": "13",
     "hp": "2 (1d4)",
     "speed": "30 ft., burrow 5 ft.",
+    "skills": "Perception +3, Stealth +5",
     "senses": "darkvision 60 ft., passive Perception 13",
     "languages": "-",
     "cr": "0 (10 XP)",
@@ -569,6 +574,7 @@ const CR0_BEASTS = {
     "ac": "11",
     "hp": "1 (1d4 - 1)",
     "speed": "20 ft., swim 20 ft.",
+    "skills": "Perception +1, Stealth +3",
     "senses": "Darkvision 30 ft., Passive Perception 11",
     "languages": "—",
     "cr": "0 (10 XP)",
@@ -770,6 +776,7 @@ const CR0_BEASTS = {
     "ac": "13",
     "hp": "1 (1d4 - 1)",
     "speed": "20 ft., burrow 5 ft.",
+    "skills": "Perception +2, Stealth +5",
     "senses": "passive Perception 12",
     "languages": "-",
     "cr": "0 (0 XP)",
@@ -817,6 +824,7 @@ const CR0_BEASTS = {
     "ac": "13",
     "hp": "1 (1d4 - 1)",
     "speed": "10 ft., fly 60 ft.",
+    "skills": "Perception +4",
     "senses": "Passive Perception 14",
     "languages": "—",
     "cr": "0 (10 XP)",
@@ -870,6 +878,7 @@ const CR0_BEASTS = {
     "ac": "11",
     "hp": "5 (1d8 + 1)",
     "speed": "50 ft.",
+    "skills": "Perception +3",
     "senses": "Passive Perception 13",
     "languages": "—",
     "cr": "0 (10 XP)",
@@ -1019,7 +1028,11 @@ const CR0_BEASTS = {
       },
       {
         "name": "Tail",
-        "text": "Melee Weapon Attack: +4 to hit, reach 5 ft., one target. Hit: 4 (1d4 + 2) bludgeoning damage. Description The tasty and tenacious knucklehead trout can't easily be caught in nets. Moreover, using a line to reel in such a strong fish is a significant undertaking. Incautious fishers who get pulled into freezing water can quickly die, particularly if they're weighed down by heavy furs and cloaks. A male knucklehead trout can weigh 70 pounds or more. The females tend to be smaller, weighing about 50 pounds. Both are prized for their ivory-like bones."
+        "text": "Melee Weapon Attack: +4 to hit, reach 5 ft., one target. Hit: 4 (1d4 + 2) bludgeoning damage. Description The tasty and tenacious knucklehead trout can't easily be caught in nets. Moreover, using a line to reel in such a strong fish is a significant undertaking. Incautious fishers who get pulled into freezing water can quickly die, particularly if they're weighed down by heavy furs and cloaks."
+      },
+      {
+        "name": "A male knucklehead trout can weigh 70 pounds or more",
+        "text": "The females tend to be smaller, weighing about 50 pounds. Both are prized for their ivory-like bones."
       }
     ],
     "slug": "creatures:knucklehead-trout"
@@ -1033,6 +1046,7 @@ const CR0_BEASTS = {
     "ac": "12",
     "hp": "3 (1d6)",
     "speed": "40 ft.",
+    "skills": "Perception +3",
     "senses": "Passive Perception 13",
     "languages": "—",
     "cr": "0 (10 XP)",
@@ -1137,6 +1151,7 @@ const CR0_BEASTS = {
     "ac": "12",
     "hp": "3 (1d6)",
     "speed": "5 ft., swim 30 ft.",
+    "skills": "Perception +2, Stealth +4",
     "senses": "Darkvision 30 ft., Passive Perception 12",
     "languages": "—",
     "cr": "0 (10 XP)",
@@ -1184,7 +1199,11 @@ const CR0_BEASTS = {
     "actions": [
       {
         "name": "Tentacles",
-        "text": "Melee Weapon Attack: +4 to hit, reach 5 ft., one target. Hit: 1 bludgeoning damage, and the target is grappled (escape DC 10). Until this grapple ends, the octopus can't use its tentacles on another target. Ink Cloud (Recharges after a Short or Long Rest). A 5-foot-radius cloud of ink extends all around the octopus if it is underwater. The area is heavily obscured for 1 minute, although a significant current can disperse the ink. After releasing the ink, the octopus can use the Dash action as a bonus action."
+        "text": "Melee Weapon Attack: +4 to hit, reach 5 ft., one target. Hit: 1 bludgeoning damage, and the target is grappled (escape DC 10). Until this grapple ends, the octopus can't use its tentacles on another target."
+      },
+      {
+        "name": "Ink Cloud (Recharges after a Short or Long Rest)",
+        "text": "A 5-foot-radius cloud of ink extends all around the octopus if it is underwater. The area is heavily obscured for 1 minute, although a significant current can disperse the ink. After releasing the ink, the octopus can use the Dash action as a bonus action."
       }
     ],
     "slug": "creatures:octopus"
@@ -1198,6 +1217,7 @@ const CR0_BEASTS = {
     "ac": "12",
     "hp": "2 (1d4)",
     "speed": "400 ft., climb 200 ft.",
+    "skills": "Perception +3, Stealth +4",
     "senses": "Passive Perception 13",
     "languages": "—",
     "cr": "0 (10 XP)",
@@ -1259,6 +1279,7 @@ const CR0_BEASTS = {
     "ac": "11",
     "hp": "1 (1d4 - 1)",
     "speed": "5 ft., fly 60 ft.",
+    "skills": "Perception +3, Stealth +3",
     "senses": "Darkvision 120 ft., Passive Perception 13",
     "languages": "—",
     "cr": "0 (10 XP)",
@@ -1400,7 +1421,11 @@ const CR0_BEASTS = {
     "actions": [
       {
         "name": "Bite",
-        "text": "Melee Weapon Attack: +5 to hit, reach 5 ft., one target. Hit: 1 piercing damage. Description A quipper is a carnivorous fish with sharp teeth. Quippers can adapt to any aquatic environment, including cold subterranean lakes. They frequently gather in swarms; the statistics for a swarm of quippers appear later in this appendix."
+        "text": "Melee Weapon Attack: +5 to hit, reach 5 ft., one target. Hit: 1 piercing damage. Description"
+      },
+      {
+        "name": "A quipper is a carnivorous fish with sharp teeth",
+        "text": "Quippers can adapt to any aquatic environment, including cold subterranean lakes. They frequently gather in swarms; the statistics for a swarm of quippers appear later in this appendix."
       }
     ],
     "slug": "creatures:quipper"
@@ -1467,6 +1492,7 @@ const CR0_BEASTS = {
     "ac": "12",
     "hp": "1 (1d4 - 1)",
     "speed": "10 ft., fly 50 ft.",
+    "skills": "Perception +3",
     "senses": "Passive Perception 13",
     "languages": "—",
     "cr": "0 (10 XP)",
@@ -1661,6 +1687,7 @@ const CR0_BEASTS = {
     "ac": "12",
     "hp": "1 (1d4 - 1)",
     "speed": "20 ft., climb 20 ft.",
+    "skills": "Stealth +4",
     "senses": "Darkvision 30 ft., Passive Perception 10",
     "languages": "—",
     "cr": "0 (10 XP)",
@@ -1722,6 +1749,7 @@ const CR0_BEASTS = {
     "ac": "12",
     "hp": "5 (2d4)",
     "speed": "40 ft., climb 30 ft., fly 40 ft.",
+    "skills": "Perception +5, Stealth +4",
     "cr": "0 (10 XP)",
     "source": "Storm King's Thunder",
     "abilities": {
@@ -1781,6 +1809,7 @@ const CR0_BEASTS = {
     "ac": "10",
     "hp": "5 (1d8 + 1)",
     "speed": "10 ft., fly 50 ft.",
+    "skills": "Perception +3",
     "senses": "Passive Perception 13",
     "languages": "—",
     "cr": "0 (10 XP)",
@@ -1838,6 +1867,7 @@ const CR0_BEASTS = {
     "ac": "13",
     "hp": "1 (1d4 - 1)",
     "speed": "30 ft.",
+    "skills": "Perception +3, Stealth +5",
     "senses": "Passive Perception 13",
     "languages": "—",
     "cr": "0 (10 XP)",

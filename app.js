@@ -1852,6 +1852,7 @@ function followersTab() {
       "</span></div>" +
       (derived ? '<div class="sbrow"><span>Proficiency Bonus</span><b>' + sign(b.pb) +
         '</b><span class="sbwhy">equals yours</span></div>' : "") +
+      (b.skills ? '<div class="sbrow"><span>Skills</span><b>' + esc(b.skills) + "</b></div>" : "") +
       '<div class="sbrow"><span>Senses</span><b>' +
       esc(derived ? "Passive Perception " + b.passivePerception : b.senses) + "</b></div>" +
       '<div class="sbrow"><span>Languages</span><b>' + esc(b.languages) + "</b></div>" +
@@ -2464,17 +2465,30 @@ function summonModalHTML() {
       return '<option value="' + esc(o) + '"' + (o === p.form ? " selected" : "") + ">" + esc(o) + "</option>";
     }).join("");
   } else {
-    /* Names only. A select sizes itself to its widest option, so putting
-       each beast's stat line in here made the control 700px wide and
-       pushed the modal into horizontal scroll on a phone. The stats for
-       whichever one is selected are previewed directly below. */
-    body += Object.keys(CR0_BEASTS).sort(function (a, b) {
-      return CR0_BEASTS[a].name.localeCompare(CR0_BEASTS[b].name);
-    }).map(function (k) {
-      const x = CR0_BEASTS[k];
+    /* Grouped by what you'd want one FOR, with the rest below. Native
+       optgroups cost no height in an already-tall modal and the iOS
+       picker renders them as section headings, which is exactly the
+       filtering you want without another control to tap.
+
+       Names only in the labels: a select sizes itself to its widest
+       option, and stat lines in here made the control 700px wide. */
+    const opt = function (k) {
       return '<option value="' + esc(k) + '"' + (k === p.form ? " selected" : "") + ">" +
-        esc(x.name) + "</option>";
-    }).join("");
+        esc(CR0_BEASTS[k].name) + "</option>";
+    };
+    const recommended = {};
+    FAMILIAR_GUIDE.categories.forEach(function (c) {
+      body += '<optgroup label="' + esc(c.name) + '">';
+      c.picks.forEach(function (pick) {
+        if (!CR0_BEASTS[pick.form]) return;
+        recommended[pick.form] = true;
+        body += opt(pick.form);
+      });
+      body += "</optgroup>";
+    });
+    const rest = Object.keys(CR0_BEASTS).filter(function (k) { return !recommended[k]; })
+      .sort(function (a, b) { return CR0_BEASTS[a].name.localeCompare(CR0_BEASTS[b].name); });
+    body += '<optgroup label="Every other Beast of CR 0">' + rest.map(opt).join("") + "</optgroup>";
   }
   body += "</select>";
   if (steed) {
@@ -2485,8 +2499,17 @@ function summonModalHTML() {
     'placeholder="Name it" value="' + esc(p.name || "") + '"></div>';
   body += '<div class="foot" style="margin:0 0 12px">' +
     (steed ? "Anything you type in the middle wins over the list."
-           : "All " + Object.keys(CR0_BEASTS).length + " Beasts of CR 0 with a published stat block.") +
+           : "All " + Object.keys(CR0_BEASTS).length + " Beasts of CR 0 with a published stat " +
+             "block, the useful ones grouped by what you'd want one for.") +
     "</div>";
+
+  /* The note for whatever is selected right now — costs nothing when the
+     pick has no note, and never adds a control of its own. */
+  if (!steed && preview && preview.guide) {
+    body += '<div class="advice"><span class="advk">' + esc(preview.guide.category) +
+      ' <span class="bdg">' + esc(FAMILIAR_GUIDE.label) + "</span></span>" +
+      '<span class="advt">' + esc(preview.guide.why) + "</span></div>";
+  }
 
   /* 2 — creature type */
   body += '<div class="sbk">Creature type' + (steed ? " — this one changes the stat block" : "") + "</div>";
@@ -2501,13 +2524,19 @@ function summonModalHTML() {
         '<div class="pt">' + esc(ty.ba.text) + "</div></button>";
     });
   } else {
+    const adv = FAMILIAR_GUIDE.typeAdvice;
     body += '<div class="mrow">' + Object.keys(FAMILIAR_TYPES).map(function (k) {
       return '<button class="bt cutsm' + (p.creatureType === k ? " pri" : "") +
-        '" data-act="summonType" data-key="' + k + '">' + esc(FAMILIAR_TYPES[k].name) + "</button>";
+        '" data-act="summonType" data-key="' + k + '">' + esc(FAMILIAR_TYPES[k].name) +
+        (k === adv.pick ? " ★" : "") + "</button>";
     }).join("") + "</div>" +
-    '<div class="foot" style="margin:0 0 12px">It is a ' +
+    '<div class="foot" style="margin:0 0 8px">It is a ' +
       esc(FAMILIAR_TYPES[p.creatureType].name) + " instead of a Beast — same numbers either way, " +
-      "but it counts as that type for anything that cares.</div>";
+      "but it counts as that type for anything that cares.</div>" +
+    '<div class="advice"><span class="advk">Why ' + esc(FAMILIAR_TYPES[adv.pick].name) +
+      ' <span class="bdg">' + esc(FAMILIAR_GUIDE.label) + "</span></span>" +
+      '<span class="advt">' + esc(adv.text) +
+      '<em class="advfix">' + esc(adv.correction) + "</em></span></div>";
   }
 
   /* 3 — what you spend */

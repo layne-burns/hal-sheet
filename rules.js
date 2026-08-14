@@ -499,6 +499,71 @@ const FOLLOWER_SOURCES = {
   }
 };
 
+/* ------------------------------------------------------------
+   Which familiar to pick, and why. Table notes rather than rules —
+   badged as such in the UI so it never reads like something out of the
+   book. Every stat quoted here is checked against the scraped block by
+   the tests, so the advice can't quietly drift from the numbers.
+   ------------------------------------------------------------ */
+const FAMILIAR_GUIDE = {
+  label: "Table notes",
+  typeAdvice: {
+    pick: "celestial",
+    text: "All three are equally exposed to the things that name creature types outright — " +
+          "Protection from Evil and Good, Magic Circle — so the tiebreaker is what your own side " +
+          "throws around. Effects that single out Fiends are common (Divine Smite's extra damage, " +
+          "an ally's Advantage on saves forced by a Fiend); effects that single out Celestials are " +
+          "rare. Celestial is the quietest choice.",
+    /* The usual argument for this is a 2014 one and worth heading off. */
+    correction: "Some guidance says a Paladin's Channel Divinity turns Fey and Fiends. That was " +
+                "2014. In 2024 the Ancients' Channel Divinity is Nature's Wrath (a Strength save " +
+                "for Restrained, any creature) and Devotion's is Sacred Weapon — no Paladin " +
+                "turning survives, so nothing in Hal's own kit would rout his familiar."
+  },
+  categories: [
+    { key:"aerial", name:"Aerial scouts & harassers",
+      picks: [
+        { form:"owl",
+          why:"The best action economy in a fight. Flyby lets it move into a hostile creature's " +
+              "reach, take the Help action or deliver a touch spell, and leave again without " +
+              "provoking an Opportunity Attack." },
+        { form:"bat",
+          why:"Sharing its senses costs a Bonus Action, so this hands you 60 ft of Blindsight for " +
+              "your Action — targeting through magical darkness, Fog Cloud or invisibility." },
+        { form:"raven",
+          why:"Mimicry copies simple sounds and voices: distract a patrol, trip something " +
+              "listening, or pass a message along without it looking like magic." }
+      ] },
+    { key:"stealth", name:"Infiltration & stealth",
+      picks: [
+        { form:"spider",
+          why:"Gets into places nothing else does — ceilings, under doors, through a keyhole — and " +
+              "nobody in a dungeon looks twice at a spider." },
+        { form:"weasel",
+          why:"Stealth +5, tied for the best on the list — the fox, hare and almiraj match it if " +
+              "you want a different look. The pick when beating a passive Perception is the " +
+              "whole problem." },
+        { form:"cat",
+          why:"The town one. Slightly less Stealth than the weasel, but a cat on a wall or in a " +
+              "market draws nothing at all when the roll goes badly." }
+      ] },
+    { key:"utility", name:"Utility & environment",
+      picks: [
+        { form:"baboon",
+          why:"Hands. The only one on the list that can work a lever, open a door, or set " +
+              "something down where you need it." },
+        { form:"badger",
+          why:"A burrow speed is the point — through loose earth past a blockade, or underground " +
+              "mid-fight for full cover so it survives to keep being useful. Three CR 0 beasts " +
+              "burrow, and on paper the fox is the best of them (Stealth +5, darkvision 60 ft, " +
+              "half again the speed), so take the badger for the look rather than the numbers." },
+        { form:"octopus",
+          why:"The underwater one. Ink Cloud is an action rather than an attack, so a familiar " +
+              "may use it — note the block: it only works while the octopus is underwater." }
+      ] }
+  ]
+};
+
 /* The three creature types a familiar can be. Unlike the steed's, this
    choice changes no numbers — it changes what the familiar IS, which
    matters to anything that keys off creature type. */
@@ -777,11 +842,22 @@ const CALC = {
       speed: beast.speed,
       canFly: /fly/i.test(beast.speed),
       abilities: abilities,
+      skills: beast.skills || "",
       senses: beast.senses || "—",
       languages: beast.languages || "—",
       cr: beast.cr,
       formLabel: beast.name,
       cardLine: beast.speed + (beast.senses ? " · " + beast.senses : ""),
+      /* The table note for this form, if it has one. */
+      guide: (function () {
+        let hit = null;
+        FAMILIAR_GUIDE.categories.forEach(function (c) {
+          c.picks.forEach(function (p) {
+            if (p.form === f.form) hit = { category: c.name, why: p.why };
+          });
+        });
+        return hit;
+      })(),
       traits: beast.traits || [],
       actions: beast.actions || [],
       bonusActions: beast.bonusActions || [],
@@ -1188,7 +1264,7 @@ const SEED = {
 if (typeof module !== "undefined" && module.exports) {
   module.exports = { WIKIA_BASE_URL, wiki, TAGS, MASTERIES, WEAPONS, ARMOR, PALADIN_TABLE,
     ASI_LEVELS, OATH_SPELLS, SPELLS, PALADIN_SPELL_LIST, FEATS, FEATURES, CONDITIONS,
-    STEED_FORMS, STEED_TYPES, STEED_ABILITIES, FOLLOWER_SOURCES, FAMILIAR_TYPES,
+    STEED_FORMS, STEED_TYPES, STEED_ABILITIES, FOLLOWER_SOURCES, FAMILIAR_TYPES, FAMILIAR_GUIDE,
     COMBAT_RULES, SIZE_ORDER,
     SKILL_ABILITY, SKILL_NAMES, ABILITY_NAMES, CALC, SEED };
 }

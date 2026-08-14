@@ -246,6 +246,16 @@ input[type=number]{width:88px}
 .modal .pick.a-cel,.modal .pick.a-fey,.modal .pick.a-fnd{border-left:3px solid var(--acc)}
 .modal .pick .pm b{color:var(--acc,var(--cyan));font-weight:400}
 
+/* Table notes — advice, not rules. Cyan is the app's voice for "the
+   sheet is telling you something", and the badge keeps it honest. */
+.advice{display:flex;flex-direction:column;gap:3px;border-left:2px solid var(--line2);
+  padding:7px 0 7px 10px;margin:0 0 12px}
+.advk{font-family:var(--m);font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.advt{font-size:17px;color:var(--txt);line-height:1.5}
+.advfix{display:block;margin-top:6px;font-style:normal;font-size:15.5px;color:var(--dimmer);
+  line-height:1.5}
+.modal .advice{border-left-color:var(--cyan)}
+
 /* Rules quoted from the source, one lookup per line. */
 .ruleline{display:flex;gap:12px;padding:6px 0;border-bottom:1px solid #1A242D;align-items:baseline}
 .ruleline:last-child{border-bottom:none}
