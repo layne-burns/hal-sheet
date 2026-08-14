@@ -16,6 +16,7 @@ const ASSETS = [
   "./combat.js",
   "./backup.js",
   "./manifest.json",
+  "./map-cyrnn.jpg",
   "./icon-180.png",
   "./icon-192.png",
   "./icon-512.png",
