@@ -1262,7 +1262,7 @@ function leftRail() {
   /* Topmost header doubles as the collapse control for the whole stats
      column, mirroring how the Resources rail collapses on the right. */
   let out = '<div class="pnl cut"><h3 class="collapse" data-act="toggleLeftRail">' +
-    '<span>Abilities</span><span class="chev">‹‹ Hide</span></h3>';
+    '<span>Abilities</span><span class="chev">Hide</span></h3>';
   ["str","dex","con","int","wis","cha"].forEach(function (k) {
     const m = CALC.mod(S.abilities[k]);
     if (E) {
@@ -1460,7 +1460,7 @@ function spellsTab() {
     '<span class="lbl" style="margin-left:12px">Ability</span><b class="mono">Charisma</b>' +
     '<span class="lbl" style="margin-left:12px">Focus</span><b class="mono">Holy Symbol</b></div>' +
     '<div class="ph2" style="margin-top:10px">Filter' +
-    '<button class="bt cutsm" style="margin-left:8px" data-act="expand" data-id="filterCollapsed">' +
+    '<button class="pcol" style="margin-left:8px" data-act="expand" data-id="filterCollapsed">' +
     (filterCollapsed ? "Show" : "Hide") + "</button></div>" +
     (filterCollapsed ? "" : tagFilterBar()) + "</div>";
 
@@ -2207,7 +2207,7 @@ function calDayPanel(cur) {
 function filterPanel() {
   const collapsed = !!UI.expanded.filterCollapsed;
   let out = '<div class="pnl cut"><h3>Filter' +
-    '<button class="bt cutsm" data-act="expand" data-id="filterCollapsed">' +
+    '<button class="pcol" data-act="expand" data-id="filterCollapsed">' +
     (collapsed ? "Show" : "Hide") + "</button></h3>";
   if (!collapsed) out += tagFilterBar();
   return out + "</div>";
@@ -2241,7 +2241,7 @@ function resourceRail() {
   let out = followerRail();
   /* The whole header is the collapse control — a big, obvious tap target. */
   out += '<div class="pnl cut"><h3 class="collapse" data-act="toggleRail">' +
-    '<span>Resources</span><span class="chev">Hide ‹‹</span></h3>';
+    '<span>Resources</span><span class="chev">Hide</span></h3>';
 
   out += '<div class="res"><div class="rh"><span class="lbl">Lay on hands</span>' +
     '<span class="rv" data-act="prov" data-prov="loh">' + S.resources.layOnHands +
@@ -2464,12 +2464,16 @@ function summonModalHTML() {
       return '<option value="' + esc(o) + '"' + (o === p.form ? " selected" : "") + ">" + esc(o) + "</option>";
     }).join("");
   } else {
+    /* Names only. A select sizes itself to its widest option, so putting
+       each beast's stat line in here made the control 700px wide and
+       pushed the modal into horizontal scroll on a phone. The stats for
+       whichever one is selected are previewed directly below. */
     body += Object.keys(CR0_BEASTS).sort(function (a, b) {
       return CR0_BEASTS[a].name.localeCompare(CR0_BEASTS[b].name);
     }).map(function (k) {
       const x = CR0_BEASTS[k];
       return '<option value="' + esc(k) + '"' + (k === p.form ? " selected" : "") + ">" +
-        esc(x.name) + " — " + esc(x.size) + ", AC " + esc(x.ac) + ", " + esc(x.hp) + " HP</option>";
+        esc(x.name) + "</option>";
     }).join("");
   }
   body += "</select>";
@@ -2535,6 +2539,7 @@ function summonModalHTML() {
       '<div class="sbrow"><span>Armor Class</span><b>' + esc(preview.acNote || preview.ac) + "</b></div>" +
       '<div class="sbrow"><span>Hit Points</span><b>' + esc(preview.hpNote || String(preview.maxHP)) + "</b></div>" +
       '<div class="sbrow"><span>Speed</span><b>' + esc(preview.speed) + "</b></div>" +
+      (steed ? "" : '<div class="sbrow"><span>Size</span><b>' + esc(preview.size) + "</b></div>") +
       '<div class="sbrow"><span>' + (steed ? "Otherworldly Slam" : "Senses") + "</span><b>" +
         esc(steed ? sign(preview.slam.bonus) + " · " + preview.slam.damage + " " + preview.slam.damageType
                   : preview.senses) + "</b></div>" +

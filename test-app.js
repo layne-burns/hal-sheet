@@ -511,6 +511,13 @@ const tap = new w.MouseEvent("click", { bubbles: true, cancelable: true });
 selNode.dispatchEvent(tap);
 ok("tapping the dropdown is not swallowed", !tap.defaultPrevented);
 ok("...and doesn't re-render the dropdown out from under you", $("#summon-form") === selNode);
+/* A select is as wide as its widest option, so stat lines in the option
+   text made the control 700px and pushed the modal sideways. Names only;
+   the stats for the selected one are previewed underneath. */
+eq("options are bare names", $$("#summon-form option")[0].textContent, "Almiraj");
+ok("no option carries a stat line",
+   $$("#summon-form option").every(function (o) { return o.textContent.length < 24; }));
+ok("the selected beast's stats show below instead", /Passive Perception/.test(text()));
 ok("no free-text form — it must be a real Beast", !$("#summon-custom"));
 ok("a ritual option is offered", /Ritual — no slot/.test(text()));
 const slot1Before = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).resources.slots["1"].used;

@@ -159,7 +159,9 @@ function panelHead(title, count, key) {
     collapsed: collapsed,
     html: '<div class="pnl cut"><h3>' + title +
       (count == null ? "" : ' <span class="cnt">' + count + "</span>") +
-      '<button class="bt cutsm" data-act="expand" data-id="' + key + '">' +
+      /* Same chip as every other panel's fold control — this is the
+         same action, so it shouldn't look like a different one. */
+      '<button class="pcol" data-act="expand" data-id="' + key + '">' +
       (collapsed ? "Show" : "Hide") + "</button></h3>"
   };
 }
