@@ -649,6 +649,48 @@ const ACT = {
     mutate(function (st) { st.calendar.system = k; });
   },
 
+  /* Setting the date outright, rather than stepping to it. Each of these
+     leaves the other parts of the date alone — changing the year does
+     not move the day, and picking a month keeps the day-of-month where
+     it can, so correcting one field never quietly rewrites another.
+
+     The browsing cursor is released afterwards: having just set the
+     party's date, what you want to look at is that date. */
+  calSetYear(el) {
+    const y = parseInt(el.value, 10);
+    if (isNaN(y)) return;
+    mutate(function (st) { st.calendar.year = y; });
+    UI.cal.day = null; UI.cal.year = null;
+    render();
+  },
+
+  calJumpMonth(el) {
+    const i = parseInt(el.value, 10);
+    mutate(function (st) {
+      const mo = CAL.system(st.calendar.system).months[i];
+      if (!mo) return;
+      /* Jerbeen months are 28 days and Common ones 30, so the day you
+         were on may not exist in the month you picked. Land on the last
+         day of it rather than overshooting into the next. */
+      const dom = CAL.dayOfMonth(st.calendar.system, st.calendar.day);
+      st.calendar.day = mo.start + Math.min(dom, mo.end - mo.start + 1) - 1;
+    });
+    UI.cal.day = null; UI.cal.year = null;
+    render();
+  },
+
+  calSetDayOfMonth(el) {
+    const d = parseInt(el.value, 10);
+    if (isNaN(d)) return;
+    mutate(function (st) {
+      const mo = CAL.monthFor(st.calendar.system, st.calendar.day);
+      const len = mo.end - mo.start + 1;
+      st.calendar.day = mo.start + Math.max(1, Math.min(len, d)) - 1;
+    });
+    UI.cal.day = null; UI.cal.year = null;
+    render();
+  },
+
   /* ---- Calendar browsing (the cursor, not the date) ---- */
   calView(el) {
     const v = el.dataset.view;
@@ -2608,7 +2650,26 @@ function calendarTab() {
     '<div class="mrow"><span class="lbl">Day</span>' +
     '<button class="bt cutsm" data-act="advanceDay" data-d="-1">−1</button>' +
     '<button class="bt cutsm" data-act="advanceDay" data-d="1">+1</button>' +
-    '<button class="bt cutsm" data-act="advanceDay" data-d="7">+7</button></div>' +
+    '<button class="bt cutsm" data-act="advanceDay" data-d="7">+7</button>' +
+    '<button class="bt cutsm" data-act="advanceDay" data-d="28">+28</button></div>' +
+    /* Stepping is fine for a day or a week, but a year is 364 taps and
+       one mistap restarts the count. So the date is also directly
+       editable: type the year, pick the month, type the day. */
+    '<div class="mrow caljump"><span class="lbl">Jump to</span>' +
+    '<span class="cjk">Year</span>' +
+    '<input type="number" value="' + cal.year + '" data-act="calSetYear" style="width:104px">' +
+    '<span class="cjk">Month</span>' +
+    '<select data-act="calJumpMonth">' +
+      sys.months.map(function (mo, i) {
+        return '<option value="' + i + '"' + (mo.name === month.name ? " selected" : "") +
+          ">" + esc(mo.name) + "</option>";
+      }).join("") + "</select>" +
+    '<span class="cjk">Day</span>' +
+    '<input type="number" min="1" max="' + (month.end - month.start + 1) +
+      '" value="' + CAL.dayOfMonth(sysKey, cal.day) + '" data-act="calSetDayOfMonth" style="width:78px">' +
+    "</div>" +
+    '<div class="foot">Editing these moves the party’s date, not just the view. ' +
+      "The Common calendar reckons from the Great Fracture, so the campaign opens in 2022 PF.</div>" +
     '<div class="mrow"><span class="lbl">Showing</span>' +
     Object.keys(CAL.systems).map(function (k) {
       return '<button class="bt cutsm' + (k === sysKey ? " pri" : "") +

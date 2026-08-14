@@ -365,6 +365,44 @@ ok("now reads in Common months", /Dawnrise 1/.test(text()));
 click(byAct("calSystem", { key: "jerbeen" }));
 click(byAct("advanceTime"));
 eq("time of day steps forward", calState().timeOfDay, "midday");
+
+console.log("\n=== SETTING THE DATE OUTRIGHT, NOT STEPPING TO IT ===");
+/* A year is 364 taps away by stepping, and one mistap restarts the
+   count — so each part of the date is directly editable. */
+function setField(act, v) {
+  const el = byAct(act);
+  el.value = v;
+  el.dispatchEvent(new w.Event("change", { bubbles: true }));
+}
+click(byAct("calSystem", { key: "common" }));
+CALe("mutate(function(st){ st.calendar.year=222; st.calendar.day=100; })");
+setField("calSetYear", "2022");
+eq("typing the year sets it in one edit", calState().year, 2022);
+eq("...and leaves the day exactly where it was", calState().day, 100);
+setField("calJumpMonth", "0");
+eq("picking a month moves to it", CALe('CAL.monthFor("common", ' + calState().day + ").name"), "Dawnrise");
+eq("...keeping the day of the month", CALe('CAL.dayOfMonth("common",' + calState().day + ")"), 10);
+setField("calSetDayOfMonth", "14");
+eq("typing a day of the month lands on it", calState().day, 14);
+/* Jerbeen months are 28 days and Common 30, and the Convergence is 4,
+   so the day you were on may not exist in the month you pick. */
+setField("calSetDayOfMonth", "30");
+setField("calJumpMonth", "12");
+eq("jumping into the 4-day Convergence clamps rather than overshoots",
+   calState().day, 364);
+setField("calSetDayOfMonth", "99");
+eq("an impossible day of the month clamps to the month's last", calState().day, 364);
+setField("calSetDayOfMonth", "0");
+eq("...and zero clamps to its first", calState().day, 361);
+const heldDay = calState().day, heldYear = calState().year;
+setField("calSetYear", "");
+setField("calSetDayOfMonth", "abc");
+eq("junk input changes nothing", JSON.stringify([calState().day, calState().year]),
+   JSON.stringify([heldDay, heldYear]));
+setField("calSetYear", "-6");
+eq("a year before the Fracture is allowed", calState().year, -6);
+CALe("mutate(function(st){ st.calendar.year=2022; st.calendar.day=1; })");
+click(byAct("calSystem", { key: "jerbeen" }));
 click(byAct("tab", { tab: "combat" }));
 
 console.log("\n=== CALENDAR: WEEKS AND GRIDS ===");

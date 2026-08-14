@@ -303,6 +303,11 @@ input[type=number]{width:88px}
    be allowed to wrap or it pushes the whole panel sideways. */
 .pnl>h3{flex-wrap:wrap}
 .calnav{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:10px}
+/* The jump row is the one place two bare labels sit side by side, and
+   .mrow's gap is scoped to modals — so it lays itself out. */
+.caljump{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.caljump .lbl,.caljump .cjk{flex:none}
+.cjk{font-family:var(--m);font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--dimmer)}
 .calaway{font-family:var(--m);font-size:14px;letter-spacing:.06em;color:var(--yel);
   display:flex;align-items:center;gap:9px;flex-wrap:wrap}
 .calgrid{font-family:var(--m)}
