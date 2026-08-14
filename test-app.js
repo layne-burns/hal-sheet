@@ -17,6 +17,7 @@ function ok(label, cond) { eq(label, !!cond, true); }
 const dir = __dirname;
 function inline(f) { return "<script>" + fs.readFileSync(path.join(dir, f), "utf8") + "</script>"; }
 const html = fs.readFileSync(path.join(dir, "index.html"), "utf8")
+  .replace(/<script src="beasts-data\.js"><\/script>/, inline("beasts-data.js"))
   .replace(/<script src="rules\.js"><\/script>/, inline("rules.js"))
   .replace(/<script src="calendar-data\.js"><\/script>/, inline("calendar-data.js"))
   .replace(/<script src="combat-rules\.js"><\/script>/, inline("combat-rules.js"))
@@ -430,8 +431,13 @@ eq("the free cast starts full", st.resources.faithfulSteed, 1);
 /* "You can cast it once without a spell slot, regaining that use on a
    Long Rest" — the rest used to skip it, stranding the use at 0. */
 click(byAct("use", { kind: "spell", id: "findSteed" }));
+ok("casting a summon asks first instead of spending", !!$("#summon-form"));
+eq("...and nothing has been spent yet",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).resources.faithfulSteed, 1);
+click(byAct("summonApply"));
 eq("casting it free spends the use",
    JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).resources.faithfulSteed, 0);
+if (byAct("dismissAlert")) click(byAct("dismissAlert"));
 click(byAct("longRestPrompt"));
 if ($("#rest-days")) $("#rest-days").value = "0";
 click(byAct("longRest"));
@@ -444,6 +450,104 @@ w.eval("mutate(function (st) { delete st.resources.faithfulSteed; })");
 eq("an imported level-5 sheet is given the use rather than an empty pip",
    JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).resources.faithfulSteed, 1);
 st = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1"));
+
+console.log("\n=== THE SUMMONED STEED ===");
+function followers() { return JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).followers; }
+eq("the cast left a follower behind", followers().length, 1);
+const steed = followers()[0];
+eq("...from the right spell", steed.source, "findSteed");
+eq("cast at its base level", steed.spellLevel, 2);
+eq("AC is 10 + 1 per spell level", CALe("CALC.followerBlock(S, S.followers[0]).ac"), 12);
+eq("HP is 5 + 10 per spell level", CALe("CALC.followerBlock(S, S.followers[0]).maxHP"), 25);
+eq("its attack uses YOUR spell attack bonus",
+   CALe("CALC.followerBlock(S, S.followers[0]).slam.bonus"), CALe("CALC.spellAttack(S).value"));
+eq("no flight below a level 4 slot", CALe("CALC.followerBlock(S, S.followers[0]).canFly"), false);
+eq("a level 4 slot would buy flight",
+   CALe('CALC.steedBlock(S, { spellLevel: 4, creatureType: "celestial" }).canFly'), true);
+eq("...and scale the block with it",
+   CALe('CALC.steedBlock(S, { spellLevel: 4, creatureType: "celestial" }).maxHP'), 45);
+eq("Celestial slams for Radiant",
+   CALe('CALC.steedBlock(S, { spellLevel: 2, creatureType: "celestial" }).slam.damageType'), "Radiant");
+eq("Fey for Psychic",
+   CALe('CALC.steedBlock(S, { spellLevel: 2, creatureType: "fey" }).slam.damageType'), "Psychic");
+eq("Fiend for Necrotic",
+   CALe('CALC.steedBlock(S, { spellLevel: 2, creatureType: "fiend" }).slam.damageType'), "Necrotic");
+ok("the rail carries the follower on every tab", !!$(".rrail .fol"));
+click(byAct("tab", { tab: "notes" }));
+ok("...including one it has nothing to do with", !!$(".rrail .fol"));
+ok("the Followers tab exists", !!byAct("tab", { tab: "followers" }));
+click(byAct("tab", { tab: "followers" }));
+ok("and prints the stat block", /Otherworldly Steed/.test(text()));
+ok("naming Life Bond", /Life Bond/.test(text()));
+
+console.log("\n=== CR 0 BEASTS ===");
+eq("every eligible form is loaded", CALe("Object.keys(CR0_BEASTS).length"), 35);
+ok("and every one of them is Challenge 0",
+   CALe("Object.keys(CR0_BEASTS).every(function(k){return /^0[\\s(]/.test(CR0_BEASTS[k].cr)})"));
+ok("each carries a full ability spread",
+   CALe("Object.keys(CR0_BEASTS).every(function(k){return Object.keys(CR0_BEASTS[k].abilities).length===6})"));
+eq("the owl is the owl", CALe("CR0_BEASTS.owl.ac + '/' + CR0_BEASTS.owl.hp + '/' + CR0_BEASTS.owl.speed"),
+   "11/1 (1d4 - 1)/5 ft., fly 60 ft.");
+
+console.log("\n=== THE FAMILIAR ===");
+click(byAct("tab", { tab: "spells" }));
+click(byAct("use", { kind: "spell", id: "findFamiliar" }));
+ok("casting it asks first", !!$("#summon-form"));
+eq("every CR 0 beast is offered", $$("#summon-form option").length, 35);
+ok("no free-text form — it must be a real Beast", !$("#summon-custom"));
+ok("a ritual option is offered", /Ritual — no slot/.test(text()));
+const slot1Before = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).resources.slots["1"].used;
+$("#summon-form").value = "raven";
+$("#summon-form").dispatchEvent(new w.Event("change", { bubbles: true }));
+click(byAct("summonType", { key: "fiend" }));
+$("#summon-name").value = "Tallow";
+click(byAct("summonApply"));
+if (byAct("dismissAlert")) click(byAct("dismissAlert"));
+eq("the familiar joins the steed rather than replacing it", followers().length, 2);
+const fam = followers().filter(function (f) { return f.source === "findFamiliar"; })[0];
+eq("it took the form chosen", fam.form, "raven");
+eq("a ritual costs no slot",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).resources.slots["1"].used, slot1Before);
+eq("and no free use either",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).resources.findFamiliar, 1);
+eq("its stats are the raven's, untouched",
+   CALe('(function(){var b=CALC.familiarBlock(S,{source:"findFamiliar",form:"raven",creatureType:"fiend"});' +
+        'return b.acNote + "/" + b.hpNote + "/" + b.speed})()'),
+   "12/1 (1d4 - 1)/10 ft., fly 50 ft.");
+eq("but it is a Fiend, not a Beast",
+   CALe('CALC.familiarBlock(S,{source:"findFamiliar",form:"raven",creatureType:"fiend"}).type.name'), "Fiend");
+eq("the creature type changes nothing else",
+   CALe('CALC.familiarBlock(S,{source:"findFamiliar",form:"raven",creatureType:"celestial"}).maxHP'),
+   CALe('CALC.familiarBlock(S,{source:"findFamiliar",form:"raven",creatureType:"fiend"}).maxHP'));
+click(byAct("tab", { tab: "followers" }));
+ok("the familiar's own traits print", /Mimicry/.test(text()));
+ok("and the rule the block doesn't carry", /can't attack/.test(text()));
+/* "You can't have more than one familiar at a time." */
+click(byAct("tab", { tab: "spells" }));
+click(byAct("use", { kind: "spell", id: "findFamiliar" }));
+$("#summon-form").value = "cat";
+$("#summon-form").dispatchEvent(new w.Event("change", { bubbles: true }));
+click(byAct("summonApply"));
+if (byAct("dismissAlert")) click(byAct("dismissAlert"));
+eq("recasting changes the form instead of adding a second familiar", followers().length, 2);
+eq("...to the new one", followers().filter(function (f) {
+  return f.source === "findFamiliar"; })[0].form, "cat");
+
+console.log("\n=== A SUMMON THAT DROPS TO 0 IS GONE ===");
+click(byAct("tab", { tab: "followers" }));
+const famId = followers().filter(function (f) { return f.source === "findFamiliar"; })[0].id;
+click(byAct("followerStow", { id: famId }));
+eq("stowing keeps it, pocketed", followers().filter(function (f) { return f.id === famId; })[0].stowed, true);
+click(byAct("followerStow", { id: famId }));
+eq("and recalling brings it back out",
+   followers().filter(function (f) { return f.id === famId; })[0].stowed, false);
+click(byAct("followerDamageModal", { id: famId }));
+$("#fol-dmg").value = "99";
+click(byAct("followerDamage", { heal: "0" }));
+eq("0 Hit Points removes it", followers().filter(function (f) { return f.id === famId; }).length, 0);
+ok("and says so plainly", /disappears/.test(text()));
+if (byAct("dismissAlert")) click(byAct("dismissAlert"));
+eq("the steed is untouched by any of that", followers().length, 1);
 
 console.log("\n=== AURA APPEARS AT LEVEL 6 ===");
 click(byAct("levelUpModal"));

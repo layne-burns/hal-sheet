@@ -58,6 +58,7 @@ function migrate(st) {
   out.session = Object.assign({}, base.session, st.session || {});
   out.session.stats = Object.assign({}, base.session.stats, (st.session || {}).stats || {});
   out.sessionHistory = st.sessionHistory || [];
+  out.followers = st.followers || [];
   out.calendar = Object.assign({}, base.calendar, st.calendar || {});
   out.schemaVersion = base.schemaVersion;
   return out;
@@ -137,6 +138,16 @@ function clampState(st) {
   if (!Array.isArray(st.session.log)) st.session.log = [];
   if (!Array.isArray(st.sessionHistory)) st.sessionHistory = [];
   if (!Array.isArray(st.party.roster)) st.party.roster = [];
+  if (!Array.isArray(st.followers)) st.followers = [];
+  /* A follower's HP is the only number it owns, so it's the only one
+     that can go out of range — and a summon at 0 HP is already gone. */
+  st.followers = st.followers.filter(function (f) {
+    const b = CALC.followerBlock(st, f);
+    if (!b) return false;
+    f.hp = Math.max(0, Math.min(typeof f.hp === "number" ? f.hp : b.maxHP, b.maxHP));
+    f.tempHP = Math.max(0, f.tempHP || 0);
+    return f.hp > 0;
+  });
   if (!Array.isArray(st.calendar.events)) st.calendar.events = [];
   if (!Array.isArray(st.calendar.acked)) st.calendar.acked = [];
   /* Acknowledgements are write-once bookkeeping — keep the newest and
@@ -435,6 +446,157 @@ const ACT = {
     UI.alert = { info: "Short rest — regained 1 Channel Divinity use. Spend Hit Dice in the Combat tab if you need HP." };
     render();
   },
+  /* ---- Summoned followers ---- */
+
+  /* Casting a summon opens this instead of resolving immediately — the
+     spell asks you questions, and nothing is spent until you answer
+     them and press Summon. Cancel costs nothing. */
+  summonModal(el) {
+    const key = el.dataset.spell || "findSteed";
+    const src = FOLLOWER_SOURCES[key];
+    if (!src) return;
+    const steed = key === "findSteed";
+    const existing = S.followers.filter(function (f) { return f.source === key; })[0];
+    const freeRes = steed ? "faithfulSteed" : "findFamiliar";
+    const defaultForm = steed ? STEED_FORMS[0] : "cat";
+    UI.modal = {
+      type: "summon", source: key,
+      pick: {
+        /* Recasting offers back what you had — both spells explicitly
+           let you bring back the one you lost. */
+        form: existing ? existing.form : defaultForm,
+        custom: steed && existing && STEED_FORMS.indexOf(existing.form) < 0 ? existing.form : "",
+        name: existing ? existing.name : "",
+        creatureType: existing ? existing.creatureType : "celestial",
+        level: src.baseLevel,
+        /* A ritual costs no slot, which makes it the sensible default
+           for the one spell that offers it. */
+        ritual: !steed && !!SPELLS[src.spell].ritual,
+        free: steed && (S.resources[freeRes] || 0) > 0
+      }
+    };
+    render();
+  },
+  summonType(el) { UI.modal.pick.creatureType = el.dataset.key; render(); },
+  summonForm(el) { UI.modal.pick.form = el.value; render(); },
+  summonField(el) { UI.modal.pick[el.dataset.field] = el.value; render(); },
+  summonPower(el) {
+    UI.modal.pick.ritual = el.dataset.ritual === "1";
+    UI.modal.pick.free = el.dataset.free === "1";
+    UI.modal.pick.level = parseInt(el.dataset.lv, 10) || FOLLOWER_SOURCES[UI.modal.source].baseLevel;
+    render();
+  },
+  summonApply() {
+    const m = UI.modal, src = FOLLOWER_SOURCES[m.source];
+    const pick = m.pick;
+    const steed = m.source === "findSteed";
+    /* Read the live fields, so an edit that was never blurred still counts. */
+    const el = function (id) { return document.getElementById(id); };
+    const custom = steed && el("summon-custom") ? (el("summon-custom").value || "").trim() : "";
+    const form = custom || (el("summon-form") ? el("summon-form").value : pick.form);
+    const name = ((el("summon-name") ? el("summon-name").value : pick.name) || "").trim() ||
+                 src.defaultName;
+    const lv = (pick.free || pick.ritual) ? src.baseLevel : pick.level;
+    const block = CALC.followerBlock(S, {
+      source: m.source, spellLevel: lv, creatureType: pick.creatureType, form: form
+    });
+    if (!block) return;
+    const freeRes = steed ? "faithfulSteed" : "findFamiliar";
+    UI.modal = null;
+    mutate(function (st) {
+      /* Pay for it — the one place a summon costs anything. A ritual
+         costs no slot at all, which is the point of casting it that way. */
+      if (pick.ritual) { /* nothing spent */ }
+      else if (pick.free) {
+        st.resources[freeRes] = Math.max(0, (st.resources[freeRes] || 0) - 1);
+      } else {
+        if (!st.resources.slots[lv]) st.resources.slots[lv] = { used: 0 };
+        st.resources.slots[lv].used += 1;
+      }
+      if (st.combat.active && !pick.ritual) {
+        st.combat.turn.action = true;
+        if (!pick.free) st.combat.turn.slotUsed = true;
+      }
+      /* Only one steed, and only one familiar. */
+      if (src.unique) {
+        st.followers = st.followers.filter(function (f) { return f.source !== m.source; });
+      }
+      st.followers.push({
+        id: "f" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        source: m.source, name: name, form: form,
+        creatureType: pick.creatureType, spellLevel: lv,
+        hp: block.maxHP, tempHP: 0, baUsed: false, stowed: false,
+        summoned: calStamp(st)
+      });
+    }, "Summon " + name);
+    UI.alert = { info: name + " answers — " + block.type.name + " " +
+      block.formLabel.toLowerCase() + ", AC " + block.ac + ", " + block.maxHP +
+      " HP. Undo is in the top bar if that was a misfire." };
+    render();
+  },
+  /* "As a Magic action you can temporarily dismiss the familiar to a
+     pocket dimension" — and bring it back the same way. */
+  followerStow(el) {
+    const id = el.dataset.id;
+    mutate(function (st) {
+      const f = st.followers.filter(function (x) { return x.id === id; })[0];
+      if (f) f.stowed = !f.stowed;
+    }, "Stow/recall follower");
+  },
+
+  followerDamageModal(el) {
+    UI.modal = { type: "followerDamage", id: el.dataset.id };
+    render();
+  },
+  followerDamage(el) {
+    const heal = el.dataset.heal === "1";
+    const id = UI.modal.id;
+    const n = Math.max(0, parseInt(document.getElementById("fol-dmg").value, 10) || 0);
+    if (!n) return;
+    const f = S.followers.filter(function (x) { return x.id === id; })[0];
+    const name = f ? f.name : "The summon";
+    UI.modal = null;
+    mutate(function (st) {
+      const t = st.followers.filter(function (x) { return x.id === id; })[0];
+      if (!t) return;
+      if (heal) {
+        const b = CALC.followerBlock(st, t);
+        t.hp = Math.min(b.maxHP, t.hp + n);
+      } else {
+        const soak = Math.min(t.tempHP || 0, n);
+        t.tempHP = (t.tempHP || 0) - soak;
+        t.hp = Math.max(0, t.hp - (n - soak));
+      }
+    }, (heal ? "Heal " : "Damage ") + name);
+    /* clampState removes anything that hit 0 — say so rather than
+       letting a card silently vanish from the rail. */
+    if (!S.followers.some(function (x) { return x.id === id; })) {
+      UI.alert = { info: name + " drops to 0 Hit Points and disappears, leaving behind anything it carried." };
+    }
+    render();
+  },
+  followerBonus(el) {
+    const id = el.dataset.id;
+    mutate(function (st) {
+      const f = st.followers.filter(function (x) { return x.id === id; })[0];
+      if (f) f.baUsed = !f.baUsed;
+    }, "Follower bonus action");
+  },
+  followerName(el) {
+    const id = el.dataset.id, v = el.value;
+    mutate(function (st) {
+      const f = st.followers.filter(function (x) { return x.id === id; })[0];
+      if (f) f.name = v;
+    });
+  },
+  followerDismiss(el) {
+    const id = el.dataset.id;
+    const f = S.followers.filter(function (x) { return x.id === id; })[0];
+    mutate(function (st) {
+      st.followers = st.followers.filter(function (x) { return x.id !== id; });
+    }, "Dismiss " + (f ? f.name : "follower"));
+  },
+
   /* ---- Calendar ---- */
   advanceTime() {
     mutate(function (st) {
@@ -575,6 +737,10 @@ const ACT = {
       /* Faithful Steed: "regaining that use on a Long Rest" — it was the
          one once-per-rest resource the rest never gave back. */
       if (st.level >= 5) st.resources.faithfulSteed = 1;
+      /* A summon's signature Bonus Action recharges on the same rest.
+         The summon itself doesn't expire — Find Steed is Instantaneous,
+         so the steed stays until it drops or you do. */
+      st.followers.forEach(function (f) { f.baUsed = false; });
       Object.keys(st.resources.slots).forEach(function (lv) { st.resources.slots[lv].used = 0; });
       st.hitDiceUsed = Math.max(0, st.hitDiceUsed - Math.max(1, Math.floor(st.level / 2)));
       st.toggles.concentrating = false;
@@ -1015,7 +1181,8 @@ function alertBar() {
 /* ---------- TABS ---------- */
 function tabBar(active) {
   const tabs = [["combat","Combat","1"],["spells","Spells","2"],["features","Features","3"],
-                ["inventory","Inventory","4"],["notes","Notes","5"],["calendar","Calendar","6"]];
+                ["inventory","Inventory","4"],["notes","Notes","5"],["calendar","Calendar","6"],
+                ["followers","Followers","7"]];
   return '<div class="tabs">' + tabs.map(function (t) {
     return '<button class="tab" aria-selected="' + (active === t[0]) +
       '" data-act="tab" data-tab="' + t[0] + '">' + t[1] + "<k>" + t[2] + "</k></button>";
@@ -1135,6 +1302,7 @@ function tabContent(tab) {
   if (tab === "inventory") return inventoryTab();
   if (tab === "notes") return notesTab();
   if (tab === "calendar") return calendarTab();
+  if (tab === "followers") return followersTab();
   return combatTab();
 }
 
@@ -1526,6 +1694,141 @@ function notesTab() {
   return out;
 }
 
+/* ---------- FOLLOWERS ----------
+   A summon is a second creature you are responsible for, so it gets
+   treated like one: a card that stays on screen wherever you are, and
+   a tab holding the stat block in full. The card is deliberately the
+   same component in the rail and in combat — one thing to recognise. */
+
+/* Each creature type gets its own colour so two steeds are never
+   mistaken for each other at a glance. */
+function followerAccent(f) {
+  return { celestial: "cel", fey: "fey", fiend: "fnd" }[f.creatureType] || "cel";
+}
+function followerGlyph(f) {
+  return { celestial: "❖", fey: "✦", fiend: "✸" }[f.creatureType] || "❖";
+}
+
+function followerCard(f, full) {
+  const b = CALC.followerBlock(S, f);
+  if (!b) return "";
+  const pct = Math.round((f.hp / b.maxHP) * 100);
+  const cls = pct <= 25 ? "crit" : (pct <= 60 ? "hurt" : "");
+  /* Only some followers have an ability worth tracking between rests. */
+  const tracked = (b.bonusActions || []).filter(function (x) { return x.tracked; })[0];
+  return '<div class="fol a-' + followerAccent(f) + (full ? " full" : "") +
+    (f.stowed ? " stowed" : "") + '">' +
+    '<div class="folhead"><span class="folglyph">' + followerGlyph(f) + "</span>" +
+    '<span class="folname" data-act="tab" data-tab="followers">' + esc(f.name) + "</span>" +
+    '<span class="foltype">' + esc(b.type.name) + "</span></div>" +
+    '<div class="folsub">' + esc(b.formLabel) + " · " + esc(b.source.label) +
+      (b.source.key === "findSteed" ? " · spell level " + b.spellLevel : "") +
+      (f.stowed ? " · stowed" : "") + "</div>" +
+    '<div class="folhp"><span class="lbl">HP</span>' +
+      '<div class="hpbar"><div class="hpfill ' + cls + '" style="width:' + pct + '%"></div></div>' +
+      '<span class="folnum">' + f.hp + "<small>/" + b.maxHP + "</small></span>" +
+      (f.tempHP ? '<span class="tmp">+' + f.tempHP + "</span>" : "") +
+      '<span class="lbl">AC</span><span class="folnum">' + b.ac + "</span></div>" +
+    '<div class="folatk">' + esc(b.cardLine) + "</div>" +
+    '<div class="folacts">' +
+      '<button class="bt cutsm dg" data-act="followerDamageModal" data-id="' + f.id + '">Damage…</button>' +
+      (tracked ? '<button class="chip' + (f.baUsed ? " used" : "") + '" data-act="followerBonus" data-id="' +
+        f.id + '" title="' + esc(tracked.text) + '">' + esc(tracked.name) +
+        (f.baUsed ? " · spent" : "") + "</button>" : "") +
+      (b.source.key === "findFamiliar"
+        ? '<button class="chip" data-act="followerStow" data-id="' + f.id + '">' +
+          (f.stowed ? "Recall" : "Stow") + "</button>" : "") +
+      (full ? '<button class="bt cutsm dg" data-act="followerDismiss" data-id="' + f.id +
+              '">Dismiss</button>' : "") +
+    "</div></div>";
+}
+
+/* The right-rail panel. Renders nothing at all when you have no
+   followers, so it costs no space until it matters. */
+function followerRail() {
+  if (!S.followers.length) return "";
+  return '<div class="pnl cut"><h3>Followers <span class="cnt">' + S.followers.length + "</span></h3>" +
+    S.followers.map(function (f) { return followerCard(f, false); }).join("") + "</div>";
+}
+
+function followersTab() {
+  let out = "";
+  if (!S.followers.length) {
+    out += '<div class="pnl cut"><h3>Followers <span class="cnt">none</span></h3>' +
+      '<div class="foot" style="margin:0">Nothing summoned. Cast <b>Find Steed</b> from the Spells ' +
+      "tab and it will ask you what answers.</div></div>";
+  }
+  S.followers.forEach(function (f) {
+    const b = CALC.followerBlock(S, f);
+    out += '<div class="pnl cut a-' + followerAccent(f) + '"><h3>' + esc(b.statName) +
+      '<span class="cnt">' + esc(b.size) + " " + esc(b.type.name) + " · " + esc(b.alignment) +
+      "</span></h3>" + followerCard(f, true);
+
+    out += '<div class="mrow" style="margin-top:11px"><span class="lbl">Name</span>' +
+      '<input type="text" value="' + esc(f.name) + '" data-act="followerName" data-id="' + f.id +
+      '" style="flex:1;min-width:140px">' + wikiBtn(b.source.slug) + "</div>";
+
+    /* The block itself, in the order the source prints it. The "why"
+       column only has something to say when a number is derived. */
+    const derived = b.source.key === "findSteed";
+    out += '<div class="sb"><div class="sbrow"><span>Armor Class</span><b>' + esc(b.acNote || b.ac) +
+      '</b><span class="sbwhy">' + (derived ? "10 + 1 per spell level" : "") + "</span></div>" +
+      '<div class="sbrow"><span>Hit Points</span><b>' + esc(b.hpNote || String(b.maxHP)) +
+      '</b><span class="sbwhy">' + (derived ? "5 + 10 per spell level · " + esc(b.hitDice) : "") +
+      "</span></div>" +
+      '<div class="sbrow"><span>Speed</span><b>' + esc(b.speed) + "</b>" +
+      '<span class="sbwhy">' + (derived ? (b.canFly ? "flight from the level 4+ slot"
+                                                    : "Fly 60 ft. needs a level 4+ slot") : "") +
+      "</span></div>" +
+      (derived ? '<div class="sbrow"><span>Proficiency Bonus</span><b>' + sign(b.pb) +
+        '</b><span class="sbwhy">equals yours</span></div>' : "") +
+      '<div class="sbrow"><span>Senses</span><b>' +
+      esc(derived ? "Passive Perception " + b.passivePerception : b.senses) + "</b></div>" +
+      '<div class="sbrow"><span>Languages</span><b>' + esc(b.languages) + "</b></div>" +
+      '<div class="sbrow"><span>Challenge</span><b>' + esc(b.cr) + "</b></div></div>";
+
+    out += '<div class="sbabil">';
+    ["str","dex","con","int","wis","cha"].forEach(function (k) {
+      const a = b.abilities[k];
+      out += '<div class="sbab"><span class="lbl">' + k.toUpperCase() + "</span>" +
+        "<b>" + a.score + "</b><span class=\"sbwhy\">" + sign(a.mod) +
+        " / save " + sign(a.save) + "</span></div>";
+    });
+    out += "</div>";
+
+    [["Traits", b.traits], ["Actions", b.actions],
+     ["Bonus Actions", b.bonusActions], ["Reactions", b.reactions]].forEach(function (sec) {
+      if (!sec[1] || !sec[1].length) return;
+      out += '<div class="sbsec"><span class="sbk">' + sec[0] + "</span>";
+      sec[1].forEach(function (a) {
+        out += '<div class="entry"><div class="eh"><b class="en">' + esc(a.name) + "</b>" +
+          (a.meta ? '<span class="emeta">' + esc(a.meta) + "</span>" : "") +
+          (a.tracked ? '<button class="chip' + (f.baUsed ? " used" : "") +
+            '" data-act="followerBonus" data-id="' + f.id + '">' +
+            (f.baUsed ? "Spent — tap to restore" : "Available — tap when used") + "</button>" : "") +
+          "</div>" +
+          '<div class="etext">' + esc(a.text) +
+          (a.name === "Fell Glare" ? " (Your spell save DC is " + b.saveDC + ".)" : "") +
+          "</div></div>";
+      });
+      out += "</div>";
+    });
+
+    /* The rules that live on the spell rather than in the stat block. */
+    if (b.cantAttack) out += '<div class="warnbox">' + esc(b.cantAttack) + "</div>";
+    let notes = esc(b.combat) + "<br><em>" + esc(b.ends) + "</em>";
+    if (b.telepathy) notes += "<br>" + esc(b.telepathy);
+    if (b.touchDelivery) notes += "<br>" + esc(b.touchDelivery);
+    if (f.summoned) {
+      notes += "<br>Summoned " + esc(CAL.format(S.calendar.system, f.summoned.day)) +
+        ", Year " + f.summoned.year + ".";
+    }
+    out += '<div class="seqnote">' + notes + "</div>";
+    out += "</div>";
+  });
+  return out;
+}
+
 /* ---------- CALENDAR ----------
    Two things at once, kept deliberately separate: the date the party is
    living in (S.calendar — only the "Set the date" controls move it), and
@@ -1830,8 +2133,11 @@ function resourceRail() {
   const loh = CALC.layOnHandsMax(S).value;
   const cdMax = CALC.channelDivinityMax(S).value;
   const slots = CALC.slotsMax(S);
+  /* Followers ride at the top of the rail: a summon is a creature you're
+     responsible for on every tab, not a resource you spend. */
+  let out = followerRail();
   /* The whole header is the collapse control — a big, obvious tap target. */
-  let out = '<div class="pnl cut"><h3 class="collapse" data-act="toggleRail">' +
+  out += '<div class="pnl cut"><h3 class="collapse" data-act="toggleRail">' +
     '<span>Resources</span><span class="chev">Hide ‹‹</span></h3>';
 
   out += '<div class="res"><div class="rh"><span class="lbl">Lay on hands</span>' +
@@ -2005,8 +2311,147 @@ function modalHTML() {
     body += '<div class="mfoot"><button class="bt cutsm" data-act="closeModal">Cancel</button></div>';
   }
 
+  else if (t === "summon") body = summonModalHTML();
+
+  else if (t === "followerDamage") {
+    const f = S.followers.filter(function (x) { return x.id === UI.modal.id; })[0];
+    if (!f) return "";
+    const b = CALC.followerBlock(S, f);
+    body = "<h2>" + esc(f.name) + "</h2>" +
+      '<div class="msub">' + f.hp + " of " + b.maxHP + " Hit Points. At 0 it disappears, " +
+      "leaving behind anything it was carrying.</div>" +
+      '<div class="mrow"><input type="number" id="fol-dmg" min="0" placeholder="Amount" autofocus>' +
+      '<button class="bt cutsm dg" data-act="followerDamage" data-heal="0">Damage</button>' +
+      '<button class="bt cutsm" data-act="followerDamage" data-heal="1">Heal</button></div>' +
+      '<div class="msub">Life Bond: when you regain Hit Points from a level 1+ spell, it regains ' +
+      "the same number if you're within 5 feet.</div>" +
+      '<div class="mfoot"><button class="bt cutsm" data-act="closeModal">Cancel</button></div>';
+  }
+
   if (!body) return "";
   return '<div class="mask"><div class="modal cut">' + body + "</div></div>";
+}
+
+/* The spell asks before it spends. Every choice here is one the spell
+   actually gives you, and the numbers update live so you can see what a
+   bigger slot buys before committing to it. */
+function summonModalHTML() {
+  const m = UI.modal, p = m.pick;
+  const src = FOLLOWER_SOURCES[m.source];
+  const sp = SPELLS[src.spell];
+  const steed = m.source === "findSteed";
+  const preview = CALC.followerBlock(S, {
+    source: m.source, spellLevel: p.free ? src.baseLevel : p.level,
+    creatureType: p.creatureType, form: p.form
+  });
+
+  let body = "<h2>" + esc(sp.name) + "</h2>" +
+    '<div class="msub">' + esc(sp.time) + " · " + esc(sp.range) + " · " + esc(sp.comp) +
+    " · " + esc(sp.dur) + ". " +
+    (steed ? "The animal is description only — it changes no numbers. The creature type does."
+           : "The animal you choose IS the stat block. The creature type changes what it counts " +
+             "as, not its numbers.") + "</div>";
+
+  /* 1 — the form */
+  body += '<div class="sbk">' + (steed ? "The form it takes" : "Which Beast — any with a Challenge Rating of 0") +
+    "</div>" + '<div class="mrow"><select id="summon-form" data-act="summonForm">';
+  if (steed) {
+    body += STEED_FORMS.map(function (o) {
+      return '<option value="' + esc(o) + '"' + (o === p.form ? " selected" : "") + ">" + esc(o) + "</option>";
+    }).join("");
+  } else {
+    body += Object.keys(CR0_BEASTS).sort(function (a, b) {
+      return CR0_BEASTS[a].name.localeCompare(CR0_BEASTS[b].name);
+    }).map(function (k) {
+      const x = CR0_BEASTS[k];
+      return '<option value="' + esc(k) + '"' + (k === p.form ? " selected" : "") + ">" +
+        esc(x.name) + " — " + esc(x.size) + ", AC " + esc(x.ac) + ", " + esc(x.hp) + " HP</option>";
+    }).join("");
+  }
+  body += "</select>";
+  if (steed) {
+    body += '<input type="text" id="summon-custom" data-act="summonField" data-field="custom" ' +
+      'placeholder="…or describe your own" value="' + esc(p.custom || "") + '" style="flex:1;min-width:170px">';
+  }
+  body += '<input type="text" id="summon-name" data-act="summonField" data-field="name" ' +
+    'placeholder="Name it" value="' + esc(p.name || "") + '"></div>';
+  body += '<div class="foot" style="margin:0 0 12px">' +
+    (steed ? "Anything you type in the middle wins over the list."
+           : "All " + Object.keys(CR0_BEASTS).length + " Beasts of CR 0 with a published stat block.") +
+    "</div>";
+
+  /* 2 — creature type */
+  body += '<div class="sbk">Creature type' + (steed ? " — this one changes the stat block" : "") + "</div>";
+  if (steed) {
+    Object.keys(STEED_TYPES).forEach(function (k) {
+      const ty = STEED_TYPES[k];
+      body += '<button class="pick a-' + ({celestial:"cel",fey:"fey",fiend:"fnd"}[k]) +
+        (p.creatureType === k ? " sel" : "") + '" data-act="summonType" data-key="' + k + '">' +
+        '<div class="pn">' + esc(ty.name) + "</div>" +
+        '<div class="pm">Otherworldly Slam deals <b>' + esc(ty.damage) + "</b> damage · Bonus Action: <b>" +
+        esc(ty.ba.name) + "</b></div>" +
+        '<div class="pt">' + esc(ty.ba.text) + "</div></button>";
+    });
+  } else {
+    body += '<div class="mrow">' + Object.keys(FAMILIAR_TYPES).map(function (k) {
+      return '<button class="bt cutsm' + (p.creatureType === k ? " pri" : "") +
+        '" data-act="summonType" data-key="' + k + '">' + esc(FAMILIAR_TYPES[k].name) + "</button>";
+    }).join("") + "</div>" +
+    '<div class="foot" style="margin:0 0 12px">It is a ' +
+      esc(FAMILIAR_TYPES[p.creatureType].name) + " instead of a Beast — same numbers either way, " +
+      "but it counts as that type for anything that cares.</div>";
+  }
+
+  /* 3 — what you spend */
+  body += '<div class="sbk">Cast it with</div><div class="mrow">';
+  const slots = CALC.slotsMax(S);
+  const freeRes = steed ? "faithfulSteed" : "findFamiliar";
+  const freeLabel = steed ? "Faithful Steed — free" : "Magic Initiate — free";
+  if (!steed && sp.ritual) {
+    body += '<button class="bt cutsm' + (p.ritual ? " pri" : "") +
+      '" data-act="summonPower" data-ritual="1" data-free="0" data-lv="' + src.baseLevel +
+      '">Ritual — no slot</button>';
+  }
+  if ((S.resources[freeRes] || 0) > 0) {
+    body += '<button class="bt cutsm' + (p.free && !p.ritual ? " pri" : "") +
+      '" data-act="summonPower" data-ritual="0" data-free="1" data-lv="' + src.baseLevel + '">' +
+      freeLabel + " (level " + src.baseLevel + ")</button>";
+  }
+  Object.keys(slots).map(Number).sort(function (a, b) { return a - b; }).forEach(function (lv) {
+    if (lv < src.baseLevel) return;
+    const left = slots[lv] - ((S.resources.slots[lv] || {}).used || 0);
+    body += '<button class="bt cutsm' + (!p.free && !p.ritual && p.level === lv ? " pri" : "") +
+      (left <= 0 ? " dim" : "") + '" data-act="summonPower" data-ritual="0" data-free="0" data-lv="' + lv + '">' +
+      "Level " + lv + " slot <k>" + left + "</k></button>";
+  });
+  body += "</div>";
+
+  if (preview) {
+    body += '<div class="sb" style="margin-bottom:12px">' +
+      '<div class="sbrow"><span>Armor Class</span><b>' + esc(preview.acNote || preview.ac) + "</b></div>" +
+      '<div class="sbrow"><span>Hit Points</span><b>' + esc(preview.hpNote || String(preview.maxHP)) + "</b></div>" +
+      '<div class="sbrow"><span>Speed</span><b>' + esc(preview.speed) + "</b></div>" +
+      '<div class="sbrow"><span>' + (steed ? "Otherworldly Slam" : "Senses") + "</span><b>" +
+        esc(steed ? sign(preview.slam.bonus) + " · " + preview.slam.damage + " " + preview.slam.damageType
+                  : preview.senses) + "</b></div>" +
+      (steed ? "" : '<div class="sbrow"><span>Traits</span><b>' +
+        esc((preview.traits || []).map(function (t) { return t.name; }).join(", ") || "—") + "</b></div>") +
+      "</div>";
+  }
+
+  const existing = S.followers.filter(function (f) { return f.source === m.source; })[0];
+  if (existing) {
+    body += '<div class="warnbox">' +
+      (steed ? "Casting again replaces <b>" + esc(existing.name) +
+               "</b> — a steed from this spell is replaced by the new one."
+             : "You can't have more than one familiar. Casting again makes <b>" + esc(existing.name) +
+               "</b> adopt the new form instead.") + "</div>";
+  }
+
+  body += '<div class="mfoot"><button class="bt cutsm pri" data-act="summonApply">' +
+    (existing && !steed ? "Change form" : "Summon") + "</button>" +
+    '<button class="bt cutsm" data-act="closeModal">Cancel — spend nothing</button></div>';
+  return body;
 }
 
 function levelUpModal() {
@@ -2138,8 +2583,8 @@ document.addEventListener("keydown", function (e) {
   }
   const k = e.key.toLowerCase();
   if (k === "escape") { UI.modal = null; UI.prov = null; UI.alert = null; render(); return; }
-  if (["1","2","3","4","5","6"].indexOf(k) >= 0) {
-    const tabs = ["combat","spells","features","inventory","notes","calendar"];
+  if (["1","2","3","4","5","6","7"].indexOf(k) >= 0) {
+    const tabs = ["combat","spells","features","inventory","notes","calendar","followers"];
     mutate(function (st) { st.ui = st.ui || {}; st.ui.tab = tabs[parseInt(k, 10) - 1]; });
     return;
   }

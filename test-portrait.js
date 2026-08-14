@@ -19,6 +19,7 @@ const dir = __dirname;
 function src(f) { return fs.readFileSync(path.join(dir, f), "utf8"); }
 function inline(f) { return "<script>" + src(f) + "</script>"; }
 const html = src("index.html")
+  .replace(/<script src="beasts-data\.js"><\/script>/, inline("beasts-data.js"))
   .replace(/<script src="rules\.js"><\/script>/, inline("rules.js"))
   .replace(/<script src="calendar-data\.js"><\/script>/, inline("calendar-data.js"))
   .replace(/<script src="combat-rules\.js"><\/script>/, inline("combat-rules.js"))

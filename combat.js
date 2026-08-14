@@ -226,6 +226,17 @@ const PARTY_STATUS = ["healthy", "bloodied", "down"];
 const PARTY_STATUS_LABEL = { healthy: "Healthy", bloodied: "Bloodied", down: "Down" };
 /* forceOpen: the pre-session checklist embeds this panel and collapsing it
    there would defeat the point, so it ignores the collapse flag. */
+/* Followers sit with Party rather than with Creatures — they fight on
+   your side, and the steed shares your Initiative count rather than
+   rolling its own, so it never belongs in the turn order. */
+EXT.followersPanel = function () {
+  if (!S.followers.length) return "";
+  return '<div class="pnl cut"><h3>Followers <span class="cnt">' + S.followers.length + "</span></h3>" +
+    S.followers.map(function (f) { return followerCard(f, true); }).join("") +
+    '<div class="seqnote">Shares your Initiative count — it acts on your turn, so it is not ' +
+    "listed in the turn order.</div></div>";
+};
+
 EXT.partyPanel = function (forceOpen) {
   const roster = S.party.roster || [];
   const head = panelHead("Party", roster.length || "none", "partyCollapsed");
@@ -318,7 +329,11 @@ EXT.rollModal = function () {
       '<div class="rd">' + esc(r.text) + "</div>" +
       '<div class="rwhy">' + esc(r.why) + "</div></div>";
   });
+  /* The cost is already paid by the time this card appears, so the way
+     out is to put it back — one step of the same history the Undo
+     button uses, labelled for what it is. */
   body += '<div class="mfoot"><button class="bt cutsm pri" data-act="closeModal">Done</button>' +
+    '<button class="bt cutsm dg" data-act="cancelCast">Cancel — take the cost back</button>' +
     '<button class="bt cutsm" data-act="settingsModal">Settings</button></div>';
   return body;
 };
@@ -747,6 +762,12 @@ Object.assign(ACT, {
   /* ---- Using anything ---- */
   use(el) {
     const kind = el.dataset.kind, id = el.dataset.id;
+    /* A summoning spell has questions to ask first, and asking them is
+       free — nothing is spent until its own Summon button. */
+    if (kind === "spell" && SPELLS[id] && SPELLS[id].summons) {
+      ACT.summonModal({ dataset: { spell: SPELLS[id].summons } });
+      return;
+    }
     const item = CALC.castables(S).filter(function (x) {
       return x.kind === kind && x.id === id;
     })[0];
@@ -1103,6 +1124,12 @@ Object.assign(ACT, {
   },
 
   /* ---- Undo ---- */
+  /* Back out of the cast you just made: the slot, the action, the
+     concentration and any effect all go back where they were. */
+  cancelCast() {
+    UI.modal = null;
+    ACT.undo();
+  },
   undo() {
     const h = histLoad();
     if (!h.length) { UI.alert = { info: "Nothing to undo." }; render(); return; }
@@ -1261,7 +1288,8 @@ render = function () {
     const centre = app.querySelector(".wrap > div:nth-child(2)");
     if (centre) {
       centre.insertAdjacentHTML("afterbegin", EXT.canDoPanel() + EXT.effectsPanel());
-      centre.insertAdjacentHTML("beforeend", EXT.partyPanel() + EXT.creaturesPanel());
+      centre.insertAdjacentHTML("beforeend",
+        EXT.followersPanel() + EXT.partyPanel() + EXT.creaturesPanel());
     }
   } else {
     const centre = app.querySelector(".wrap > div:nth-child(2)");

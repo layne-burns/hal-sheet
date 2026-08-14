@@ -39,6 +39,7 @@ const TAGS = {
   melee:         { label: "Melee",         color: "g",  group: "how" },
   aoe:           { label: "AoE",           color: "g",  group: "how" },
   utility:       { label: "Utility",       color: "g",  group: "how" },
+  summon:        { label: "Summon",        color: "g",  group: "how" },
   selfOnly:      { label: "Self",          color: "g",  group: "how" }
 };
 const TAG_GROUPS = {
@@ -146,10 +147,14 @@ const SPELLS = {
     text:"Create a spectral hand. As a Magic action you can move it up to 30 ft and use it to manipulate objects, open unlocked doors or containers, stow or retrieve items, or pour contents. Can't attack, activate magic items, or carry more than 10 lb." },
 
   /* --- Magic Initiate 1st-level pick --- */
+  /* Transcribed from dnd2024.wikidot.com/spell:find-familiar. The sheet
+     had it acting on your Initiative — it rolls its own — and had the
+     senses and touch-delivery costs wrong. */
   findFamiliar: { name:"Find Familiar", lvl:1, slug:"spell:find-familiar", school:"Conjuration",
-    time:"1 hour", range:"10 ft", dur:"Until dispelled", comp:"V, S, M (10 gp of charcoal, incense, and herbs, consumed)",
-    tags:["utility","ritual"], ritual:true,
-    text:"Summon a familiar spirit in animal form (Celestial, Fey, or Fiend). It acts on your Initiative but can't attack; it can take other actions. While within 100 ft you can communicate telepathically and see through its senses as a Magic action. As a Magic action you can cast a spell with a range of Touch through it. It vanishes at 0 HP rather than dying; resummon by recasting. Dismiss to a pocket dimension and recall as a Magic action." },
+    time:"1 hour or Ritual", range:"10 ft", dur:"Instantaneous",
+    comp:"V, S, M (burning incense worth 10+ GP, which the spell consumes)",
+    tags:["utility","ritual","summon"], ritual:true, summons:"findFamiliar",
+    text:"You gain the service of a familiar, a spirit that takes an animal form you choose: Bat, Cat, Frog, Hawk, Lizard, Octopus, Owl, Rat, Raven, Spider, Weasel, or another Beast that has a Challenge Rating of 0. The familiar has the statistics of the chosen form, though it is a Celestial, Fey, or Fiend (your choice) instead of a Beast. It acts independently of you, but it obeys your commands. Telepathic Connection: while within 100 feet you can communicate telepathically, and as a Bonus Action you can see through its eyes and hear what it hears until the start of your next turn, gaining the benefits of any special senses it has. When you cast a spell with a range of touch, the familiar can deliver the touch if it is within 100 feet and takes a Reaction to do so. In combat it is an ally, rolls its own Initiative and acts on its own turn; a familiar can't attack, but it can take other actions as normal. When it drops to 0 Hit Points it disappears, reappearing when you cast this spell again. As a Magic action you can temporarily dismiss it to a pocket dimension, or dismiss it forever; as a Magic action while dismissed you can return it to an unoccupied space within 30 feet. You can't have more than one familiar at a time — casting the spell while you have one instead causes it to adopt a new eligible form." },
 
   /* --- Paladin 1st level --- */
   bless: { name:"Bless", lvl:1, slug:"spell:bless", school:"Enchantment",
@@ -224,9 +229,16 @@ const SPELLS = {
     time:"Action", range:"30 ft", dur:"8 hours", comp:"V, S, M (a strip of white cloth)",
     tags:["support","healing"],
     text:"Three creatures each gain 5 Temporary HP; their HP maximum is unaffected. Higher levels: +5 Temp HP per slot level above 2." },
+  /* Transcribed from dnd2024.wikidot.com/spell:find-steed. The sheet
+     previously carried the 2014 wording — a ritual, "until dispelled",
+     five fixed animal forms with their own stat blocks, Charisma added
+     to the mount's numbers. None of that survives into 2024: one
+     Otherworldly Steed stat block that scales off the spell's level,
+     and the animal is description only. */
   findSteed: { name:"Find Steed", lvl:2, slug:"spell:find-steed", school:"Conjuration",
-    time:"Action (Ritual)", range:"30 ft", dur:"Until dispelled", comp:"V, S", tags:["utility","ritual"], ritual:true,
-    text:"Summon a Celestial spirit as a loyal mount (Warhorse, Pony, Camel, Elk, or Mastiff; Large or Medium). It has your Charisma modifier added to its AC, attack rolls, damage rolls, and saves. While within 1 mile you can communicate telepathically. It vanishes at 0 HP." },
+    time:"Action", range:"30 ft", dur:"Instantaneous", comp:"V, S", tags:["utility","summon"],
+    summons:"findSteed",
+    text:"You summon an otherworldly being that appears as a loyal steed in an unoccupied space of your choice within range. This creature uses the Otherworldly Steed stat block. If you already have a steed from this spell, the steed is replaced by the new one. The steed resembles a Large, rideable animal of your choice, such as a horse, a camel, a dire wolf, or an elk. Whenever you cast the spell, choose the steed's creature type — Celestial, Fey, or Fiend — which determines certain traits in the stat block. In combat it shares your Initiative count and functions as a controlled mount while you ride it. If you have the Incapacitated condition, the steed takes its turn immediately after yours and acts independently, focusing on protecting you. The steed disappears if it drops to 0 Hit Points or if you die. Using a higher-level spell slot: use the slot's level for the spell's level in the stat block." },
   gentleRepose: { name:"Gentle Repose", lvl:2, slug:"spell:gentle-repose", school:"Necromancy",
     time:"Action", range:"Touch", dur:"10 days", comp:"V, S, M (a copper piece placed on each of the corpse's eyes)",
     tags:["utility","ritual","touch"], ritual:true,
@@ -430,6 +442,72 @@ const CONDITIONS = {
   unconscious:  { name:"Unconscious",  slug:"condition:unconscious",  text:"Incapacitated, can't move or speak, and unaware. Drop what you're holding and fall Prone. Auto-fail STR and DEX saves. Attacks have Advantage; hits within 5 ft are Critical Hits." }
 };
 
+/* ============================================================
+   SUMMONED FOLLOWERS
+   Transcribed verbatim from dnd2024.wikidot.com. Nothing here is
+   stored on a follower that the sheet can derive: the Otherworldly
+   Steed's whole stat block scales off the SPELL's level and off your
+   own numbers (spell attack, save DC, proficiency), so a follower
+   record only ever holds what you chose and how hurt it is.
+   ============================================================ */
+
+/* "The steed resembles a Large, rideable animal of your choice, such as
+   a horse, a camel, a dire wolf, or an elk." The form is description
+   only — it changes no numbers — so this list is a convenience and
+   anything you can name is equally legal. */
+const STEED_FORMS = ["Horse", "Warhorse", "Camel", "Dire Wolf", "Elk",
+                     "Giant Goat", "Giant Lizard", "Great Stag", "Panther", "Boar"];
+
+/* The one choice that DOES change the stat block. */
+const STEED_TYPES = {
+  celestial: { key:"celestial", name:"Celestial", damage:"Radiant",
+    ba: { name:"Healing Touch", recharge:"Recharges after a Long Rest",
+          text:"One creature within 5 feet of the steed regains a number of Hit Points equal to 2d8 plus the spell's level." } },
+  fey: { key:"fey", name:"Fey", damage:"Psychic",
+    ba: { name:"Fey Step", recharge:"Recharges after a Long Rest",
+          text:"The steed teleports, along with its rider, to an unoccupied space of your choice up to 60 feet away from itself." } },
+  fiend: { key:"fiend", name:"Fiend", damage:"Necrotic",
+    ba: { name:"Fell Glare", recharge:"Recharges after a Long Rest",
+          text:"Wisdom Saving Throw: DC equals your spell save DC, one creature within 60 feet the steed can see. Failure: The target has the Frightened condition until the end of your next turn." } }
+};
+
+const STEED_ABILITIES = { str:18, dex:12, con:14, int:6, wis:12, cha:8 };
+
+/* What can be summoned, and what stat block it uses. Keyed by the
+   `summons` field on the spell, so adding a second summon is data. */
+const FOLLOWER_SOURCES = {
+  findSteed: {
+    key:"findSteed", spell:"findSteed", label:"Find Steed",
+    statName:"Otherworldly Steed", slug:"spell:find-steed",
+    size:"Large", alignment:"Neutral", baseLevel:2,
+    /* "If you already have a steed from this spell, the steed is
+       replaced by the new one." */
+    unique:true,
+    defaultName:"Steed",
+    /* The form is flavour; the creature type is what has teeth. */
+    formIsFlavour:true
+  },
+  findFamiliar: {
+    key:"findFamiliar", spell:"findFamiliar", label:"Find Familiar",
+    slug:"spell:find-familiar", baseLevel:1,
+    /* "You can't have more than one familiar at a time." */
+    unique:true,
+    defaultName:"Familiar",
+    /* Here it is the other way round: the form IS the stat block, and
+       the creature type only changes what the familiar counts as. */
+    formIsFlavour:false
+  }
+};
+
+/* The three creature types a familiar can be. Unlike the steed's, this
+   choice changes no numbers — it changes what the familiar IS, which
+   matters to anything that keys off creature type. */
+const FAMILIAR_TYPES = {
+  celestial: { key:"celestial", name:"Celestial" },
+  fey:       { key:"fey",       name:"Fey" },
+  fiend:     { key:"fiend",     name:"Fiend" }
+};
+
 const SKILL_ABILITY = {
   athletics:"str", acrobatics:"dex", sleightOfHand:"dex", stealth:"dex",
   arcana:"int", history:"int", investigation:"int", nature:"int", religion:"int",
@@ -530,6 +608,116 @@ const CALC = {
   initiative(S) {
     const d = CALC.mod(S.abilities.dex);
     return { value: d, sources:[{ kind:"ability", label:"DEX modifier", value:d }] };
+  },
+
+  /* ---- Summoned followers ----
+     The Otherworldly Steed stat block, resolved for one follower. Every
+     number is derived: AC and HP from the spell's level, the attack and
+     the save DC from yours, proficiency shared with you outright. Cast
+     with a higher slot and the whole block moves with it. */
+  steedBlock(S, f) {
+    const src = FOLLOWER_SOURCES.findSteed;
+    const lv = Math.max(src.baseLevel, Math.min(9, f.spellLevel || src.baseLevel));
+    const type = STEED_TYPES[f.creatureType] || STEED_TYPES.celestial;
+    const atk = CALC.spellAttack(S).value;
+    const abilities = {};
+    Object.keys(STEED_ABILITIES).forEach(function (k) {
+      const score = STEED_ABILITIES[k];
+      /* The block lists save bonuses equal to the modifiers — the steed
+         adds no proficiency to saves, so don't invent one. */
+      abilities[k] = { score: score, mod: CALC.mod(score), save: CALC.mod(score) };
+    });
+    return {
+      source: src, statName: src.statName, size: src.size, alignment: src.alignment,
+      spellLevel: lv, type: type,
+      ac: 10 + lv,
+      maxHP: 5 + 10 * lv,
+      hitDice: lv + "d10",
+      canFly: lv >= 4,
+      speed: "60 ft." + (lv >= 4 ? ", Fly 60 ft." : ""),
+      abilities: abilities,
+      passivePerception: 11,
+      languages: "Telepathy 1 mile (works only with you)",
+      cr: "None (XP 0; PB equals your Proficiency Bonus)",
+      pb: CALC.profBonus(S.level),
+      saveDC: CALC.spellSaveDC(S).value,
+      formLabel: f.form,
+      slam: { name:"Otherworldly Slam", bonus: atk, reach:"5 ft.",
+              damage:"1d8 + " + lv, damageType: type.damage },
+      cardLine:"Otherworldly Slam " + (atk >= 0 ? "+" : "−") + Math.abs(atk) +
+               " · 1d8 + " + lv + " " + type.damage.toLowerCase(),
+      /* Normalised so one renderer draws every follower's block. */
+      traits: [{ name:"Life Bond",
+                 text:"When you regain Hit Points from a level 1+ spell, the steed regains the " +
+                      "same number of Hit Points if you're within 5 feet of it." }],
+      actions: [{ name:"Otherworldly Slam",
+                  meta:(atk >= 0 ? "+" : "−") + Math.abs(atk) + " to hit · 1d8 + " + lv + " " + type.damage,
+                  text:"Melee Attack Roll: Bonus equals your spell attack modifier, reach 5 ft. " +
+                       "Hit: 1d8 plus the spell's level of " + type.damage + " damage." }],
+      bonusActions: [{ name: type.ba.name, meta: type.ba.recharge, text: type.ba.text, tracked: true }],
+      reactions: [],
+      bonusAction: type.ba,
+      combat:"Shares your Initiative count. A controlled mount while you ride it. If you have " +
+             "the Incapacitated condition, it takes its turn immediately after yours and acts " +
+             "independently, protecting you.",
+      ends:"Disappears at 0 Hit Points, or if you die."
+    };
+  },
+
+  /* The familiar takes the chosen beast's stat block whole — nothing is
+     derived from Hal — except that its creature type is replaced. The
+     one rule the block itself doesn't say: a familiar can't attack, so
+     the beast's attack is carried through but marked unusable rather
+     than quietly dropped. */
+  familiarBlock(S, f) {
+    const src = FOLLOWER_SOURCES.findFamiliar;
+    const beast = (typeof CR0_BEASTS !== "undefined" && CR0_BEASTS[f.form]) || null;
+    if (!beast) return null;
+    const type = FAMILIAR_TYPES[f.creatureType] || FAMILIAR_TYPES.celestial;
+    const abilities = {};
+    Object.keys(beast.abilities).forEach(function (k) {
+      const a = beast.abilities[k];
+      abilities[k] = { score: a.score, mod: a.mod, save: a.mod };
+    });
+    return {
+      source: src, statName: beast.name, beast: beast,
+      size: beast.size, alignment: beast.alignment,
+      spellLevel: Math.max(src.baseLevel, f.spellLevel || src.baseLevel),
+      type: type,
+      ac: parseInt(beast.ac, 10),
+      acNote: beast.ac,
+      maxHP: parseInt(beast.hp, 10),
+      hpNote: beast.hp,
+      speed: beast.speed,
+      canFly: /fly/i.test(beast.speed),
+      abilities: abilities,
+      senses: beast.senses || "—",
+      languages: beast.languages || "—",
+      cr: beast.cr,
+      formLabel: beast.name,
+      cardLine: beast.speed + (beast.senses ? " · " + beast.senses : ""),
+      traits: beast.traits || [],
+      actions: beast.actions || [],
+      bonusActions: beast.bonusActions || [],
+      reactions: beast.reactions || [],
+      cantAttack:"A familiar can't attack, but it can take other actions as normal. " +
+                 "Its stat block's attack is listed for reference only.",
+      telepathy:"Telepathic Connection. Within 100 feet you can communicate telepathically. " +
+                "As a Bonus Action you can see through its eyes and hear what it hears until the " +
+                "start of your next turn, gaining the benefits of any special senses it has.",
+      touchDelivery:"When you cast a spell with a range of touch, the familiar can deliver it — " +
+                    "within 100 feet, using its Reaction.",
+      combat:"An ally to you and your allies. Rolls its own Initiative and acts on its own turn.",
+      ends:"Disappears at 0 Hit Points, and reappears when you cast the spell again."
+    };
+  },
+
+  /* One entry point for every follower, whatever summoned it. */
+  followerBlock(S, f) {
+    if (!f) return null;
+    if (f.source === "findSteed") return CALC.steedBlock(S, f);
+    if (f.source === "findFamiliar") return CALC.familiarBlock(S, f);
+    return null;
   },
 
   layOnHandsMax(S) {
@@ -830,6 +1018,11 @@ const SEED = {
   },
   sessionHistory: [],
 
+  /* Summoned followers currently in play. A record holds only what you
+     chose and how hurt it is — every stat comes from CALC.followerBlock,
+     so levelling up or casting from a bigger slot moves the numbers. */
+  followers: [],
+
   /* In-world date. `day` is the shared 1-364 global day both calendars
      run on, so `system` only changes how it's displayed, never the date
      itself. See calendar-data.js.
@@ -870,5 +1063,6 @@ const SEED = {
 if (typeof module !== "undefined" && module.exports) {
   module.exports = { WIKIA_BASE_URL, wiki, TAGS, MASTERIES, WEAPONS, ARMOR, PALADIN_TABLE,
     ASI_LEVELS, OATH_SPELLS, SPELLS, PALADIN_SPELL_LIST, FEATS, FEATURES, CONDITIONS,
+    STEED_FORMS, STEED_TYPES, STEED_ABILITIES, FOLLOWER_SOURCES, FAMILIAR_TYPES,
     SKILL_ABILITY, SKILL_NAMES, ABILITY_NAMES, CALC, SEED };
 }

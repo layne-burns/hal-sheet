@@ -192,6 +192,55 @@ input[type=number]{width:88px}
 .alert .sub{opacity:.85;text-transform:none;letter-spacing:0;font-size:15.5px}
 .alert .x{margin-left:auto;font-size:20px;padding:0 5px}
 
+/* ---------- FOLLOWERS / SUMMONS ----------
+   Each creature type owns a hue, so two summons are never confused for
+   one another — the accent drives the card edge, the glyph and the type
+   chip, and the same card is used in the rail, in combat, and in the tab. */
+.a-cel{--acc:var(--yel)}
+.a-fey{--acc:var(--violet)}
+.a-fnd{--acc:var(--mag)}
+.fol{border:1px solid var(--line);border-left:3px solid var(--acc);background:var(--panel2);
+  padding:8px 10px;margin-bottom:7px}
+.fol:last-child{margin-bottom:0}
+.fol.full{background:var(--panel3)}
+.folhead{display:flex;align-items:baseline;gap:8px}
+.folglyph{color:var(--acc);font-size:17px;line-height:1;flex:none}
+.folname{font-size:19px;letter-spacing:.02em;cursor:pointer;flex:1;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.folname:hover{color:var(--cyan)}
+.foltype{font-family:var(--m);font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--acc);border:1px solid var(--acc);padding:1px 6px;flex:none}
+.folsub{font-family:var(--m);font-size:13.5px;color:var(--dim);letter-spacing:.05em;margin-top:3px}
+.folhp{display:flex;align-items:center;gap:7px;margin-top:6px}
+.folhp .hpbar{flex:1;min-width:40px}
+.folnum{font-family:var(--m);font-size:17px;font-variant-numeric:tabular-nums}
+.folnum small{color:var(--dim);font-size:13px}
+.folhp .tmp{font-family:var(--m);font-size:14px;color:var(--grn)}
+.folatk{font-family:var(--m);font-size:14.5px;color:var(--txt);margin-top:5px;letter-spacing:.03em}
+.folacts{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;align-items:center}
+.chip{font-family:var(--m);font-size:13px;letter-spacing:.08em;text-transform:uppercase;
+  border:1px solid var(--acc,var(--line2));color:var(--acc,var(--dim));padding:2px 8px;cursor:pointer}
+.chip.used{border-color:var(--line2);color:var(--dimmer);text-decoration:line-through}
+
+/* Stat block, printed in the order the source prints it. */
+.sb{margin-top:11px;border-top:1px solid var(--line);padding-top:9px}
+.sbrow{display:flex;align-items:baseline;gap:9px;font-family:var(--m);font-size:15.5px;
+  padding:3px 0;border-bottom:1px solid #1A242D}
+.sbrow:last-child{border-bottom:none}
+.sbrow>span:first-child{color:var(--dim);width:150px;flex:none}
+.sbrow b{color:var(--txt);font-weight:400}
+.sbwhy{color:var(--dimmer);font-size:13.5px;margin-left:auto;text-align:right}
+.sbabil{display:grid;grid-template-columns:repeat(6,1fr);gap:5px;margin-top:10px}
+.sbab{background:var(--panel2);border:1px solid var(--line);padding:6px 4px;text-align:center}
+.sbab b{display:block;font-family:var(--m);font-size:19px;font-weight:400;margin:2px 0}
+.sbab .sbwhy{margin:0;text-align:center;display:block;font-size:12.5px}
+.sbsec{margin-top:12px}
+.sbk{display:block;font-family:var(--m);font-size:13px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--cyan);margin:14px 0 6px}
+.sbsec .sbk{margin-top:0}
+.modal .pick.a-cel,.modal .pick.a-fey,.modal .pick.a-fnd{border-left:3px solid var(--acc)}
+.modal .pick .pm b{color:var(--acc,var(--cyan));font-weight:400}
+
 /* ---------- REMINDERS ----------
    Lives under the alert bar on every tab. Violet = the world's holidays,
    yellow = something you wrote down yourself. */
@@ -492,6 +541,7 @@ textarea.notes{width:100%;min-height:140px;line-height:1.6;font-family:var(--f);
 <div id="app"></div>
 <div id="modal-root"></div>
 
+<script src="beasts-data.js"></script>
 <script src="rules.js"></script>
 <script src="calendar-data.js"></script>
 <script src="combat-rules.js"></script>
