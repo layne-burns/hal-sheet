@@ -427,6 +427,15 @@ ok("so is the Magic Initiate spell", railSpells().indexOf("Find Familiar") >= 0)
 ok("granted spells are labelled as granted, not passed off as prepared",
    /Granted/.test($(".rrail").innerHTML));
 eq("nothing is listed twice", railSpells().length, new Set(railSpells()).size);
+/* The guard that makes this class of bug impossible: the rail must hold
+   exactly the spells the engine says are castable — no more, no fewer.
+   Cantrips were the ones that slipped through the first time. */
+eq("the rail holds exactly what the engine says is castable",
+   CALe("castableSpellKeys().slice().sort().join(',')"),
+   CALe("CALC.castables(S).filter(function(c){return c.kind==='spell'}).map(function(c){return c.id}).sort().join(',')"));
+ok("cantrips are in it too — they're the ones you cast most",
+   railSpells().indexOf("Prestidigitation") >= 0 && railSpells().indexOf("Mage Hand") >= 0);
+ok("and they say they cost nothing", /At will/.test($(".rrail").innerHTML));
 eq("the free cast starts full", st.resources.faithfulSteed, 1);
 /* "You can cast it once without a spell slot, regaining that use on a
    Long Rest" — the rest used to skip it, stranding the use at 0. */

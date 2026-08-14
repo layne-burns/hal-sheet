@@ -1512,10 +1512,13 @@ function grantedSpellKeys() {
 /* Everything castable right now, in the order the Spells tab lists it.
    The rail used to build its own list from preparedSpells + oath alone,
    which is how Find Steed could sit in the Spells tab and be missing
-   from the rail you actually cast from at the table. One list now. */
+   from the rail you actually cast from at the table — and how the
+   cantrips, the things you cast most freely of all, were missing from
+   both. Checked against CALC.castables by the tests, so the two can't
+   drift apart again. */
 function castableSpellKeys() {
   const seen = {};
-  return S.preparedSpells.concat(oathSpellKeys(), grantedSpellKeys())
+  return (S.cantrips || []).concat(S.preparedSpells, oathSpellKeys(), grantedSpellKeys())
     .filter(function (k) {
       if (!SPELLS[k] || seen[k]) return false;
       seen[k] = true;
@@ -2291,17 +2294,18 @@ function resourceRail() {
      filter so filtering is global, not just within the Spells tab. */
   const granted = grantedSpellKeys();
   out += '<div class="pnl cut"><h3>Prepared <span class="cnt">' +
-    (UI.filter.length ? "filtered" : "+ granted") + "</span></h3>";
+    (UI.filter.length ? "filtered" : "+ granted · at will") + "</span></h3>";
   castableSpellKeys().forEach(function (k) {
     const sp = SPELLS[k];
     if (!matchesFilter(tagsOf("spell:" + k, sp.tags))) return;
-    /* A granted spell says so, or the panel would read as if you'd
-       spent a prepared slot on it. */
-    const free = granted.indexOf(k) >= 0;
+    /* Where a spell comes from is worth saying, or the panel reads as
+       if you'd spent a prepared slot on every line of it. */
+    const badge = (S.cantrips || []).indexOf(k) >= 0 ? "At will"
+                : (granted.indexOf(k) >= 0 ? "Granted" : "");
     out += '<div class="entry" style="padding:6px 0"><div class="eh">' +
       '<button class="namebtn en" data-act="use" data-kind="spell" data-id="' + k +
       '">' + esc(sp.name) + "</button>" + wikiBtn(sp.slug) +
-      (free ? '<span class="bdg">Granted</span>' : "") + "</div>" +
+      (badge ? '<span class="bdg">' + badge + "</span>" : "") + "</div>" +
       "<div>" + tagHTML(tagsOf("spell:" + k, sp.tags), false) + "</div></div>";
   });
   out += "</div>";
