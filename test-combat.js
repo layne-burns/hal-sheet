@@ -589,6 +589,45 @@ ok("notes read by time of day", /\*\*Morning\*\* — Met the keeper/.test(md));
 ok("flags are marked", /⚠ Hal is down/.test(md));
 ok("bookkeeping stays out of the story section",
    md.indexOf("Start session") > md.indexOf("## Technical log"));
+
+console.log("\n=== THE RECAP DATES ITSELF IN BOTH CALENDARS ===");
+/* A recap is read later, often by someone who thinks in the other
+   calendar, so a heading naming only one reckoning is half a date. */
+ok("the day heading gives the Jerbeen reckoning", /### Grub-Wake 1, Year 222/.test(md));
+ok("...and the Common one beside it", /### Grub-Wake 1, Year 222 · Dawnrise 1, 222 PF/.test(md));
+ok("the second day too", /### Grub-Wake 2, Year 222 · Dawnrise 2, 222 PF/.test(md));
+ok("the technical log is dated in both as well", /\(Grub-Wake 1 · Dawnrise 1\)/.test(md));
+
+console.log("\n=== THINGS YOU ADD TO THE WORLD ARE STORY, NOT WARNINGS ===");
+const wmd = w.eval("sessionToMarkdown({startedAt:Date.now(),endedAt:Date.now()," +
+  "stats:{highestACFaced:null,highestDCSet:null},log:[" +
+  "{t:Date.now(),label:'Marker placed: The missing caravan — near Gloomwood'," +
+  "kind:'world',ref:'map:c-1',cal:{day:1,year:2022,time:'morning'}}," +
+  "{t:Date.now(),label:'Hal is down (0 HP)',kind:'flag',cal:{day:1,year:2022,time:'morning'}}" +
+  "]})");
+ok("a marker you placed appears in the story section",
+   wmd.indexOf("The missing caravan") < wmd.indexOf("## Technical log") ||
+   wmd.indexOf("## Technical log") === -1);
+ok("...naming it and where it is", /Marker placed: The missing caravan — near Gloomwood/.test(wmd));
+ok("...without a warning glyph, which is for things going wrong",
+   !/⚠ Marker placed/.test(wmd));
+ok("a genuine warning still gets one", /⚠ Hal is down/.test(wmd));
+
+console.log("\n=== GETTING THE NOTES OFF THE IPAD ===");
+/* This used to be one button, reachable only after ending a session,
+   and only ever for the last one. */
+ok("a running session can be exported without ending it",
+   !!w.eval("sessionMarkdownFor('current').length"));
+ok("the export block is offered while the session runs",
+   /data-act="sessionCopy"/.test(w.eval("EXT.sessionModal()")));
+ok("...offering both copy and share",
+   /data-act="sessionExport"/.test(w.eval("EXT.sessionModal()")));
+ok("...and it says where the notes end up on a computer",
+   /hal-session-notes\.md/.test(w.eval("EXT.sessionModal()")));
+ok("the running session is included in the all-sessions document",
+   w.eval("allSessionsMarkdown()").indexOf("# Session") === 0);
+eq("an export of nothing is empty rather than a stray file",
+   w.eval("sessionMarkdownFor('last')"), "");
 click(byAct("closeModal"));
 
 console.log("\n=== SESSION NOTE REMINDER NUDGE ===");

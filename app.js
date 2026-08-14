@@ -110,6 +110,33 @@ function logFlag(st, text) {
   }
 }
 
+/* Things you added to the world — a marker, an article, notes on a
+   place. Narrative like a flag, but not a warning, so it reads as part
+   of the story rather than as something going wrong.
+
+   Upserts on `ref` instead of appending. A marker is created and then
+   named a moment later, and notes on a place get edited four times in
+   an evening; appending would turn one act into a pile of lines saying
+   almost the same thing. Rewriting the entry keeps the log at one line
+   per thing you actually did, carrying its latest name. */
+function logWorld(st, ref, text) {
+  if (!st.session || !st.session.active) return;
+  const log = st.session.log;
+  /* A null ref always appends: some world events genuinely happen more
+     than once and each time is worth a line — the party moving twice in
+     an evening is two moves, not a correction of the first. */
+  for (let i = ref ? log.length - 1 : -1; i >= 0; i--) {
+    if (log[i].ref === ref) {
+      log[i].label = text;
+      log[i].t = Date.now();
+      log[i].cal = calStamp(st);
+      return;
+    }
+  }
+  log.push({ t: Date.now(), label: text, kind: "world", ref: ref, cal: calStamp(st) });
+  if (log.length > 500) log.shift();
+}
+
 /* Where the party was in the story when something happened — the wall
    clock says when you played, this says when it happened. */
 function calStamp(st) {
@@ -896,7 +923,7 @@ const ACT = {
        export reads as a journey and not just a list of fights. */
     mutate(function (st) {
       st.map.party = { x: p.x, y: p.y };
-      logFlag(st, "The party is at " + p.name);
+      logWorld(st, null, "The party is at " + p.name);
     });
   },
   mapClearParty() {
@@ -909,8 +936,16 @@ const ACT = {
     if (!name) return;
     mutate(function (st) {
       const c = st.map.custom.filter(function (k) { return k.id === id; })[0];
-      if (c) { c.name = name; return; }
+      if (c) {
+        c.name = name;
+        const near = mapNearest(c.x, c.y, c.id);
+        logWorld(st, "map:" + id, "Marker placed: " + name +
+          (near ? " — near " + near.name : ""));
+        return;
+      }
+      const was = mapPin(id);
       st.map.edits[id] = Object.assign({}, st.map.edits[id], { name: name });
+      logWorld(st, "rename:" + id, "Renamed " + (was ? was.name : id) + " to " + name);
     });
   },
 
@@ -935,7 +970,9 @@ const ACT = {
   },
   mapDelete(el) {
     const id = el.dataset.id;
+    const gone = mapPin(id);
     mutate(function (st) {
+      logWorld(st, "del:" + id, "Marker removed: " + (gone ? gone.name : id));
       st.map.custom = st.map.custom.filter(function (c) { return c.id !== id; });
       st.map.notes[id] && delete st.map.notes[id];
       st.map.lore = st.map.lore.filter(function (l) { return l.scope !== id; });
@@ -946,8 +983,14 @@ const ACT = {
 
   mapNote(el) {
     const id = el.dataset.id, v = el.value;
+    const where = mapScopeName(id);
     mutate(function (st) {
-      if (v.trim()) st.map.notes[id] = v; else delete st.map.notes[id];
+      if (v.trim()) {
+        st.map.notes[id] = v;
+        logWorld(st, "note:" + id, "Notes on " + where + ": " + shortenNote(v));
+      } else {
+        delete st.map.notes[id];
+      }
     });
   },
 
@@ -958,15 +1001,22 @@ const ACT = {
     const title = tEl ? tEl.value.trim() : "";
     const body = bEl ? bEl.value.trim() : "";
     if (!title && !body) return;
+    const id = newPinId();
     mutate(function (st) {
-      st.map.lore.push({ id: newPinId(), scope: scope,
+      st.map.lore.push({ id: id, scope: scope,
                          title: title || "Untitled", body: body });
+      logWorld(st, "lore:" + id, "Lore added — “" + (title || "Untitled") +
+        "” on " + mapScopeName(scope) +
+        (body ? ": " + shortenNote(body) : ""));
     });
   },
   mapLoreDelete(el) {
     const id = el.dataset.id;
+    const gone = S.map.lore.filter(function (l) { return l.id === id; })[0];
     mutate(function (st) {
       st.map.lore = st.map.lore.filter(function (l) { return l.id !== id; });
+      logWorld(st, "loredel:" + id, "Lore removed — “" +
+        (gone ? gone.title : id) + "”");
     });
   },
 
@@ -2152,6 +2202,37 @@ function mapHiddenIds() {
 
 function newPinId() { return "c-" + Date.now().toString(36) + Math.floor(Math.random() * 1e3); }
 
+/* A log line quotes enough of a note to be recognised later without
+   copying the whole thing into the recap — the note itself lives on the
+   place, and that is where you go to read it. */
+const NOTE_GIST_CHARS = 90;
+function shortenNote(text) {
+  const one = String(text || "").replace(/\s+/g, " ").trim();
+  return one.length > NOTE_GIST_CHARS ? one.slice(0, NOTE_GIST_CHARS - 1) + "…" : one;
+}
+
+/* The pin closest to a point, so "where is that?" can be answered in
+   place names rather than coordinates. Straight-line distance across
+   the image is not a travel time and is never offered as one. */
+function mapNearest(x, y, excludeId) {
+  let near = null, best = Infinity;
+  mapPins().forEach(function (q) {
+    if (q.id === excludeId) return;
+    const d = Math.pow(q.x - x, 2) + Math.pow(q.y - y, 2);
+    if (d < best) { best = d; near = q; }
+  });
+  return near;
+}
+
+/* What a piece of your own lore is filed under, named for the log. */
+function mapScopeName(scope) {
+  if (!scope || scope === "__world") return "the world";
+  const pin = mapPin(scope);
+  if (pin) return pin.name;
+  const r = CYRNN.region(scope);
+  return r ? r.name : scope;
+}
+
 /* ---------- MAP TAB ---------- */
 function mapTab() {
   return mapPanel() + mapSelectedPanel() + atlasPanel() + worldLorePanel();
@@ -2299,14 +2380,7 @@ function mapSelectedPanel() {
 function partyPanel() {
   const p = S.map.party;
   if (!p) return "";
-  /* Nearest pin, so "where are we?" gets an answer in place names rather
-     than in coordinates. Straight-line distance on the image is not a
-     travel time and is not offered as one. */
-  let near = null, best = Infinity;
-  mapPins().forEach(function (q) {
-    const d = Math.pow(q.x - p.x, 2) + Math.pow(q.y - p.y, 2);
-    if (d < best) { best = d; near = q; }
-  });
+  const near = mapNearest(p.x, p.y);
   return '<div class="pnl cut"><h3>The party</h3>' +
     '<div class="etext">Standing ' +
       (near ? "nearest to <b>" + esc(near.name) + "</b>" : "somewhere in Cyrnn") + ".</div>" +
@@ -3541,9 +3615,14 @@ document.addEventListener("pointerup", function (e) {
     if (!at) return;
     if (UI.map.mode === "add") {
       const id = newPinId();
+      const near = mapNearest(at.x, at.y);
       mutate(function (st) {
         st.map.custom.push({ id: id, name: "New marker", kind: "marker",
                              x: at.x, y: at.y, note: "" });
+        /* Logged unnamed; naming it rewrites this same line rather than
+           adding a second one. */
+        logWorld(st, "map:" + id, "Marker placed: New marker" +
+          (near ? " — near " + near.name : ""));
       });
       UI.map.sel = id;
       render();

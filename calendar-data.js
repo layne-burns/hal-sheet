@@ -361,6 +361,17 @@ const CAL = {
     return era ? year + " " + era : "Year " + year;
   },
 
+  /* The same day told in both reckonings at once. A session recap is
+     read later and often by someone who thinks in the other calendar,
+     so a date that only says "Grub-Wake 14" is half a date. Everything
+     that writes a date down for keeping should use this; the live
+     screens, which have a system picker right there, need not. */
+  bothLabel(day, year) {
+    return Object.keys(CAL_SYSTEMS).map(function (k) {
+      return CAL.format(k, day) + (year == null ? "" : ", " + CAL.yearLabel(k, year));
+    }).join(" · ");
+  },
+
   /* ---- Who keeps which feast ---------------------------------
      The map's side of the join. Hand it every scope a place answers to
      -- its own id, its region, any group it belongs to -- and get back

@@ -538,7 +538,9 @@ function fmtTime(t) { return new Date(t).toLocaleTimeString([], { hour: "2-digit
 function fmtDate(t) { return new Date(t).toLocaleDateString(); }
 /* Notes and flags are the story; everything else is bookkeeping the app
    logged for you. Splitting them is what makes a recap readable. */
-function isNarrative(e) { return e.kind === "note" || e.kind === "flag"; }
+function isNarrative(e) {
+  return e.kind === "note" || e.kind === "flag" || e.kind === "world";
+}
 
 /* In-world date for a log entry, in whichever calendar you're reading. */
 function calLabel(e) {
@@ -566,7 +568,7 @@ function sessionToMarkdown(s) {
       if (key !== lastKey) {
         lastKey = key;
         out += (out.slice(-2) === "\n\n" ? "" : "\n") + "### " +
-          (e.cal ? CAL.format(sys, e.cal.day) + ", " + CAL.yearLabel(sys, e.cal.year) : "Undated") + "\n\n";
+          (e.cal ? CAL.bothLabel(e.cal.day, e.cal.year) : "Undated") + "\n\n";
       }
       out += "- **" + (e.cal ? CAL.timeLabel(e.cal.time) : fmtTime(e.t)) + "** — " +
         (e.kind === "flag" ? "⚠ " : "") + e.label + "\n";
@@ -576,12 +578,69 @@ function sessionToMarkdown(s) {
   if (tech.length) {
     out += "\n## Technical log\n\n";
     tech.forEach(function (e) {
-      out += "- " + fmtTime(e.t) + (e.cal ? " (" + CAL.format(sys, e.cal.day) + ")" : "") +
+      out += "- " + fmtTime(e.t) +
+        (e.cal ? " (" + CAL.bothLabel(e.cal.day, null) + ")" : "") +
         " — " + e.label + "\n";
     });
   }
   return out;
 }
+/* Every session, newest first, as one document — what the cloud backup
+   carries and what "Export all" hands you. The running session is
+   included, closed off at now, so you never have to end a session to
+   read it back. */
+function allSessionsMarkdown() {
+  const all = S.sessionHistory.slice();
+  if (S.session && S.session.active) {
+    all.push(Object.assign({}, S.session, { endedAt: Date.now() }));
+  }
+  if (!all.length) return "";
+  return all.reverse().map(sessionToMarkdown).join("\n\n---\n\n");
+}
+
+/* Which session a given export button means. */
+function sessionFor(which) {
+  if (which === "current") {
+    return S.session && S.session.active
+      ? Object.assign({}, S.session, { endedAt: Date.now() })
+      : null;
+  }
+  return S.sessionHistory[S.sessionHistory.length - 1] || null;
+}
+
+function sessionMarkdownFor(which) {
+  if (which === "all") return allSessionsMarkdown();
+  const s = sessionFor(which);
+  return s ? sessionToMarkdown(s) : "";
+}
+
+/* The export block, shown whether or not a session is running. Getting
+   the notes off the iPad was the whole point and it used to be reachable
+   only after ending a session, from a single button that only ever gave
+   you the last one. */
+function sessionExportControls() {
+  const running = !!(S.session && S.session.active);
+  const count = S.sessionHistory.length + (running ? 1 : 0);
+  if (!count) return "";
+  let out = '<div class="ph2" style="margin-top:14px">Take the notes with you</div><div class="mrow">';
+  const which = running ? "current" : "last";
+  const label = running ? "this session" : "last session";
+  out += '<button class="bt cutsm pri" data-act="sessionCopy" data-which="' + which +
+      '">Copy ' + label + "</button>" +
+    '<button class="bt cutsm" data-act="sessionExport" data-which="' + which +
+      '">Share ' + label + "</button>";
+  if (count > 1) {
+    out += '<button class="bt cutsm" data-act="sessionExport" data-which="all">Share all ' +
+      count + "</button>";
+  }
+  out += "</div>";
+  out += '<div class="foot">Copy puts the Markdown on the clipboard — paste it anywhere. ' +
+    "Share opens the iPad share sheet, so it can go to Files, Mail or another device. " +
+    "Every cloud sync also writes them to your backup gist as <b>hal-session-notes.md</b>, " +
+    "which reads as a formatted page on any computer.</div>";
+  return out;
+}
+
 EXT.sessionModal = function () {
   const s = S.session;
   let body = "<h2>Session log</h2>";
@@ -605,7 +664,8 @@ EXT.sessionModal = function () {
     }
     story.slice().reverse().forEach(function (e) {
       const stamp = calLabel(e) || fmtTime(e.t);
-      body += '<div class="gain ' + (e.kind === "flag" ? "k-flag" : "k-note") + '">' +
+      body += '<div class="gain ' +
+        (e.kind === "flag" ? "k-flag" : e.kind === "world" ? "k-proficiency" : "k-note") + '">' +
         '<span class="gk">' + esc(stamp) + "</span><span>" +
         (e.kind === "flag" ? "⚠ " : "") + esc(e.label) + "</span></div>";
     });
@@ -624,6 +684,7 @@ EXT.sessionModal = function () {
           esc(e.label) + "</span></div>";
       });
     }
+    body += sessionExportControls();
     body += '<div class="mfoot"><button class="bt cutsm dg" data-act="sessionEnd">End session</button>' +
       '<button class="bt cutsm" data-act="closeModal">Keep playing</button></div>';
   } else {
@@ -637,8 +698,8 @@ EXT.sessionModal = function () {
       body += '<div class="ph2" style="margin-top:10px">Last session</div>';
       body += '<div class="foot">' + fmtDate(last.startedAt) + " · " + last.log.length + " events" +
         (lastStats.length ? " · " + esc(lastStats.join(", ")) : "") + "</div>";
-      body += '<div class="mrow"><button class="bt cutsm" data-act="sessionExport">Export last session as Markdown</button></div>';
     }
+    body += sessionExportControls();
     body += '<div class="mfoot"><button class="bt cutsm" data-act="closeModal">Close</button></div>';
   }
   return body;
@@ -1125,17 +1186,75 @@ Object.assign(ACT, {
     UI.modal = { type: "session" };
     render();
   },
-  sessionExport() {
-    const s = S.sessionHistory[S.sessionHistory.length - 1];
-    if (!s) return;
-    const md = sessionToMarkdown(s);
+  /* Share sheet first, download second. On an iPad a download lands in
+     Files and is then your problem; the share sheet can put it straight
+     into Mail, Notes, or another device, which is what "read it on the
+     PC" actually needs. Same approach as the backup export. */
+  sessionExport(el) {
+    const which = (el && el.dataset.which) || "last";
+    const md = sessionMarkdownFor(which);
+    if (!md) return;
+    const stamp = which === "all"
+      ? new Date().toISOString().slice(0, 10) + "-all"
+      : new Date((sessionFor(which) || {}).startedAt || Date.now()).toISOString().slice(0, 10);
+    const filename = "hal-session-" + stamp + ".md";
     const blob = new Blob([md], { type: "text/markdown" });
+
+    if (typeof navigator !== "undefined" && navigator.share && navigator.canShare) {
+      const file = new File([blob], filename, { type: "text/markdown" });
+      if (navigator.canShare({ files: [file] })) {
+        navigator.share({ files: [file], title: "Hal — session notes" })
+          .catch(function () { /* cancelled */ });
+        return;
+      }
+    }
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "hal-session-" + new Date(s.startedAt).toISOString().slice(0, 10) + ".md";
+    a.download = filename;
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
+  },
+
+  /* The most portable option of the lot: no file, no share sheet, just
+     the text where anything can paste it. */
+  sessionCopy(el) {
+    const which = (el && el.dataset.which) || "last";
+    const md = sessionMarkdownFor(which);
+    if (!md) return;
+    const done = function (ok) {
+      UI.alert = { info: ok
+        ? "Session notes copied — paste them anywhere."
+        : "Couldn't reach the clipboard. Use Share instead." };
+      render();
+    };
+    /* Older WebKit, and the retry when the modern call is refused: a
+       selected off-screen textarea and execCommand. */
+    const legacyCopy = function () {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = md;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "fixed";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand && document.execCommand("copy");
+        ta.remove();
+        return !!ok;
+      } catch (e) {
+        return false;
+      }
+    };
+    /* The modern call can be refused for reasons that have nothing to do
+       with support — an unfocused document, a permissions policy — so a
+       rejection falls through to the old way rather than giving up. */
+    if (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(md).then(function () { done(true); },
+                                            function () { done(legacyCopy()); });
+      return;
+    }
+    done(legacyCopy());
   },
   addSessionNote(el) {
     const input = el.parentElement.querySelector('input[type="text"]');

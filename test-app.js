@@ -240,6 +240,11 @@ ok("no lore still claims the round 2000 years",
 
 console.log("\n=== MAP TAB ===");
 click(byAct("tab", { tab: "map" }));
+function setField2(act, v) {
+  const el = byAct(act);
+  el.value = v;
+  el.dispatchEvent(new w.Event("change", { bubbles: true }));
+}
 function mapState() { return JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).map; }
 ok("the map is drawn", !!$(".mapimg"));
 eq("every visible place has a pin", $$(".mpin").length, CALe("CYRNN.places.length"));
@@ -337,6 +342,65 @@ eq("the party stands where you put it",
 ok("the party gets its own pin", !!$(".mpin.party"));
 click($('.mpin[data-id="__party"]'));
 ok("and the party panel names where it is", /nearest to/.test(text()));
+
+console.log("\n=== MAP: WHAT YOU ADD TO THE WORLD REACHES THE SESSION LOG ===");
+CALe("mutate(function(st){ st.session.active=true; st.session.startedAt=Date.now();" +
+     " st.session.log=[]; st.session.stats={highestACFaced:null,highestDCSet:null}; })");
+function logLabels() { return CALe("S.session.log.map(function(e){return e.kind+'|'+e.label})"); }
+
+/* A marker is created and then named a moment later. Appending both
+   would turn one act into two near-identical lines. */
+CALe('mutate(function(st){ st.map.custom.push(' +
+     '{id:"c-log",name:"New marker",kind:"marker",x:50.4,y:47.4,note:""});' +
+     ' logWorld(st,"map:c-log","Marker placed: New marker — near Gloomwood"); })');
+eq("placing a marker writes one line", logLabels().length, 1);
+click($('.mpin[data-id="c-log"]'));
+setField2("mapRename", "The missing caravan");
+eq("...and naming it rewrites that line rather than adding another", logLabels().length, 1);
+ok("...now carrying the name you gave it",
+   /Marker placed: The missing caravan/.test(logLabels()[0]));
+ok("...and where on the map it is", /near /.test(logLabels()[0]));
+ok("it is filed as world, so the recap reads it as story",
+   logLabels()[0].indexOf("world|") === 0);
+
+CALe('mutate(function(st){ st.map.notes = {}; })');
+click($('.mpin[data-id="gloomwood"]'));
+setField2("mapNote", "Three wagons went in and never came out the far side.");
+ok("notes on a place are logged, quoting enough to recognise",
+   logLabels().some(function (l) { return /Notes on Gloomwood: Three wagons/.test(l); }));
+setField2("mapNote", "Three wagons went in and never came out. The keeper is lying.");
+eq("editing the same notes again keeps it to one line",
+   logLabels().filter(function (l) { return /Notes on Gloomwood/.test(l); }).length, 1);
+
+const beforeLore = logLabels().length;
+CALe('mutate(function(st){ st.map.lore.push({id:"L-log",scope:"gloomwood",' +
+     'title:"Rumour at the Ghost Moors",body:"A demon with a grudge."});' +
+     ' logWorld(st,"lore:L-log","Lore added — \\u201cRumour at the Ghost Moors\\u201d on Gloomwood: A demon with a grudge."); })');
+eq("adding lore writes a line", logLabels().length, beforeLore + 1);
+ok("...naming it and what it is filed under",
+   /Lore added .*Rumour at the Ghost Moors.* on Gloomwood/.test(logLabels()[logLabels().length - 1]));
+
+/* The party moving twice in an evening is two moves, not a correction
+   of the first — so these append where a rename does not. */
+click($('.mpin[data-id="gloomwood"]'));
+click(byAct("mapPartyHere", { id: "gloomwood" }));
+click($('.mpin[data-id="corisport"]'));
+click(byAct("mapPartyHere", { id: "corisport" }));
+eq("every party move gets its own line",
+   logLabels().filter(function (l) { return /The party is at/.test(l); }).length, 2);
+ok("...and is story rather than a warning",
+   logLabels().filter(function (l) { return /The party is at/.test(l); })
+     .every(function (l) { return l.indexOf("world|") === 0; }));
+
+ok("every world entry is stamped with the in-world date",
+   CALe("S.session.log.filter(function(e){return e.kind==='world'})" +
+        ".every(function(e){return e.cal && e.cal.day && e.cal.year})"));
+CALe("mutate(function(st){ st.session.active=false; st.session.log=[]; })");
+eq("nothing is logged when no session is running",
+   (function () {
+     CALe('mutate(function(st){ logWorld(st,"x","should not appear"); })');
+     return CALe("S.session.log.length");
+   })(), 0);
 
 console.log("\n=== MAP: THE CAMERA IS NOT PART OF THE CHARACTER ===");
 ok("zoom and selection are not persisted",

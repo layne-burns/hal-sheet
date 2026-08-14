@@ -26,6 +26,12 @@ const DAILY_KEY = "hal-briarshade-daily-v1";
 const DAILY_MAX = 14;
 const LAST_EXPORT_KEY = "hal-briarshade-last-export";
 const GIST_FILENAME = "hal-briarshade-backup.json";
+/* The backup is JSON, which is exactly the wrong thing to read on a
+   laptop after a session. So the same gist also carries the notes as
+   Markdown, which GitHub renders as a page -- no export step, no cable,
+   and it is already there the next time you look. Purely a second copy:
+   nothing ever reads it back, so it can never corrupt a restore. */
+const GIST_NOTES_FILENAME = "hal-session-notes.md";
 
 /* ---------- BACKUP CONFIG (token / gist id / status) ----------- */
 function backupDefaults() {
@@ -180,6 +186,12 @@ function syncToGist() {
     files: {}
   };
   payload.files[GIST_FILENAME] = { content: JSON.stringify(S, null, 2) };
+  /* combat.js owns the recap format; if it failed to load, sync the
+     sheet anyway rather than losing the backup over a nicety. */
+  if (typeof allSessionsMarkdown === "function") {
+    const notes = allSessionsMarkdown();
+    if (notes) payload.files[GIST_NOTES_FILENAME] = { content: notes };
+  }
   const headers = gistHeaders(cfg.token);
   function fail(msg) {
     cfg.lastSyncOk = false; cfg.lastError = msg; cfg.pending = true;

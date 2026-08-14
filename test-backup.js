@@ -138,6 +138,32 @@ eq("one PATCH call this time", fetchCalls.length, 1);
 ok("PATCHed the specific gist id, not the collection", /gists\/gist-abc123$/.test(fetchCalls[0].url));
 eq("PATCH method used", fetchCalls[0].opts.method, "PATCH");
 
+console.log("\n=== THE GIST CARRIES THE NOTES AS READABLE MARKDOWN ===");
+/* The backup itself is JSON, which is the wrong thing to open on a
+   laptop after a session. The same gist carries a rendered copy so the
+   notes are already there, with no export step. */
+const bare = JSON.parse(fetchCalls[0].opts.body);
+ok("with no sessions there is no stray empty notes file",
+   !bare.files["hal-session-notes.md"]);
+w.eval("mutate(function(st){ st.session.active=true; st.session.startedAt=Date.now();" +
+       " st.session.log=[{t:Date.now(),label:'Marker placed: The missing caravan'," +
+       "kind:'world',cal:{day:14,year:2022,time:'morning'}}];" +
+       " st.session.stats={highestACFaced:null,highestDCSet:null}; })");
+fetchCalls.length = 0;
+fetchQueue = [{ status: 200, body: { id: "gist-abc123" } }];
+click(byAct("backupNow"));
+await flush();
+const payload = JSON.parse(fetchCalls[0].opts.body);
+ok("the sheet is still the backup file", !!payload.files["hal-briarshade-backup.json"]);
+ok("...and the notes ride alongside it", !!payload.files["hal-session-notes.md"]);
+const notes = payload.files["hal-session-notes.md"].content;
+ok("the notes are Markdown, not JSON", notes.indexOf("# Session") === 0);
+ok("a running session is included without ending it",
+   /The missing caravan/.test(notes));
+ok("dated in both calendars for whoever reads it later",
+   /Grub-Wake 14, Year 2022 · Dawnrise 14, 2022 PF/.test(notes));
+w.eval("mutate(function(st){ st.session.active=false; st.session.log=[]; })");
+
 console.log("\n=== LOAD FROM CLOUD (CARRYING THE SHEET BETWEEN DEVICES) ===");
 ok("the backup modal offers a restore", !!byAct("backupLoad"));
 /* The cloud copy is a level 7 Hal — clearly distinguishable from local. */
