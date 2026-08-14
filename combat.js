@@ -87,14 +87,23 @@ EXT.glow = function () {
   const maxHP = CALC.maxHP(S).value;
   const low = maxHP > 0 && (S.currentHP / maxHP) <= 0.2;
   const conc = S.toggles.concentrating;
-  if (!low && !conc) return "";
-  let cls = "glow";
-  if (conc && low) cls += " glow-both";
-  else if (conc) cls += " glow-conc";
-  else cls += " glow-low";
-  const label = conc && low ? "Concentrating and badly hurt"
-    : conc ? "Concentrating" : "Below 20% hit points";
-  return '<div class="' + cls + '" aria-label="' + label + '"></div>';
+  let out = "";
+  if (low || conc) {
+    let cls = "glow";
+    if (conc && low) cls += " glow-both";
+    else if (conc) cls += " glow-conc";
+    else cls += " glow-low";
+    const label = conc && low ? "Concentrating and badly hurt"
+      : conc ? "Concentrating" : "Below 20% hit points";
+    out += '<div class="' + cls + '" aria-label="' + label + '"></div>';
+  }
+  /* Inspiration is a standing reminder, not an alarm, so it rides on its
+     own quiet layer — slow and gold — instead of competing with the
+     colours that mean something is going wrong. */
+  if (S.toggles.inspiration) {
+    out += '<div class="glow glow-insp" aria-label="You have Inspiration"></div>';
+  }
+  return out;
 };
 
 /* ---------- COMBAT BAR -------------------------------------- */
@@ -1304,6 +1313,10 @@ render = function () {
       (S.session.active ? "Session ●" : "Session") + "</button>" +
       '<button class="bt cutsm" data-act="settingsModal">Settings</button>');
   }
+
+  /* Panels injected above didn't exist when the base render folded
+     things, so fold again now that the DOM is final. */
+  applyPanelFolds();
 };
 
 /* Re-render once combat.js has patched everything */

@@ -508,6 +508,73 @@ const FAMILIAR_TYPES = {
   fiend:     { key:"fiend",     name:"Fiend" }
 };
 
+/* ============================================================
+   COMBAT RULES THAT FOLLOWERS DEPEND ON
+   Transcribed from the 2024 SRD, Playing the Game → Combat. Kept as
+   data next to the followers that need it, because looking up whether a
+   mount acts on your Initiative shouldn't mean leaving the table.
+   ============================================================ */
+const COMBAT_RULES = {
+  source: "2024 SRD · Playing the Game → Combat",
+  url: "https://5e24srd.com/playing-the-game/combat.html",
+  sections: [
+    { key:"mounted", name:"Mounted Combat",
+      intro:"A willing creature that is at least one size larger than a rider and that has an " +
+            "appropriate anatomy can serve as a mount, using the following rules.",
+      parts: [
+        { name:"Mounting and Dismounting",
+          text:"During your move, you can mount a creature that is within 5 feet of you or " +
+               "dismount. Doing so costs an amount of movement equal to half your Speed (round " +
+               "down). For example, if your Speed is 30 feet, you spend 15 feet of movement to " +
+               "mount a horse." },
+        { name:"Controlling a Mount",
+          text:"You can control a mount only if it has been trained to accept a rider. " +
+               "Domesticated horses, mules, and similar creatures have such training. The " +
+               "Initiative of a controlled mount changes to match yours when you mount it. It " +
+               "moves on your turn as you direct it, and it has only three action options during " +
+               "that turn: Dash, Disengage, and Dodge. A controlled mount can move and act even " +
+               "on the turn that you mount it. In contrast, an independent mount — one that lets " +
+               "you ride but ignores your control — retains its place in the Initiative order and " +
+               "moves and acts as it likes." },
+        { name:"Falling Off",
+          text:"If an effect is about to move your mount against its will while you're on it, you " +
+               "must succeed on a DC 10 Dexterity saving throw or fall off, landing with the Prone " +
+               "condition in an unoccupied space within 5 feet of the mount. While mounted, you " +
+               "must make the same save if you're knocked Prone or the mount is." }
+      ] },
+    { key:"opportunity", name:"Opportunity Attacks",
+      intro:"Combatants watch for enemies to drop their guard. If you move heedlessly past your " +
+            "foes, you put yourself in danger by provoking an Opportunity Attack.",
+      parts: [
+        { name:"Making an Opportunity Attack",
+          text:"You can make an Opportunity Attack when a creature that you can see leaves your " +
+               "reach. To make the attack, take a Reaction to make one melee attack with a weapon " +
+               "or an Unarmed Strike against that creature. The attack occurs right before it " +
+               "leaves your reach." },
+        { name:"Avoiding Opportunity Attacks",
+          text:"You can avoid provoking an Opportunity Attack by taking the Disengage action. You " +
+               "also don't provoke an Opportunity Attack when you Teleport or when you are moved " +
+               "without using your movement, action, Bonus Action, or Reaction." }
+      ] },
+    { key:"initiative", name:"Initiative",
+      intro:"Initiative determines the order of turns during combat. When combat starts, every " +
+            "participant rolls Initiative; they make a Dexterity check that determines their " +
+            "place in the Initiative order.",
+      parts: [
+        { name:"Initiative Order",
+          text:"A combatant's check total is called their Initiative count. The GM ranks the " +
+               "combatants from highest to lowest Initiative. This is the order in which they act " +
+               "during each round, and it remains the same from round to round." },
+        { name:"Ties",
+          text:"If a tie occurs, the GM decides the order among tied monsters, and the players " +
+               "decide the order among tied characters. The GM decides the order if the tie is " +
+               "between a monster and a player character." }
+      ] }
+  ]
+};
+
+const SIZE_ORDER = ["Tiny", "Small", "Medium", "Large", "Huge", "Gargantuan"];
+
 const SKILL_ABILITY = {
   athletics:"str", acrobatics:"dex", sleightOfHand:"dex", stealth:"dex",
   arcana:"int", history:"int", investigation:"int", nature:"int", religion:"int",
@@ -660,7 +727,26 @@ const CALC = {
       combat:"Shares your Initiative count. A controlled mount while you ride it. If you have " +
              "the Incapacitated condition, it takes its turn immediately after yours and acts " +
              "independently, protecting you.",
-      ends:"Disappears at 0 Hit Points, or if you die."
+      ends:"Disappears at 0 Hit Points, or if you die.",
+      /* The spell's own combat rules, broken out so each one can be
+         found on its own rather than read out of a paragraph. */
+      combatRules: [
+        { name:"Initiative", text:"The steed shares your Initiative count — it acts on your turn, " +
+          "so it never takes a place of its own in the turn order." },
+        { name:"A controlled mount", text:"While you ride it, it functions as a controlled mount. " +
+          "That means it moves on your turn as you direct it, and on that turn it has only three " +
+          "action options: Dash, Disengage, and Dodge." },
+        { name:"If you are Incapacitated", text:"The steed takes its turn immediately after yours " +
+          "and acts independently, focusing on protecting you." },
+        { name:"Disappearance", text:"The steed disappears if it drops to 0 Hit Points or if you " +
+          "die. When it disappears it leaves behind anything it was wearing or carrying." },
+        { name:"Casting it again", text:"If you already have a steed from this spell, the steed is " +
+          "replaced by the new one — and you decide whether you summon back the steed that " +
+          "disappeared or a different one." },
+        { name:"A higher-level slot", text:"Use the spell slot's level for the spell's level in " +
+          "the stat block: +1 AC and +10 Hit Points per level, +1 to the Slam's damage, and a " +
+          "Fly Speed of 60 feet from level 4." }
+      ]
     };
   },
 
@@ -708,8 +794,44 @@ const CALC = {
       touchDelivery:"When you cast a spell with a range of touch, the familiar can deliver it — " +
                     "within 100 feet, using its Reaction.",
       combat:"An ally to you and your allies. Rolls its own Initiative and acts on its own turn.",
-      ends:"Disappears at 0 Hit Points, and reappears when you cast the spell again."
+      ends:"Disappears at 0 Hit Points, and reappears when you cast the spell again.",
+      combatRules: [
+        { name:"Initiative", text:"Unlike a steed, the familiar rolls its own Initiative and acts " +
+          "on its own turn — so it does belong in the turn order." },
+        { name:"It can't attack", text:"A familiar can't attack, but it can take other actions as " +
+          "normal. Its stat block's attack is listed here for reference only." },
+        { name:"Telepathic Connection", text:"While it is within 100 feet of you, you can " +
+          "communicate with it telepathically. As a Bonus Action you can see through its eyes and " +
+          "hear what it hears until the start of your next turn, gaining the benefits of any " +
+          "special senses it has." },
+        { name:"Delivering touch spells", text:"When you cast a spell with a range of touch, the " +
+          "familiar can deliver the touch. It must be within 100 feet of you, and it must take a " +
+          "Reaction to deliver the touch when you cast the spell." },
+        { name:"Disappearance", text:"When it drops to 0 Hit Points it disappears, leaving behind " +
+          "anything it was wearing or carrying. It reappears after you cast this spell again." },
+        { name:"The pocket dimension", text:"As a Magic action you can temporarily dismiss it to a " +
+          "pocket dimension, or dismiss it forever. As a Magic action while it is dismissed, you " +
+          "can cause it to reappear in an unoccupied space within 30 feet of you." },
+        { name:"One familiar only", text:"You can't have more than one familiar at a time. Casting " +
+          "the spell while you have one instead causes it to adopt a new eligible form." }
+      ]
     };
+  },
+
+  /* "A willing creature that is at least one size larger than a rider…"
+     — the sheet knows both sizes, so it can just answer the question
+     instead of making you compare them. */
+  canBeMount(S, block) {
+    const rider = SIZE_ORDER.indexOf(S.identity.size);
+    const beast = SIZE_ORDER.indexOf(block.size);
+    if (rider < 0 || beast < 0) return { ok: false, why: "Sizes unknown." };
+    const steps = beast - rider;
+    if (steps >= 1) {
+      return { ok: true, why: block.size + " is " + (steps === 1 ? "one size" : steps + " sizes") +
+        " larger than " + S.identity.size + " — big enough to carry you." };
+    }
+    return { ok: false, why: block.size + " is not larger than " + S.identity.size +
+      " — a mount has to be at least one size up, so this one can't be ridden." };
   },
 
   /* One entry point for every follower, whatever summoned it. */
@@ -976,7 +1098,10 @@ const SEED = {
   toggles: {
     concentrating: false, concentratingOn: "",
     takeHeart: false, auraOfProtection: false, editMode: false,
-    railCollapsed: false, leftRailCollapsed: false
+    railCollapsed: false, leftRailCollapsed: false,
+    /* Held Inspiration. A toggle rather than a counter: you have it or
+       you don't, and the screen edge says so until you spend it. */
+    inspiration: false
   },
   conditions: [],
   exhaustion: 0,
@@ -1064,5 +1189,6 @@ if (typeof module !== "undefined" && module.exports) {
   module.exports = { WIKIA_BASE_URL, wiki, TAGS, MASTERIES, WEAPONS, ARMOR, PALADIN_TABLE,
     ASI_LEVELS, OATH_SPELLS, SPELLS, PALADIN_SPELL_LIST, FEATS, FEATURES, CONDITIONS,
     STEED_FORMS, STEED_TYPES, STEED_ABILITIES, FOLLOWER_SOURCES, FAMILIAR_TYPES,
+    COMBAT_RULES, SIZE_ORDER,
     SKILL_ABILITY, SKILL_NAMES, ABILITY_NAMES, CALC, SEED };
 }

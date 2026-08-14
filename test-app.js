@@ -549,6 +549,62 @@ ok("and says so plainly", /disappears/.test(text()));
 if (byAct("dismissAlert")) click(byAct("dismissAlert"));
 eq("the steed is untouched by any of that", followers().length, 1);
 
+console.log("\n=== COMBAT RULES ON THE FOLLOWERS TAB ===");
+click(byAct("tab", { tab: "followers" }));
+ok("the steed's own combat rules are spelled out", /shares your Initiative count/i.test(text()));
+ok("including what happens when you go down", /Incapacitated/.test(text()));
+ok("the general mounted combat rules are there too", /Mounting and Dismounting/.test(text()));
+ok("...including controlling a mount", /only three action options/.test(text()));
+ok("...and falling off", /DC 10 Dexterity saving throw/.test(text()));
+ok("opportunity attacks are covered", /Opportunity Attack/.test(text()));
+ok("and the source is named", /Playing the Game/.test(text()));
+ok("the sheet works out whether it can carry Hal", /big enough to carry you/.test(text()));
+eq("a Large steed can carry a Small rider",
+   CALe('CALC.canBeMount(S, { size: "Large" }).ok'), true);
+eq("a Tiny familiar cannot", CALe('CALC.canBeMount(S, { size: "Tiny" }).ok'), false);
+eq("nor can one exactly Hal's size", CALe('CALC.canBeMount(S, { size: "Small" }).ok'), false);
+ok("mounting cost is worked out from Hal's own Speed", /15 ft/.test(text()));
+
+console.log("\n=== PANELS FOLD, AND REMEMBER IT PER TAB ===");
+function foldBtn(key) { return $('[data-act="foldPanel"][data-key="' + key + '"]'); }
+function foldedKeys() {
+  const u = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).ui;
+  return Object.keys((u && u.folded) || {});
+}
+click(byAct("tab", { tab: "spells" }));
+ok("every panel gets a fold control", $$('[data-act="foldPanel"]').length > 4);
+ok("the rail's Prepared and the tab's Prepared are separate panels",
+   !!foldBtn("spells/rail/prepared") && !!foldBtn("spells/main/prepared"));
+click(foldBtn("spells/rail/prepared"));
+eq("folding one records exactly one key", foldedKeys(), ["spells/rail/prepared"]);
+ok("the folded panel is hidden", !!$(".rrail .pnl.folded"));
+ok("its neighbour in the same column is not", $$(".rrail .pnl.folded").length < $$(".rrail .pnl").length);
+ok("and the tab's own Prepared is untouched", !$(".wrap > div:nth-child(2) .pnl.folded"));
+click(byAct("tab", { tab: "combat" }));
+ok("the same rail panel is open on a different tab", !$(".rrail .pnl.folded"));
+click(foldBtn("combat/rail/prepared"));
+eq("each tab records its own", foldedKeys().sort(),
+   ["combat/rail/prepared", "spells/rail/prepared"]);
+click(byAct("tab", { tab: "spells" }));
+ok("...and the first tab kept its state", !!$(".rrail .pnl.folded"));
+click(foldBtn("spells/rail/prepared"));
+ok("unfolding shows it again", !$(".rrail .pnl.folded"));
+eq("and drops the key rather than storing false", foldedKeys(), ["combat/rail/prepared"]);
+click(byAct("tab", { tab: "combat" }));
+click(foldBtn("combat/rail/prepared"));
+
+console.log("\n=== INSPIRATION ===");
+ok("there is an Inspiration toggle", !!byAct("toggle", { key: "inspiration" }));
+eq("it starts empty",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).toggles.inspiration, false);
+click(byAct("toggle", { key: "inspiration" }));
+eq("holding it persists",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).toggles.inspiration, true);
+ok("and the button reads as held", !!$('.tg.on[data-key="inspiration"]'));
+click(byAct("toggle", { key: "inspiration" }));
+eq("spending it clears the marker",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).toggles.inspiration, false);
+
 console.log("\n=== AURA APPEARS AT LEVEL 6 ===");
 click(byAct("levelUpModal"));
 $("#hp-roll").value = "10";

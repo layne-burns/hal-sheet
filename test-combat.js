@@ -321,6 +321,14 @@ function glowClass() {
   return g ? g.innerHTML : "";
 }
 ok("no glow at full HP, not concentrating", !/glow-conc|glow-low|glow-both/.test(glowClass()));
+click(byAct("toggle", { key: "inspiration" }));
+ok("holding Inspiration lights the screen edge on its own", /glow-insp/.test(glowClass()));
+click(byAct("toggle", { key: "concentrating" }));
+ok("...and layers with concentration rather than replacing it",
+   /glow-insp/.test(glowClass()) && /glow-conc/.test(glowClass()));
+click(byAct("toggle", { key: "concentrating" }));
+click(byAct("toggle", { key: "inspiration" }));
+ok("spending it puts the screen back", !/glow-insp/.test(glowClass()));
 click(byAct("toggle", { key: "concentrating" }));
 ok("cyan glow while concentrating", /glow-conc/.test(glowClass()));
 click(byAct("toggle", { key: "concentrating" }));

@@ -342,6 +342,16 @@ const ACT = {
     render();
   },
 
+  /* Folding is per panel AND per tab, and it outlives a reload. */
+  foldPanel(el) {
+    const k = el.dataset.key;
+    mutate(function (st) {
+      st.ui = st.ui || {};
+      st.ui.folded = st.ui.folded || {};
+      if (st.ui.folded[k]) delete st.ui.folded[k]; else st.ui.folded[k] = true;
+    });
+  },
+
   /* ---- Resources ---- */
   loh(el) {
     const d = parseInt(el.dataset.d, 10);
@@ -1016,6 +1026,58 @@ function render() {
     '</div>' +
     '<input type="file" id="import-file" accept="application/json" class="hide" data-act="doImport">';
   document.getElementById("modal-root").innerHTML = modalHTML();
+  applyPanelFolds();
+}
+
+/* ---------- PER-TAB PANEL FOLDING ----------
+   Every panel folds, and each one remembers its own state per tab: the
+   rails render on all seven, so "Prepared" can be shut on Combat and
+   open on Spells and stay that way. Done as a pass over the finished
+   DOM rather than by touching thirty call sites — which also means
+   panels injected later by combat.js are covered for free.
+
+   The key is the panel's heading text, so it survives a re-render but
+   not a rename; a renamed panel simply starts open again. */
+function panelKey(pnl) {
+  const h = pnl.querySelector(":scope > h3");
+  if (!h) return null;
+  let label = "";
+  h.childNodes.forEach(function (n) {
+    if (n.nodeType === 3) label += n.textContent;                     /* text only */
+    else if (n.tagName === "SPAN" && !n.classList.contains("cnt")) label += n.textContent;
+  });
+  label = label.replace(/\s+/g, " ").trim().toLowerCase();
+  if (!label) return null;
+  /* Which column it lives in, because "Prepared" exists both in the rail
+     and in the Spells tab and they must fold independently. */
+  const scope = pnl.closest(".rrail") ? "rail" : (pnl.closest(".lrail") ? "lrail" : "main");
+  return scope + "/" + label.replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+function applyPanelFolds() {
+  const tab = (S.ui && S.ui.tab) || "combat";
+  const folded = (S.ui && S.ui.folded) || {};
+  Array.prototype.forEach.call(document.querySelectorAll("#app .pnl"), function (pnl) {
+    const h = pnl.querySelector(":scope > h3");
+    if (!h) return;
+    /* Leave panels that already own a collapse control alone — the rails
+       and the calendar browser have their own, with their own meaning. */
+    if (h.classList.contains("collapse")) return;
+    if (h.querySelector('[data-act="expand"], [data-act="toggleRail"], [data-act="toggleLeftRail"]')) return;
+    if (h.querySelector(".pcol")) return;
+    const key = panelKey(pnl);
+    if (!key) return;
+    const full = tab + "/" + key;
+    const isFolded = !!folded[full];
+    if (isFolded) pnl.classList.add("folded");
+    const btn = document.createElement("button");
+    btn.className = "pcol";
+    btn.dataset.act = "foldPanel";
+    btn.dataset.key = full;
+    btn.textContent = isFolded ? "Show" : "Hide";
+    btn.title = (isFolded ? "Show" : "Hide") + " this panel on the " + tab + " tab";
+    h.appendChild(btn);
+  });
 }
 
 /* ---------- TOP BAR ---------- */
@@ -1029,6 +1091,11 @@ function topBar() {
   const E = S.toggles.editMode;
 
   let toggles =
+    '<button class="tg cutsm' + (S.toggles.inspiration ? " on y" : "") +
+      '" data-act="toggle" data-key="inspiration" title="' +
+      (S.toggles.inspiration ? "You have Inspiration — tap when you spend it"
+                             : "Tap when the DM gives you Inspiration") + '">Inspiration' +
+      (S.toggles.inspiration ? " ★" : "") + "</button>" +
     '<button class="tg cutsm' + (S.toggles.concentrating ? " on y" : "") +
       '" data-act="toggle" data-key="concentrating">Concentrating</button>' +
     '<button class="tg cutsm' + (S.toggles.takeHeart ? " on" : "") +
@@ -1814,16 +1881,49 @@ function followersTab() {
       out += "</div>";
     });
 
-    /* The rules that live on the spell rather than in the stat block. */
+    /* The rules that live on the spell rather than in the stat block —
+       the ones you actually have to look up mid-fight. */
     if (b.cantAttack) out += '<div class="warnbox">' + esc(b.cantAttack) + "</div>";
-    let notes = esc(b.combat) + "<br><em>" + esc(b.ends) + "</em>";
-    if (b.telepathy) notes += "<br>" + esc(b.telepathy);
-    if (b.touchDelivery) notes += "<br>" + esc(b.touchDelivery);
+    out += '<div class="sbsec"><span class="sbk">In combat</span>';
+    (b.combatRules || []).forEach(function (r) {
+      out += '<div class="ruleline"><span class="rn">' + esc(r.name) + "</span>" +
+        '<span class="rt">' + esc(r.text) + "</span></div>";
+    });
+    /* Can this one actually carry Hal? The sheet knows both sizes. */
+    const mount = CALC.canBeMount(S, b);
+    out += '<div class="ruleline' + (mount.ok ? " yes" : " no") + '">' +
+      '<span class="rn">As a mount</span><span class="rt">' + esc(mount.why) +
+      (mount.ok ? " Mounted Combat is below." : "") + "</span></div></div>";
+
     if (f.summoned) {
-      notes += "<br>Summoned " + esc(CAL.format(S.calendar.system, f.summoned.day)) +
-        ", Year " + f.summoned.year + ".";
+      out += '<div class="seqnote">Summoned ' + esc(CAL.format(S.calendar.system, f.summoned.day)) +
+        ", Year " + f.summoned.year + ". <em>" + esc(b.ends) + "</em></div>";
     }
-    out += '<div class="seqnote">' + notes + "</div>";
+    out += "</div>";
+  });
+
+  out += combatRulesPanel();
+  return out;
+}
+
+/* The general rules a follower drags in with it. Verbatim from the SRD,
+   because half-remembered mounted-combat rules are how a fight stalls. */
+function combatRulesPanel() {
+  let out = "";
+  COMBAT_RULES.sections.forEach(function (sec) {
+    out += '<div class="pnl cut"><h3>' + esc(sec.name) +
+      '<span class="cnt">' + esc(COMBAT_RULES.source) + "</span></h3>" +
+      '<div class="etext" style="margin-bottom:10px">' + esc(sec.intro) + "</div>";
+    sec.parts.forEach(function (p) {
+      out += '<div class="ruleline"><span class="rn">' + esc(p.name) + "</span>" +
+        '<span class="rt">' + esc(p.text) + "</span></div>";
+    });
+    if (sec.key === "mounted") {
+      out += '<div class="seqnote">Hal is <b>' + esc(S.identity.size) + "</b>, so a mount must be " +
+        "<b>" + esc(SIZE_ORDER[Math.min(SIZE_ORDER.length - 1, SIZE_ORDER.indexOf(S.identity.size) + 1)]) +
+        "</b> or larger. Half his Speed is <b>" + Math.floor(S.identity.speed / 2) +
+        " ft</b>, which is what mounting or dismounting costs.</div>";
+    }
     out += "</div>";
   });
   return out;

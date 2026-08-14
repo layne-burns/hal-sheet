@@ -241,6 +241,23 @@ input[type=number]{width:88px}
 .modal .pick.a-cel,.modal .pick.a-fey,.modal .pick.a-fnd{border-left:3px solid var(--acc)}
 .modal .pick .pm b{color:var(--acc,var(--cyan));font-weight:400}
 
+/* Rules quoted from the source, one lookup per line. */
+.ruleline{display:flex;gap:12px;padding:6px 0;border-bottom:1px solid #1A242D;align-items:baseline}
+.ruleline:last-child{border-bottom:none}
+.ruleline .rn{font-family:var(--m);font-size:14px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--cyan);width:186px;flex:none}
+.ruleline .rt{font-size:18px;color:var(--dim);line-height:1.5}
+.ruleline.yes .rn{color:var(--grn)}
+.ruleline.no .rn{color:var(--dimmer)}
+.ruleline.no .rt{color:var(--dimmer)}
+
+/* Per-panel collapse, remembered per tab. */
+.pcol{font-family:var(--m);font-size:14px;letter-spacing:.1em;color:var(--dim);
+  border:1px solid var(--line2);padding:1px 8px;margin-left:auto;flex:none;cursor:pointer}
+.pcol:hover{color:var(--cyan);border-color:var(--cyan)}
+.pnl.folded>*:not(h3){display:none}
+.pnl.folded>h3{margin-bottom:0}
+
 /* ---------- REMINDERS ----------
    Lives under the alert bar on every tab. Violet = the world's holidays,
    yellow = something you wrote down yourself. */
@@ -350,10 +367,16 @@ input[type=number]{width:88px}
 /* Both: cyan on the outside, red hugged just inside it */
 .glow-both{box-shadow:inset 0 0 10px 2px rgba(0,229,255,.75),inset 0 0 34px 10px rgba(255,0,60,.5),
   inset 0 0 70px 22px rgba(255,0,60,.22);animation:pulseB 2.2s ease-in-out infinite}
+/* Inspiration: a standing reminder. Dimmer and much slower than the
+   warnings, so it reads as "you still have this" rather than "act now",
+   and never buries the red. */
+.glow-insp{box-shadow:inset 0 0 44px 5px rgba(252,238,10,.16),inset 0 0 11px 1px rgba(252,238,10,.34);
+  animation:pulseI 5.6s ease-in-out infinite}
 @keyframes pulseC{0%,100%{opacity:.75}50%{opacity:1}}
 @keyframes pulseR{0%,100%{opacity:.7}50%{opacity:1}}
 @keyframes pulseB{0%,100%{opacity:.78}50%{opacity:1}}
-@media (prefers-reduced-motion:reduce){.glow-conc,.glow-low,.glow-both{animation:none}}
+@keyframes pulseI{0%,100%{opacity:.55}50%{opacity:.9}}
+@media (prefers-reduced-motion:reduce){.glow-conc,.glow-low,.glow-both,.glow-insp{animation:none}}
 
 /* ---------- COMBAT BAR ---------- */
 .strip.combat{gap:7px;border-color:var(--line2)}
