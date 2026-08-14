@@ -106,6 +106,13 @@ function clampState(st) {
   st.tempHP = Math.max(0, st.tempHP || 0);
   st.resources.layOnHands = Math.max(0, Math.min(st.resources.layOnHands, lohMax));
   st.resources.channelDivinity = Math.max(0, Math.min(st.resources.channelDivinity, cdMax));
+  /* The free Find Steed cast exists from level 5 on. Seed it here rather
+     than only on level-up, so a sheet that arrived at 5 by import or a
+     cloud load doesn't show an empty pip it can never explain. */
+  if (st.level >= 5) {
+    if (typeof st.resources.faithfulSteed !== "number") st.resources.faithfulSteed = 1;
+    st.resources.faithfulSteed = Math.max(0, Math.min(1, st.resources.faithfulSteed));
+  }
   st.hitDiceUsed = Math.max(0, Math.min(st.hitDiceUsed, st.level));
   const slots = CALC.slotsMax(st);
   Object.keys(slots).forEach(function (lv) {
@@ -565,6 +572,9 @@ const ACT = {
       st.resources.freeSmite = 1;
       st.resources.findFamiliar = 1;
       st.resources.detectThoughts = 1;
+      /* Faithful Steed: "regaining that use on a Long Rest" — it was the
+         one once-per-rest resource the rest never gave back. */
+      if (st.level >= 5) st.resources.faithfulSteed = 1;
       Object.keys(st.resources.slots).forEach(function (lv) { st.resources.slots[lv].used = 0; });
       st.hitDiceUsed = Math.max(0, st.hitDiceUsed - Math.max(1, Math.floor(st.level / 2)));
       st.toggles.concentrating = false;
@@ -1242,8 +1252,7 @@ function spellsTab() {
 
   /* Granted */
   out += '<div class="pnl cut"><h3>Always available</h3>' +
-    spellEntry("divineSmite", false) + spellEntry(S.magicInitiate.spell, false);
-  if (S.level >= 5) out += spellEntry("findSteed", false);
+    grantedSpellKeys().map(function (k) { return spellEntry(k, false); }).join("");
   out += "</div>";
   return out;
 }
@@ -1254,6 +1263,29 @@ function oathSpellKeys() {
     if (S.level >= parseInt(lv, 10)) out.push.apply(out, OATH_SPELLS[lv]);
   });
   return out;
+}
+
+/* Spells a feature or feat hands you outright — they cost no prepared
+   slot and can't be unprepared. Faithful Steed grants Find Steed at 5. */
+function grantedSpellKeys() {
+  const out = ["divineSmite"];
+  if (S.magicInitiate && S.magicInitiate.spell) out.push(S.magicInitiate.spell);
+  if (S.level >= 5) out.push("findSteed");
+  return out;
+}
+
+/* Everything castable right now, in the order the Spells tab lists it.
+   The rail used to build its own list from preparedSpells + oath alone,
+   which is how Find Steed could sit in the Spells tab and be missing
+   from the rail you actually cast from at the table. One list now. */
+function castableSpellKeys() {
+  const seen = {};
+  return S.preparedSpells.concat(oathSpellKeys(), grantedSpellKeys())
+    .filter(function (k) {
+      if (!SPELLS[k] || seen[k]) return false;
+      seen[k] = true;
+      return true;
+    });
 }
 
 function spellEntry(k, editable) {
@@ -1851,15 +1883,19 @@ function resourceRail() {
 
   /* Quick prepared list for at-a-glance casting. Respects the tag
      filter so filtering is global, not just within the Spells tab. */
-  out += '<div class="pnl cut"><h3>Prepared' +
-    (UI.filter.length ? ' <span class="cnt">filtered</span>' : "") + "</h3>";
-  S.preparedSpells.concat(oathSpellKeys()).forEach(function (k) {
+  const granted = grantedSpellKeys();
+  out += '<div class="pnl cut"><h3>Prepared <span class="cnt">' +
+    (UI.filter.length ? "filtered" : "+ granted") + "</span></h3>";
+  castableSpellKeys().forEach(function (k) {
     const sp = SPELLS[k];
-    if (!sp) return;
     if (!matchesFilter(tagsOf("spell:" + k, sp.tags))) return;
+    /* A granted spell says so, or the panel would read as if you'd
+       spent a prepared slot on it. */
+    const free = granted.indexOf(k) >= 0;
     out += '<div class="entry" style="padding:6px 0"><div class="eh">' +
       '<button class="namebtn en" data-act="use" data-kind="spell" data-id="' + k +
-      '">' + esc(sp.name) + "</button>" + wikiBtn(sp.slug) + "</div>" +
+      '">' + esc(sp.name) + "</button>" + wikiBtn(sp.slug) +
+      (free ? '<span class="bdg">Granted</span>' : "") + "</div>" +
       "<div>" + tagHTML(tagsOf("spell:" + k, sp.tags), false) + "</div></div>";
   });
   out += "</div>";

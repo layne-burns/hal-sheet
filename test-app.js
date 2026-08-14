@@ -414,6 +414,37 @@ ok("2nd level slots exist", !!st.resources.slots["2"]);
 ok("proficiency is now +3 in the UI", /\+3/.test($("#app").innerHTML));
 if (byAct("dismissAlert")) click(byAct("dismissAlert"));
 
+console.log("\n=== FAITHFUL STEED GRANTS A SPELL YOU CAN ACTUALLY REACH ===");
+/* The rail is what you cast from at the table. A granted spell that only
+   appears in the Spells tab may as well not have been granted. */
+function railSpells() {
+  return $$(".rrail .entry .namebtn").map(function (e) { return e.textContent.trim(); });
+}
+ok("Find Steed is in the right rail, not just the Spells tab",
+   railSpells().indexOf("Find Steed") >= 0);
+ok("so is the Magic Initiate spell", railSpells().indexOf("Find Familiar") >= 0);
+ok("granted spells are labelled as granted, not passed off as prepared",
+   /Granted/.test($(".rrail").innerHTML));
+eq("nothing is listed twice", railSpells().length, new Set(railSpells()).size);
+eq("the free cast starts full", st.resources.faithfulSteed, 1);
+/* "You can cast it once without a spell slot, regaining that use on a
+   Long Rest" — the rest used to skip it, stranding the use at 0. */
+click(byAct("use", { kind: "spell", id: "findSteed" }));
+eq("casting it free spends the use",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).resources.faithfulSteed, 0);
+click(byAct("longRestPrompt"));
+if ($("#rest-days")) $("#rest-days").value = "0";
+click(byAct("longRest"));
+eq("a long rest gives the free cast back",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).resources.faithfulSteed, 1);
+click(byAct("closeModal"));
+/* A sheet that reached level 5 by import rather than by levelling still
+   has to know the free cast exists. */
+w.eval("mutate(function (st) { delete st.resources.faithfulSteed; })");
+eq("an imported level-5 sheet is given the use rather than an empty pip",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).resources.faithfulSteed, 1);
+st = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1"));
+
 console.log("\n=== AURA APPEARS AT LEVEL 6 ===");
 click(byAct("levelUpModal"));
 $("#hp-roll").value = "10";
