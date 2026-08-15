@@ -1126,6 +1126,33 @@ ok("it opens that panel's entries", afterCantrips > 0);
 ok("...and leaves the other panels closed", afterCantrips < 8);
 eq("the filter drawer was left exactly as it was", !!$(".tagbar"), filterOpenBefore);
 
+console.log("\n=== ONE CARD SHAPE ACROSS THE SHEET ===");
+/* Spells, features, feats, inventory and the doable list are the same
+   object with different contents. The point is that a list reads the same
+   wherever you are, so nothing here should be able to drift back into its
+   own private markup. */
+[["spells", ".spellcard"], ["features", ".card"], ["inventory", ".card"]].forEach(function (p) {
+  click(byAct("tab", { tab: p[0] }));
+  ok(p[0] + " renders cards", $$(".wrap > div:nth-child(2) " + p[1]).length > 0);
+  eq(p[0] + " has no entries left in the old shape",
+     $$(".wrap > div:nth-child(2) .entry").length, 0);
+  ok(p[0] + " puts the meta on its own line, which is what aligns it",
+     $$(".wrap > div:nth-child(2) .card > .cardmeta").length > 0);
+});
+/* An item has nothing to cast and nowhere to link, so the column that
+   carries Cast and the wiki elsewhere carries its count — which is what
+   keeps the silhouette identical rather than blank. */
+click(byAct("tab", { tab: "inventory" }));
+const itemCards = $$(".wrap > div:nth-child(2) .card");
+ok("every item shows a count where the controls sit",
+   itemCards.every(function (c) { return !!c.querySelector(".cardbtns .qty"); }));
+ok("the count is not a button", !$(".cardbtns .qty[data-act]"));
+ok("an item's note rides on the meta line rather than needing expanding",
+   itemCards.some(function (c) {
+     const m = c.querySelector(".cardmeta");
+     return m && /Finesse|Spellcasting focus|AC 14/.test(m.textContent);
+   }));
+
 console.log("\n=== MODALS SIZE AGAINST THE LAYOUT, NOT THE DEVICE ===");
 /* vh is the device viewport, which under this sheet's zoom is a smaller
    number than the space the stylesheet lays out in — 88vh capped a modal

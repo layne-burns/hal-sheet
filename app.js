@@ -2020,8 +2020,9 @@ function featuresTab() {
       (open ? '<div class="carddetail">' + esc(f.text) + "</div>" : "") + "</div>";
   });
   if (S.magicInitiate) {
-    out += '<div class="entry"><div class="eh"><span class="en">Magic Initiate picks</span></div>' +
-      '<div class="etext">Cantrips: ' +
+    out += '<div class="card"><span class="cardname">Magic Initiate picks</span>' +
+      '<span class="cardmeta">Wizard</span>' +
+      '<div class="carddetail">Cantrips: ' +
       S.magicInitiate.cantrips.map(function (c) { return SPELLS[c] ? SPELLS[c].name : c; }).join(", ") +
       ". Level 1 spell: " + (SPELLS[S.magicInitiate.spell] || {}).name +
       ", free once per long rest. Spellcasting ability: " +
@@ -2095,21 +2096,28 @@ function inventoryTab() {
   const c = S.equipment.coins;
   let out = filterPanel();
 
+  /* The same card as everywhere else. An item has nothing to cast and
+     nowhere to link, so the column that holds Cast and the wiki elsewhere
+     holds the count instead — which keeps the silhouette identical down
+     the list rather than leaving a blank quarter on every row. The note is
+     short enough to be the meta line, so nothing needs expanding. */
   out += '<div class="pnl cut"><h3>Carried</h3>';
   S.equipment.inventory.forEach(function (it, i) {
     if (!matchesFilter(it.tags)) return;
     if (E) {
-      out += '<div class="entry"><div class="mrow">' +
+      out += '<div class="card carded"><div class="mrow">' +
         '<input style="flex:1" value="' + esc(it.name) + '" data-act="editItem" data-i="' + i + '" data-field="name">' +
         '<input type="number" style="width:60px" value="' + it.qty + '" data-act="editItem" data-i="' + i + '" data-field="qty">' +
         '<button class="bt cutsm dg" data-act="delItem" data-i="' + i + '">Delete</button></div>' +
         '<input style="width:100%;margin-top:4px" placeholder="Note" value="' + esc(it.note || "") +
         '" data-act="editItem" data-i="' + i + '" data-field="note"></div>';
     } else {
-      out += '<div class="entry"><div class="eh"><span class="en">' + esc(it.name) +
-        (it.qty > 1 ? ' <span class="emeta">x' + it.qty + "</span>" : "") + "</span></div>" +
-        "<div>" + tagHTML(it.tags, true) + "</div>" +
-        (it.note ? '<div class="etext">' + esc(it.note) + "</div>" : "") + "</div>";
+      out += '<div class="card">' +
+        '<span class="cardname">' + esc(it.name) + "</span>" +
+        '<span class="cardmeta">' + esc(it.note || "") + "</span>" +
+        '<div class="cardtags">' + tagHTML(it.tags, true) + "</div>" +
+        '<div class="cardbtns"><span class="qty">×' + it.qty + "</span></div>" +
+        "</div>";
     }
   });
   if (E) out += '<button class="bt cutsm" data-act="addItem">+ Add item</button>';

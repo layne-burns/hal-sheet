@@ -625,6 +625,12 @@ body.onecol .mpin .mlab{font-size:10px;max-width:84px}
 .card>.cardbtns>.pri{flex:1 0 100%}
 .card>.cardbtns .bt{padding:4px 9px}
 .card>.cardbtns .wikibtn .wkar{display:none}
+/* A count, not a control — it sits where the buttons sit so the cards line
+   up, but it must not look like something you can press. */
+.card>.cardbtns .qty{font-family:var(--m);font-size:21px;color:var(--txt);text-align:center;
+  font-variant-numeric:tabular-nums;line-height:1.1;padding:2px 0;flex:1 0 100%}
+/* Edit mode keeps its plain stacked rows — the fields are the content. */
+.card.carded{display:block}
 .card>.cardbtns .wikibtn{margin-left:0;text-align:center}
 .card>.carddetail{grid-column:1/-1;grid-row:4;font-size:17.5px;color:var(--dim);
   line-height:1.45;margin-top:6px;border-top:1px solid var(--line);padding-top:6px}
