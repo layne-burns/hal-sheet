@@ -332,6 +332,41 @@ Object.assign(CALC, {
     return "?";
   },
 
+  /* Everything between here and your next turn, worked out in one go.
+
+     The table keeps its own initiative, so the sheet's turn order is a
+     record of it rather than the thing driving it — which means the turns
+     between yours often go by without anyone pressing anything here, and
+     you come back to a sheet that thinks it is still the goblin's go.
+     Rather than press Next four times to catch up, press this once.
+
+     It walks the same step the single-turn version walks, counting the
+     round boundaries it crosses, so the two can't disagree about what a
+     lap costs. Returns null when there is nobody to walk to: no order at
+     all, or an order Hal isn't in — which would otherwise loop forever. */
+  peekToMyTurn(S) {
+    const order = S.combat.order;
+    if (!order.length) return null;
+    if (!order.some(function (o) { return o.ref.type === "hal"; })) return null;
+
+    let curId = S.combat.currentId;
+    let wraps = 0, steps = 0;
+    /* One full lap is the most it can ever take; the guard above means we
+       always hit Hal before the bound, and the bound means a corrupt order
+       can't hang the app. */
+    for (let i = 0; i <= order.length; i++) {
+      const idx = order.findIndex(function (o) { return o.id === curId; });
+      const nextIdx = (idx + 1) % order.length;
+      /* idx === -1 means the current marker isn't in the order — the same
+         case peekNextTurn treats as "start at the top, no wrap". */
+      if (idx !== -1 && nextIdx <= idx) wraps += 1;
+      curId = order[nextIdx].id;
+      steps += 1;
+      if (order[nextIdx].ref.type === "hal") break;
+    }
+    return { nextId: curId, wraps: wraps, steps: steps };
+  },
+
   /* Pure peek at what pressing Next would do, so the caller can snapshot
      expiring effects BEFORE mutating state (same pattern as solo play). */
   peekNextTurn(S) {

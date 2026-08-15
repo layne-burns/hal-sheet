@@ -142,6 +142,23 @@ EXT.combatBar = function () {
       '<button class="bt cutsm" data-act="move" data-d="-5">+5</button></span>' +
     (t.hitLanded ? '<span class="hitflag">Hit landed — smites available</span>'
                  : '<button class="bt cutsm" data-act="logHit">Log a hit</button>') +
+    /* The table runs its own initiative, so the turns between yours often
+       pass without anyone touching the sheet. This catches it up in one
+       press instead of four, and says how far it will jump so you can see
+       it is about to cross a round before it does. */
+    (function () {
+      const plan = CALC.peekToMyTurn(S);
+      /* Shown whenever there is an order with you in it, even when it is
+         one step — a control that comes and goes depending on where the
+         marker happens to sit is one you stop trusting is there. */
+      if (!plan) return "";
+      const skips = plan.steps - 1;
+      return '<button class="bt cutsm" data-act="toMyTurn" title="' +
+        (skips ? "Skip the " + skips + " turn" + (skips === 1 ? "" : "s") + " between now and yours"
+               : "Advance to your next turn") +
+        (plan.wraps ? ", crossing into the next round" : "") +
+        '">To my turn' + (skips ? " <k>" + skips + "</k>" : "") + "</button>";
+    })() +
     '<button class="bt cutsm pri" style="margin-left:auto" data-act="endTurn">' +
       (c.order.length ? "Next turn" : "End turn") + "</button>" +
     '<button class="bt cutsm" data-act="combatEnd">Exit combat</button>' +
@@ -881,6 +898,49 @@ Object.assign(ACT, {
     if (expired.length) {
       UI.alert = { info: "Expired: " + expired.map(function (e) { return e.name; }).join(", ") };
     }
+    render();
+  },
+  /* Skip straight to your next turn, however many other people's turns
+     went by without anyone pressing anything. Crossing a round boundary
+     has to cost what crossing it the slow way costs — a round on the
+     counter, a round off every timed effect — so a lap here decays
+     effects by exactly the number of wraps it walked through, and drops
+     concentration if what expired was being concentrated on.
+
+     It is one undo step, not one per turn skipped: you pressed it once,
+     so pressing Undo once should put it back. */
+  toMyTurn() {
+    const plan = CALC.peekToMyTurn(S);
+    /* Solo, or an order Hal isn't in: a single turn is the whole of it. */
+    if (!plan) return ACT.endTurn();
+
+    const expired = plan.wraps ? S.effects.filter(function (e) {
+      return e.rounds != null && e.rounds - plan.wraps <= 0;
+    }).map(function (e) { return { name: e.name, conc: e.conc }; }) : [];
+
+    mutate(function (st) {
+      st.combat.currentId = plan.nextId;
+      if (plan.wraps) {
+        st.combat.round += plan.wraps;
+        st.effects = st.effects.filter(function (e) {
+          if (e.rounds == null) return true;
+          e.rounds -= plan.wraps;
+          return e.rounds > 0;
+        });
+        if (expired.some(function (e) { return e.conc; })) {
+          st.toggles.concentrating = false;
+          st.toggles.concentratingOn = "";
+        }
+      }
+      /* It is your turn now by construction, so the budget resets. */
+      st.combat.turn = CALC.freshTurn();
+    }, "To your turn");
+
+    const skipped = plan.steps - 1;
+    const notes = [];
+    if (skipped > 0) notes.push("Skipped " + skipped + " turn" + (skipped === 1 ? "" : "s"));
+    if (expired.length) notes.push("expired: " + expired.map(function (e) { return e.name; }).join(", "));
+    if (notes.length) UI.alert = { info: notes.join(" · ") };
     render();
   },
   econToggle(el) {

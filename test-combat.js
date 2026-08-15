@@ -588,6 +588,57 @@ st = state();
 eq("wrapping back to the first entry advances the round", st.combat.round, roundBefore + 1);
 eq("currentId wrapped back to the first entry", orderNames.indexOf(st.combat.currentId), 0);
 
+console.log("\n=== SKIPPING STRAIGHT TO YOUR OWN TURN ===");
+/* The table runs its own initiative, so the turns between yours go by
+   without anyone pressing Next. This catches the sheet up in one press,
+   and crossing a round has to cost exactly what crossing it slowly costs. */
+st = state();
+const halIdx = st.combat.order.findIndex(function (o) { return o.ref.type === "hal"; });
+ok("Hal is in this order", halIdx >= 0);
+/* Park the marker on somebody else, then jump. */
+click(byAct("orderModal"));
+click(byAct("closeModal"));
+while (state().combat.currentId === null ||
+       (state().combat.order.find(function (o) { return o.id === state().combat.currentId; }) || {}).ref.type === "hal") {
+  click(byAct("endTurn"));
+}
+const beforeJump = state();
+ok("it is somebody else's turn", (beforeJump.combat.order.find(function (o) {
+  return o.id === beforeJump.combat.currentId;
+}) || {}).ref.type !== "hal");
+ok("the catch-up button is offered", !!byAct("toMyTurn"));
+click(byAct("toMyTurn"));
+let jumped = state();
+eq("it is your turn now", (jumped.combat.order.find(function (o) {
+  return o.id === jumped.combat.currentId;
+}) || {}).ref.type, "hal");
+eq("and your budget is fresh", jumped.combat.turn, CALC_snapshot());
+
+/* Pressing it on your own turn takes a full lap rather than doing nothing —
+   "my next turn" is the next one, not this one. */
+const roundOnMyTurn = jumped.combat.round;
+click(byAct("toMyTurn"));
+jumped = state();
+eq("a lap from your own turn lands back on you", (jumped.combat.order.find(function (o) {
+  return o.id === jumped.combat.currentId;
+}) || {}).ref.type, "hal");
+eq("...and costs exactly one round", jumped.combat.round, roundOnMyTurn + 1);
+
+/* A timed effect must lose the same rounds it would have lost the slow way. */
+w.eval("mutate(function (st) { st.effects.push({ name: 'Test aura', rounds: 3, conc: false }); })");
+const roundBeforeDecay = state().combat.round;
+click(byAct("toMyTurn"));
+const afterOne = state();
+eq("a lap decays a timed effect by the rounds it crossed",
+   afterOne.effects.find(function (e) { return e.name === "Test aura"; }).rounds,
+   3 - (afterOne.combat.round - roundBeforeDecay));
+/* And it is one undo step, not one per turn skipped. */
+click(byAct("undo"));
+const undone = state();
+eq("undo puts the round back", undone.combat.round, roundBeforeDecay);
+eq("undo puts the effect back", undone.effects.find(function (e) { return e.name === "Test aura"; }).rounds, 3);
+w.eval("mutate(function (st) { st.effects = st.effects.filter(function (e) { return e.name !== 'Test aura'; }); })");
+
 console.log("\n=== A NEW ENCOUNTER RESTARTS THE ORDER FROM THE TOP ===");
 ok("currentId is mid-order (not null) before ending this fight", state().combat.currentId !== null);
 click(byAct("combatEnd"));
@@ -845,6 +896,52 @@ eq("archived log opens with Start session", archived.log[0].label, "Start sessio
 eq("archived log closes with End session", archived.log[archived.log.length - 1].label, "End session");
 ok("session modal now offers to export the last session", !!byAct("sessionExport"));
 click(byAct("closeModal"));
+
+/* The guarantee worth having: skipping is not a different code path with
+   its own idea of what a round costs. Build a six-strong order with Hal in
+   the middle, park the marker past him, and check that one press lands in
+   exactly the state that pressing Next the whole way lands in — same
+   position, same round, same effect durations, same budget. */
+console.log("\n=== SKIPPING IS THE SAME AS PRESSING NEXT UNTIL YOU GET THERE ===");
+function seedLongOrder() {
+  w.eval("mutate(function (st) {" +
+    "st.party.roster = [{id:'p1',name:'Gill',status:'healthy',present:true}," +
+                       "{id:'p2',name:'Mira',status:'healthy',present:true}," +
+                       "{id:'p3',name:'Torv',status:'healthy',present:true}];" +
+    "st.creatures = [{id:'c1',name:'Bugbear',ac:16,hit:false,conditions:[]}," +
+                    "{id:'c2',name:'Goblin',ac:15,hit:false,conditions:[]}];" +
+    "st.combat.active = true; st.combat.round = 1;" +
+    "st.combat.order = [{id:'o1',ref:{type:'creature',creatureId:'c1'}}," +
+                       "{id:'o2',ref:{type:'party',partyId:'p1'}}," +
+                       "{id:'hal',ref:{type:'hal'}}," +
+                       "{id:'o3',ref:{type:'party',partyId:'p2'}}," +
+                       "{id:'o4',ref:{type:'creature',creatureId:'c2'}}," +
+                       "{id:'o5',ref:{type:'party',partyId:'p3'}}];" +
+    "st.combat.currentId = 'o3';" +
+    "st.effects = [{name:'Bless',rounds:10,conc:true,note:'+1d4'}];" +
+    "st.toggles.concentrating = true;" +
+  "})");
+}
+function turnSnapshot() {
+  const s = state();
+  return { currentId: s.combat.currentId, round: s.combat.round,
+           effects: s.effects.map(function (e) { return { n: e.name, r: e.rounds }; }),
+           turn: s.combat.turn, conc: s.toggles.concentrating };
+}
+seedLongOrder();
+const plan = w.eval("CALC.peekToMyTurn(S)");
+eq("it knows how far away your turn is", plan.steps, 5);
+eq("...and that getting there crosses one round boundary", plan.wraps, 1);
+click(byAct("toMyTurn"));
+const fastPath = turnSnapshot();
+seedLongOrder();
+for (let i = 0; i < plan.steps; i++) click(byAct("endTurn"));
+const slowPath = turnSnapshot();
+eq("one press lands exactly where pressing Next all the way lands", fastPath, slowPath);
+eq("which is your own turn", fastPath.currentId, "hal");
+eq("a round went by", fastPath.round, 2);
+eq("and the timed effect lost exactly that one round", fastPath.effects[0].r, 9);
+
 
 console.log("\n" + "=".repeat(46));
 console.log(pass + " passed, " + fail + " failed");
