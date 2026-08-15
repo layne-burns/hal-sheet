@@ -4,7 +4,7 @@
     {
       "name": "hal-sheet",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "8137"],
+      "runtimeArgs": ["tools/devserver.py", "8137"],
       "port": 8137
     }
   ]
