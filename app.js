@@ -1302,6 +1302,15 @@ function render() {
   /* A zero here means nothing has been laid out yet rather than "no room
      at all", so fall back to the roomy layout instead of collapsing to a
      single column on the strength of a measurement we did not get. */
+  /* vh units resolve against the device viewport, which under zoom is a
+     different number from the height the stylesheet lays out in — at 80%
+     a 740px screen is 925px of layout, so 88vh capped a modal at 651 when
+     880 would fit, and pushed its footer into a scroll area. Publish the
+     real figure so CSS can size against it. */
+  const zoomFactor = (((S.settings && S.settings.uiScale) || 100) * UI_SCALE_BASE) / 100;
+  document.documentElement.style.setProperty(
+    "--appvh", (window.innerHeight / (zoomFactor || 1)) + "px");
+
   const layoutWidth = document.body.clientWidth || document.documentElement.clientWidth || 99999;
   document.body.classList.toggle("compact", layoutWidth < 1150);
   /* How many columns there is room for, decided on the same measurement
@@ -3252,6 +3261,15 @@ function resourceRail() {
 /* ============================================================
    MODALS
    ============================================================ */
+
+/* Every modal gets one, in the same corner, doing the same thing. The
+   footer buttons still say what closing means in context — Done, Cancel,
+   Close — but none of them is the only way out, because a long modal put
+   its footer behind a scroll and a scroll is a thing that can fail you. */
+function modalClose() {
+  return '<button class="mx" data-act="closeModal" title="Close" aria-label="Close">×</button>';
+}
+
 function modalHTML() {
   if (!UI.modal) return "";
   const t = UI.modal.type;
@@ -3370,7 +3388,7 @@ function modalHTML() {
   }
 
   if (!body) return "";
-  return '<div class="mask"><div class="modal cut">' + body + "</div></div>";
+  return '<div class="mask"><div class="modal cut">' + modalClose() + body + "</div></div>";
 }
 
 /* The spell asks before it spends. Every choice here is one the spell

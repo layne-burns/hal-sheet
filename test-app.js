@@ -1126,6 +1126,17 @@ ok("it opens that panel's entries", afterCantrips > 0);
 ok("...and leaves the other panels closed", afterCantrips < 8);
 eq("the filter drawer was left exactly as it was", !!$(".tagbar"), filterOpenBefore);
 
+console.log("\n=== MODALS SIZE AGAINST THE LAYOUT, NOT THE DEVICE ===");
+/* vh is the device viewport, which under this sheet's zoom is a smaller
+   number than the space the stylesheet lays out in — 88vh capped a modal
+   at 651px when 880 would fit, which is what pushed the footer out of
+   reach. render() publishes the real figure for CSS to size against. */
+ok("render publishes the layout viewport height",
+   /^\d+(\.\d+)?px$/.test(doc.documentElement.style.getPropertyValue("--appvh")));
+eq("and it is the device height divided by the zoom, not the device height",
+   Math.round(parseFloat(doc.documentElement.style.getPropertyValue("--appvh"))),
+   Math.round(w.innerHeight / (CALe("S.settings.uiScale") * 0.8 / 100)));
+
 console.log("\n=== LAY ON HANDS READS AS A POOL, NOT A FORM CONTROL ===");
 click(byAct("tab", { tab: "combat" }));
 function lohBar() { return $(".lohbar"); }

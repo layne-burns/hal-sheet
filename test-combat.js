@@ -96,6 +96,34 @@ ok("no tag uses the old violet/mag/grn classes", !tagEls.some(function (e) {
   return /t-violet|t-mag(?!enta)|t-grn/.test(e.className);
 }));
 
+console.log("\n=== EVERY MODAL CAN BE CLOSED WITHOUT SCROLLING TO FIND HOW ===");
+/* The Settings modal's Done button sat at the bottom of a scroll area. On
+   the iPad — where the whole UI is zoomed, and scrolling inside a zoomed
+   overflow container is unreliable — it could not be reached at all. The
+   footer is pinned now, and every modal carries a close control in the
+   same corner regardless of what its footer says. */
+openSettings();
+ok("the settings modal is open", /Display size/.test(text()));
+const mx = $(".modal .mx");
+ok("it has a close control", !!mx);
+eq("which closes rather than doing anything clever", mx.dataset.act, "closeModal");
+click(mx);
+ok("...and it actually closes", !$(".modal"));
+/* Not just Settings — the control is part of the modal shell, so every
+   modal has one however it was built. */
+const modalOpeners = ["damageModal", "hitDiceModal", "levelUpModal", "orderModal", "sessionModal"];
+modalOpeners.forEach(function (act) {
+  const btn = byAct(act);
+  if (!btn) return;
+  click(btn);
+  const m = $(".modal");
+  if (!m) return;
+  ok(act + " carries a close control", !!m.querySelector(".mx"));
+  click(m.querySelector(".mx"));
+  ok(act + " closes from it", !$(".modal"));
+  if ($("[data-act='closeModal']")) click(byAct("closeModal"));
+});
+
 console.log("\n=== EVERY ACTION LINKS SOMEWHERE THAT EXISTS ===");
 /* The universal actions all pointed at combat:actions, a page the wiki
    mirror has never had. Each one now deep-links the official 2024 rules
