@@ -331,8 +331,13 @@ function link(slug, label) {
    the app — the wiki is one deliberate extra tap away, not the default. */
 function wikiBtn(slug) {
   if (!slug) return "";
+  /* The arrow is its own element so a card can drop it and keep the word.
+     Inside a card the control's position already says what it is, and the
+     two characters were the difference between the secondary buttons
+     sharing a row and each taking one. */
   return '<button class="wikibtn" data-act="wiki" data-slug="' + esc(slug) +
-    '" title="Open on the wiki" aria-label="Open ' + esc(slug) + ' on the wiki">wiki ↗</button>';
+    '" title="Open on the wiki" aria-label="Open ' + esc(slug) +
+    ' on the wiki">wiki<span class="wkar"> ↗</span></button>';
 }
 function tagsOf(id, base) {
   const ov = S.tagOverrides[id];
@@ -1979,9 +1984,11 @@ function featuresTab() {
     if (!/Paladin|Oath/.test(f.src || "")) return;
     const tags = tagsOf("feature:" + k, f.tags);
     if (!matchesFilter(tags)) return;
-    out += '<div class="entry locked cnd-hide"><div class="eh"><span class="en">' + esc(f.name) +
-      '</span><span class="emeta">Unlocks at level ' + f.unlockLevel +
-      '</span><span class="esrc">' + esc(f.src) + "</span></div></div>";
+    /* No controls — there is nothing to do with a feature you don't have
+       yet — so the card is just its two lines. */
+    out += '<div class="card locked cnd-hide"><span class="cardname">' + esc(f.name) +
+      '</span><span class="cardmeta">Unlocks at level ' + f.unlockLevel + " · " +
+      esc(f.src) + "</span></div>";
   });
   out += "</div>";
 
@@ -2001,13 +2008,16 @@ function featuresTab() {
     if (!matchesFilter(tags)) return;
     const open = UI.expanded["f-" + k];
     /* Feats are passive — tapping the name reads the same as tapping More. */
-    out += '<div class="entry"><div class="eh">' +
-      '<button class="namebtn en" data-act="expand" data-id="f-' + k + '">' + esc(f.name) + "</button>" +
-      wikiBtn(f.slug) +
-      '<span class="emeta">' + esc(f.type) + " feat" + (f.prereq ? " · " + esc(f.prereq) : "") + "</span>" +
-      '<button class="bt cutsm" data-act="expand" data-id="f-' + k + '">' + (open ? "Less" : "More") + "</button></div>" +
-      "<div>" + tagHTML(tags, true) + "</div>" +
-      (open ? '<div class="etext">' + esc(f.text) + "</div>" : "") + "</div>";
+    out += '<div class="card">' +
+      '<button class="namebtn cardname" data-act="expand" data-id="f-' + k + '">' + esc(f.name) + "</button>" +
+      '<span class="cardmeta">' + esc(f.type) + " feat" +
+        (f.prereq ? " · " + esc(f.prereq) : "") + "</span>" +
+      '<div class="cardtags">' + tagHTML(tags, true) + "</div>" +
+      '<div class="cardbtns">' +
+        '<button class="bt cutsm" data-act="expand" data-id="f-' + k + '">' + (open ? "Less" : "More") + "</button>" +
+        wikiBtn(f.slug) +
+      "</div>" +
+      (open ? '<div class="carddetail">' + esc(f.text) + "</div>" : "") + "</div>";
   });
   if (S.magicInitiate) {
     out += '<div class="entry"><div class="eh"><span class="en">Magic Initiate picks</span></div>' +
@@ -2055,21 +2065,28 @@ const FEATURE_ACTION_MAP = {
   faithfulSteed:{ kind: "spell", id: "findSteed" }
 };
 
+/* Same card as spells and the doable list: name, one line of meta, tags,
+   controls bottom right. Where the feature is something you can actually
+   do, the name still does it — that behaviour predates the card and is
+   worth more than consistency about what a name does. */
 function featureEntry(k, f) {
   const tags = tagsOf("feature:" + k, f.tags);
   if (!matchesFilter(tags)) return "";
   const open = UI.expanded["ft-" + k];
   const act = FEATURE_ACTION_MAP[k];
   const nameBtn = act
-    ? '<button class="namebtn en" data-act="use" data-kind="' + act.kind + '" data-id="' + act.id + '">' +
+    ? '<button class="namebtn cardname" data-act="use" data-kind="' + act.kind + '" data-id="' + act.id + '">' +
         esc(f.name) + "</button>"
-    : '<button class="namebtn en" data-act="expand" data-id="ft-' + k + '">' + esc(f.name) + "</button>";
-  return '<div class="entry"><div class="eh">' + nameBtn + wikiBtn(f.slug) +
-    (f.homebrew ? '<span class="hb">Homebrew</span>' : "") +
-    '<button class="bt cutsm" data-act="expand" data-id="ft-' + k + '">' + (open ? "Less" : "More") + "</button>" +
-    '<span class="esrc">' + esc(f.src) + "</span></div>" +
-    "<div>" + tagHTML(tags, true) + "</div>" +
-    (open ? '<div class="etext">' + esc(f.text) + "</div>" : "") + "</div>";
+    : '<button class="namebtn cardname" data-act="expand" data-id="ft-' + k + '">' + esc(f.name) + "</button>";
+  return '<div class="card">' + nameBtn +
+    '<span class="cardmeta">' + esc(f.src) +
+      (f.homebrew ? ' <span class="hb">Homebrew</span>' : "") + "</span>" +
+    '<div class="cardtags">' + tagHTML(tags, true) + "</div>" +
+    '<div class="cardbtns">' +
+      '<button class="bt cutsm" data-act="expand" data-id="ft-' + k + '">' + (open ? "Less" : "More") + "</button>" +
+      wikiBtn(f.slug) +
+    "</div>" +
+    (open ? '<div class="carddetail">' + esc(f.text) + "</div>" : "") + "</div>";
 }
 
 /* ---------- INVENTORY ---------- */

@@ -595,17 +595,36 @@ body.onecol .mpin .mlab{font-size:10px;max-width:84px}
    and the buttons. That is the whole trick — it is what makes "Bonus
    action" line up with "Bonus action" three cards down, instead of
    starting wherever the name before it happened to end. */
-.card{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 12px;
-  padding:8px 10px;margin-bottom:5px;background:var(--panel2);border:1px solid var(--line)}
+/* Tight on purpose. The text column is what sets the height — name, meta,
+   tags — so the savings come from leading and padding rather than from
+   dropping anything. Twenty-odd pixels a card is several cards more on
+   screen down a list of twenty. */
+.card{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:1px 12px;
+  padding:6px 10px;margin-bottom:4px;background:var(--panel2);border:1px solid var(--line)}
 .card:last-child{margin-bottom:0}
-.card>.cardname{grid-column:1;grid-row:1;font-size:19px;font-weight:600;text-align:left}
-.card>.cardmeta{grid-column:1;grid-row:2;font-family:var(--m);font-size:14px;color:var(--dim);
-  letter-spacing:.06em}
-.card>.cardtags{grid-column:1;grid-row:3;min-height:1px}
+.card>.cardname{grid-column:1;grid-row:1;font-size:18.5px;font-weight:600;text-align:left;
+  line-height:1.2}
+.card>.cardmeta{grid-column:1;grid-row:2;font-family:var(--m);font-size:13.5px;color:var(--dim);
+  letter-spacing:.06em;line-height:1.25}
+/* Tags inside a card sit tighter than tags elsewhere — there are more of
+   them per square inch here than anywhere else in the app. */
+.card .tag{padding:1px 7px;margin:1px 3px 0 0}
+/* line-height:1 because the tags are inline-blocks and would otherwise
+   carry the text leading of a line box they don't use — seven pixels a
+   card, on every card in the app. */
+.card>.cardtags{grid-column:1;grid-row:3;min-height:1px;line-height:1}
 /* Spans all three rows and sits at the bottom, so the controls land in the
    same corner whether or not a card has tags. */
+/* The primary action takes a row to itself; anything secondary shares the
+   row beneath it. On a spell that is Cast on top with More and the wiki
+   link under it, which is one button-height shorter than stacking all
+   three and keeps the wiki in the bottom corner either way. */
 .card>.cardbtns{grid-column:2;grid-row:1/span 3;align-self:end;display:flex;
-  flex-direction:column;align-items:stretch;gap:4px;min-width:98px}
+  flex-wrap:wrap;justify-content:flex-end;align-content:flex-end;gap:3px;width:136px}
+.card>.cardbtns>*{flex:0 1 auto;text-align:center}
+.card>.cardbtns>.pri{flex:1 0 100%}
+.card>.cardbtns .bt{padding:4px 9px}
+.card>.cardbtns .wikibtn .wkar{display:none}
 .card>.cardbtns .wikibtn{margin-left:0;text-align:center}
 .card>.carddetail{grid-column:1/-1;grid-row:4;font-size:17.5px;color:var(--dim);
   line-height:1.45;margin-top:6px;border-top:1px solid var(--line);padding-top:6px}
