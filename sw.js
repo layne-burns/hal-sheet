@@ -3,7 +3,7 @@
    Bump CACHE_VERSION whenever you upload changed files, or Safari
    will keep serving the old ones from cache.
    ============================================================ */
-const CACHE_VERSION = "hal-v26";
+const CACHE_VERSION = "hal-v27";
 const ASSETS = [
   "./",
   "./index.html",
@@ -77,6 +77,18 @@ function putInCache(req, res) {
   return res;
 }
 
+/* Going to the network is not the same as getting a fresh file. A plain
+   fetch() may be answered from the browser's own HTTP cache without ever
+   asking the server, and a static host that sends no Cache-Control lets
+   the browser decide freshness by guesswork — so the code path could sit
+   on a stale script while believing it was network-first. Asking for
+   "no-cache" forces a revalidation, which is what makes an update actually
+   land the moment you open the app. */
+function revalidating(req) {
+  try { return new Request(req, { cache: "no-cache" }); }
+  catch (e) { return req; }   /* older engines: fall back to plain */
+}
+
 /* Resolves with the network response, or rejects once the clock runs
    out. The request itself is never cancelled — it still refreshes the
    cache if it lands late. */
@@ -87,7 +99,7 @@ function networkWithTimeout(req) {
       settled = true;
       reject(new Error("network timeout"));
     }, NET_TIMEOUT_MS);
-    fetch(req).then(function (res) {
+    fetch(revalidating(req)).then(function (res) {
       putInCache(req, res);
       if (!settled) { clearTimeout(timer); resolve(res); }
     }).catch(function (err) {
