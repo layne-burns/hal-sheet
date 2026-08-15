@@ -6,6 +6,16 @@
 
 const STORE_KEY = "hal-briarshade-sheet-v1";
 
+/* What the app's "100%" actually renders at. The sheet was always read at
+   80% on the iPad it lives on, so that is the size the layout is tuned
+   against — the breakpoints, the column widths and the type sizes were all
+   chosen for it. Naming that size 100% keeps the setting honest: it means
+   "the size this is meant to be", and A+ / A− move around it.
+
+   Declared up here because migrate() needs it, and migrate() runs on the
+   very next line. */
+const UI_SCALE_BASE = 0.8;
+
 /* ---------- STATE ------------------------------------------- */
 let S = load();
 
@@ -79,6 +89,15 @@ function migrate(st) {
   out.map.custom = (st.map || {}).custom || [];
   out.map.lore = (st.map || {}).lore || [];
   out.map.off = Object.assign({}, (st.map || {}).off || {});
+
+  /* Schema 2 moved the display-size baseline: 100% now renders at what
+     used to be 80%. A sheet saved before that stored its size against the
+     old baseline, so rescale it once — someone sitting at 80% wanted the
+     size they had, not a size 20% smaller than it. Guarded on the version
+     so it can only ever happen to a given sheet once. */
+  if ((st.schemaVersion || 1) < 2 && st.settings && st.settings.uiScale) {
+    out.settings.uiScale = Math.round(st.settings.uiScale / UI_SCALE_BASE);
+  }
   out.schemaVersion = base.schemaVersion;
   return out;
 }
@@ -388,24 +407,49 @@ const ACT = {
     render();
   },
 
-  /* Folding is per panel AND per tab, and it outlives a reload. */
+  /* Folding is per panel AND per tab, and it outlives a reload.
+
+     Panels that have a meaningful middle ground cycle through three states
+     rather than two: full → condensed → hidden → full. Skills is the case
+     that asked for it — all eighteen is the right default, but "just the
+     ones I'm proficient in" is what you want nine times in ten, and it
+     shouldn't cost a second control to get there.
+
+     State 1 is condensed and 2 is hidden, fixed rather than sequential, so
+     a two-state panel stores the same 2 a three-state one does. Sheets
+     saved before this existed stored `true`; that reads as hidden. */
   foldPanel(el) {
     const k = el.dataset.key;
+    const steps = parseInt(el.dataset.steps, 10) === 3 ? 3 : 2;
     mutate(function (st) {
       st.ui = st.ui || {};
       st.ui.folded = st.ui.folded || {};
-      if (st.ui.folded[k]) delete st.ui.folded[k]; else st.ui.folded[k] = true;
+      const cur = st.ui.folded[k] === true ? 2 : (st.ui.folded[k] || 0);
+      const next = steps === 3 ? (cur + 1) % 3 : (cur === 0 ? 2 : 0);
+      if (next === 0) delete st.ui.folded[k]; else st.ui.folded[k] = next;
     });
+  },
+
+  /* Expand or collapse every entry in one panel, or across the whole
+     centre column when scoped to the tab. Entries default closed, which is
+     right when you're hunting one spell and wrong when you're reading
+     through all of them. */
+  expandAll(el) {
+    const scope = el.dataset.scope === "tab"
+      ? document.querySelector(".wrap > div:nth-child(2)")
+      : el.closest(".pnl");
+    if (!scope) return;
+    const on = el.dataset.on === "1";
+    entryToggleIds(scope).forEach(function (id) {
+      if (on) UI.expanded[id] = true; else delete UI.expanded[id];
+    });
+    render();
   },
 
   /* ---- Resources ---- */
   loh(el) {
     const d = parseInt(el.dataset.d, 10);
     mutate(function (st) { st.resources.layOnHands += d; });
-  },
-  lohSet(el) {
-    const v = parseInt(el.value, 10) || 0;
-    mutate(function (st) { st.resources.layOnHands = v; });
   },
   cd(el) {
     const d = parseInt(el.dataset.d, 10);
@@ -1236,8 +1280,37 @@ const ACT = {
 function render() {
   /* Whole-UI zoom, not just text — the stylesheet is all px, so scaling
      root font-size would do nothing; CSS zoom (well-supported in the
-     Safari/WebKit this app targets) actually reflows everything. */
-  document.body.style.zoom = ((S.settings && S.settings.uiScale) || 100) + "%";
+     Safari/WebKit this app targets) actually reflows everything.
+
+     100% is the size the sheet is designed to be read at, and that is
+     what the stylesheet's own numbers render at times UI_SCALE_BASE. The
+     baseline exists because the sheet was always actually used at 80% —
+     so 80% is what the layout should be tuned against, and calling that
+     size "100%" is the honest way to say it. */
+  document.body.style.zoom =
+    (((S.settings && S.settings.uiScale) || 100) * UI_SCALE_BASE) + "%";
+
+  /* How much room the layout actually has is the viewport divided by the
+     zoom, and a media query cannot see that — it only ever measures the
+     device viewport. Left as a media query, the compact chrome fired on a
+     1080px iPad that, at this scale, is laying out 1350px wide and has
+     room to spare; and it would fail to fire on someone who had scaled
+     the sheet up until it was genuinely cramped. So the decision is made
+     here, where the real number is available, and carried as a class.
+     body.clientWidth is the one measurement that reports post-zoom
+     layout width rather than device pixels. */
+  /* A zero here means nothing has been laid out yet rather than "no room
+     at all", so fall back to the roomy layout instead of collapsing to a
+     single column on the strength of a measurement we did not get. */
+  const layoutWidth = document.body.clientWidth || document.documentElement.clientWidth || 99999;
+  document.body.classList.toggle("compact", layoutWidth < 1150);
+  /* How many columns there is room for, decided on the same measurement
+     and for the same reason. Portrait on this iPad is 810 device pixels
+     but lays out at 1012 — a media query would see the 810 and drop to
+     the phone stack, when there is comfortably room for the content
+     beside its resources. */
+  document.body.classList.toggle("twocol", layoutWidth >= 780 && layoutWidth < 1150);
+  document.body.classList.toggle("onecol", layoutWidth < 780);
   const app = document.getElementById("app");
   const tab = (S.ui && S.ui.tab) || "combat";
   app.innerHTML =
@@ -1288,6 +1361,21 @@ function panelKey(pnl) {
   return scope + "/" + label.replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
+/* Every entry-level "More" toggle inside a scope, deduplicated. A spell row
+   carries the same data-id on its name and its More button, and the panel
+   chrome (the More drawer, the Filter/Party/Creatures collapses) uses the
+   same action for something that isn't an entry — so both get filtered out
+   rather than swept up by an Expand all. */
+function entryToggleIds(scope) {
+  const ids = [];
+  Array.prototype.forEach.call(scope.querySelectorAll('[data-act="expand"][data-id]'), function (b) {
+    const id = b.dataset.id;
+    if (!id || id === "moreActions" || /Collapsed$/.test(id)) return;
+    if (ids.indexOf(id) < 0) ids.push(id);
+  });
+  return ids;
+}
+
 function applyPanelFolds() {
   const tab = (S.ui && S.ui.tab) || "combat";
   const folded = (S.ui && S.ui.folded) || {};
@@ -1302,14 +1390,42 @@ function applyPanelFolds() {
     const key = panelKey(pnl);
     if (!key) return;
     const full = tab + "/" + key;
-    const isFolded = !!folded[full];
-    if (isFolded) pnl.classList.add("folded");
+    /* A panel opts into the middle state by naming it — the label is what
+       the condensed view shows, so the button can say where a tap goes
+       instead of the useless "Hide" three times over. */
+    const condLabel = pnl.dataset.condense || "";
+    const steps = condLabel ? 3 : 2;
+    const raw = folded[full];
+    const state = raw === true ? 2 : (raw || 0);
+    if (state === 2) pnl.classList.add("folded");
+    else if (state === 1 && condLabel) pnl.classList.add("condensed");
+
+    /* Expand all rides in the same header, but only where there is
+       something to expand and the panel is actually showing. */
+    if (state !== 2) {
+      const ids = entryToggleIds(pnl);
+      if (ids.length >= 2) {
+        const anyClosed = ids.some(function (id) { return !UI.expanded[id]; });
+        const eb = document.createElement("button");
+        eb.className = "pcol";
+        eb.dataset.act = "expandAll";
+        eb.dataset.on = anyClosed ? "1" : "0";
+        eb.textContent = anyClosed ? "Expand all" : "Collapse all";
+        eb.title = (anyClosed ? "Open" : "Close") + " all " + ids.length + " entries in this panel";
+        h.appendChild(eb);
+      }
+    }
+
     const btn = document.createElement("button");
     btn.className = "pcol";
     btn.dataset.act = "foldPanel";
     btn.dataset.key = full;
-    btn.textContent = isFolded ? "Show" : "Hide";
-    btn.title = (isFolded ? "Show" : "Hide") + " this panel on the " + tab + " tab";
+    btn.dataset.steps = steps;
+    btn.textContent = state === 2 ? "Show" : (state === 1 ? "Hide" : (condLabel || "Hide"));
+    btn.title = state === 2 ? "Show this panel again"
+      : state === 1 ? "Hide this panel on the " + tab + " tab"
+      : condLabel ? "Show " + condLabel.toLowerCase() + " only"
+      : "Hide this panel on the " + tab + " tab";
     h.appendChild(btn);
   });
 }
@@ -1353,7 +1469,7 @@ function topBar() {
       '" aria-label="View portrait — ' + esc(portrait.label) + '">' +
       '<img src="' + portrait.file + '" alt="Hal, ' + esc(portrait.label) + '">' +
       '<span class="pstate">' + esc(portrait.label) + "</span></button>" +
-    '<div><div class="nm">' + esc(S.identity.name) + "</div>" +
+    '<div class="idblk"><div class="nm">' + esc(S.identity.name) + "</div>" +
       '<div class="nmsub">' + esc(S.identity.species).toUpperCase() + " // " +
       esc(S.identity.class).toUpperCase() + " " + S.level + " // " +
       esc(S.identity.subclass).toUpperCase() + "</div></div>" +
@@ -1495,33 +1611,35 @@ function leftRail() {
   const E = S.toggles.editMode;
   /* Topmost header doubles as the collapse control for the whole stats
      column, mirroring how the Resources rail collapses on the right. */
+  /* Abilities and saves were the same six rows listed twice — STR 9 −1,
+     then STR −1 again eight inches further down. They're one table now:
+     the score and its modifier, then the save that comes from it. The
+     heading stays the single word "Abilities" because it doubles as the
+     collapse control for the whole column, and a heading that wraps pushes
+     that control onto a second line. The columns say what they are. */
   let out = '<div class="pnl cut"><h3 class="collapse" data-act="toggleLeftRail">' +
     '<span>Abilities</span><span class="chev">Hide</span></h3>';
+  out += '<div class="abrow abhead"><span></span><span></span>' +
+    '<span>Mod</span><span>Save</span></div>';
   ["str","dex","con","int","wis","cha"].forEach(function (k) {
     const m = CALC.mod(S.abilities[k]);
-    if (E) {
-      out += '<div class="row"><span>' + k.toUpperCase() + "</span>" +
-        '<span><input type="number" style="width:56px" value="' + S.abilities[k] +
-        '" data-act="editAbility" data-key="' + k + '"> ' + sign(m) + "</span></div>";
-    } else {
-      out += '<div class="row" data-act="prov" data-prov="ability:' + k + '"><span>' + k.toUpperCase() +
-        '</span><span><span class="sc">' + S.abilities[k] + "</span> " + sign(m) + "</span></div>";
-    }
-  });
-  out += "</div>";
-
-  out += '<div class="pnl cut"><h3>Saves</h3>';
-  ["str","dex","con","int","wis","cha"].forEach(function (k) {
-    const s = CALC.savingThrow(S, k);
+    const sv = CALC.savingThrow(S, k);
     const prof = S.saveProficiencies.indexOf(k) >= 0;
-    out += '<div class="row' + (prof ? " prof" : "") + '" data-act="prov" data-prov="save:' + k + '">' +
-      "<span>" + (prof ? '<i class="dot"></i>' : '<i class="dot off"></i>') + k.toUpperCase() + "</span>" +
-      "<span>" + sign(s.value) +
-      (s.advantage ? ' <span class="adv">ADV</span>' : "") + "</span></div>";
+    out += '<div class="abrow"><span class="abk">' + k.toUpperCase() + "</span>";
+    out += E
+      ? '<span class="absc"><input type="number" value="' + S.abilities[k] +
+        '" data-act="editAbility" data-key="' + k + '"></span>'
+      : '<span class="absc" data-act="prov" data-prov="ability:' + k + '">' + S.abilities[k] + "</span>";
+    out += '<span class="abmod" data-act="prov" data-prov="ability:' + k + '">' + sign(m) + "</span>" +
+      '<span class="absv' + (prof ? " prof" : "") + '" data-act="prov" data-prov="save:' + k + '">' +
+      '<i class="dot' + (prof ? "" : " off") + '"></i>' + sign(sv.value) +
+      (sv.advantage ? '<span class="adv">ADV</span>' : "") + "</span></div>";
   });
   out += "</div>";
 
-  out += '<div class="pnl cut"><h3>Skills</h3>';
+  /* All eighteen stays the default — an unproficient check is still a roll
+     you make. The condensed state is the second tap, not the first. */
+  out += '<div class="pnl cut" data-condense="Proficient"><h3>Skills</h3>';
   /* Grouped by governing ability in ability order, alphabetical within each
      group — the way you actually reach for one ("best WIS check?"). The
      group heading carries the ability, so rows don't repeat it. */
@@ -1530,14 +1648,18 @@ function leftRail() {
       return SKILL_ABILITY[k] === ab;
     }).sort(function (a, b) { return SKILL_NAMES[a].localeCompare(SKILL_NAMES[b]); });
     if (!keys.length) return;
-    out += '<div class="grp">' + ab.toUpperCase() + "</div>";
+    /* A group whose skills all vanish in the condensed view has to vanish
+       with them, or you get a bare "STR" heading over nothing. */
+    const anyProf = keys.some(function (k) { return CALC.skill(S, k).proficient; });
+    out += '<div class="grp' + (anyProf ? "" : " cnd-hide") + '">' + ab.toUpperCase() + "</div>";
     keys.forEach(function (k) {
       const sk = CALC.skill(S, k);
       /* Every skill is listed, proficient or not — an unproficient check is
          still a roll you make. Non-proficient rows are dimmed so the ones
-         you're actually good at still read at a glance. */
+         you're actually good at still read at a glance, and they're the
+         ones the condensed view drops. */
       const dotCls = sk.expertise ? "dot exp" : (sk.proficient ? "dot" : "dot off");
-      out += '<div class="row' + (sk.proficient ? " prof" : " unprof") + '" ' +
+      out += '<div class="row' + (sk.proficient ? " prof" : " unprof cnd-hide") + '" ' +
         (E ? 'data-act="toggleSkill" data-key="' + k + '"' : 'data-act="prov" data-prov="skill:' + k + '"') +
         '><span><i class="' + dotCls + '"></i>' + esc(SKILL_NAMES[k]) + "</span>" +
         "<span>" + sign(sk.value) + "</span></div>";
@@ -1661,11 +1783,13 @@ function combatTab() {
     '<div class="mrow"><span class="lbl">Roll d10s, add CON ' + sign(CALC.mod(S.abilities.con)) + " per die</span>" +
     '<button class="bt cutsm" data-act="hitDiceModal"' + (hdLeft <= 0 ? " disabled" : "") + ">Spend</button></div></div>";
 
-  /* Conditions detail */
-  out += '<div class="pnl cut"><h3>Conditions</h3><div class="gridcols">';
+  /* Conditions detail. The condensed state shows only what's actually on
+     you — which is the whole panel most of the time, since the usual
+     number of active conditions is zero. */
+  out += '<div class="pnl cut" data-condense="Active"><h3>Conditions</h3><div class="gridcols">';
   Object.keys(CONDITIONS).forEach(function (k) {
     const c = CONDITIONS[k], on = S.conditions.indexOf(k) >= 0;
-    out += '<div class="row' + (on ? " prof" : "") + '" data-act="condition" data-key="' + k + '">' +
+    out += '<div class="row' + (on ? " prof" : " cnd-hide") + '" data-act="condition" data-key="' + k + '">' +
       '<span><i class="dot' + (on ? "" : " off") + '"></i>' + esc(c.name) + "</span></div>";
   });
   out += "</div>";
@@ -1696,7 +1820,13 @@ function spellsTab() {
     '<span class="lbl" style="margin-left:12px">Focus</span><b class="mono">Holy Symbol</b></div>' +
     '<div class="ph2" style="margin-top:10px">Filter' +
     '<button class="pcol" style="margin-left:8px" data-act="expand" data-id="filterCollapsed">' +
-    (filterCollapsed ? "Show" : "Hide") + "</button></div>" +
+    (filterCollapsed ? "Show" : "Hide") + "</button>" +
+    /* Per-panel Expand all is in every panel header already; this is the
+       one that does the whole tab at once, because "I'm reading through
+       all of them" doesn't stop at the Cantrips panel. */
+    '<button class="pcol" style="margin-left:8px" data-act="expandAll" data-scope="tab" data-on="' +
+    (spellsAllOpen() ? "0" : "1") + '">' +
+    (spellsAllOpen() ? "Collapse all spells" : "Expand all spells") + "</button></div>" +
     (filterCollapsed ? "" : tagFilterBar()) + "</div>";
 
   /* Cantrips */
@@ -1744,21 +1874,27 @@ function grantedSpellKeys() {
   return out;
 }
 
-/* Everything castable right now, in the order the Spells tab lists it.
-   The rail used to build its own list from preparedSpells + oath alone,
-   which is how Find Steed could sit in the Spells tab and be missing
-   from the rail you actually cast from at the table — and how the
-   cantrips, the things you cast most freely of all, were missing from
-   both. Checked against CALC.castables by the tests, so the two can't
-   drift apart again. */
-function castableSpellKeys() {
+/* There used to be a castableSpellKeys() here, building the rail's own copy
+   of the castable list and kept in step with CALC.castables by a test
+   because the two could drift — which is exactly how Find Steed once sat in
+   the Spells tab and was missing from the rail you cast from at the table.
+   The rail's copy is gone; the engine's list is the only one.
+
+   What follows is not that. It answers "which spells will this tab draw",
+   which is a question about presentation, and it decides one thing: whether
+   the button reads Expand or Collapse. Nothing casts from it. */
+function spellsTabKeys() {
   const seen = {};
   return (S.cantrips || []).concat(S.preparedSpells, oathSpellKeys(), grantedSpellKeys())
     .filter(function (k) {
       if (!SPELLS[k] || seen[k]) return false;
       seen[k] = true;
-      return true;
+      return matchesFilter(tagsOf("spell:" + k, SPELLS[k].tags));
     });
+}
+function spellsAllOpen() {
+  const keys = spellsTabKeys();
+  return keys.length > 0 && keys.every(function (k) { return UI.expanded["s-" + k]; });
 }
 
 function spellEntry(k, editable) {
@@ -1784,24 +1920,31 @@ function spellEntry(k, editable) {
         (c.free ? "Cast free" : "Cast") + "</button>";
     }
   }
-  let out = '<div class="entry"><div class="eh">' +
-    '<button class="namebtn en' + nameDim + '"' + nameAct + '>' + esc(sp.name) + "</button>" + wikiBtn(sp.slug) +
-    '<span class="emeta">' + (sp.lvl === 0 ? "Cantrip" : "Level " + sp.lvl) + " · " +
+  /* Same card as the doable list: name, then one line of meta, then tags,
+     with the controls stacked at the bottom right and the wiki link last.
+     Putting level/school/casting-time on its own line is what makes them
+     align down the column instead of starting wherever the spell's name
+     happened to end. */
+  let out = '<div class="card spellcard">' +
+    '<button class="namebtn cardname' + nameDim + '"' + nameAct + '>' + esc(sp.name) + "</button>" +
+    '<span class="cardmeta">' + (sp.lvl === 0 ? "Cantrip" : "Level " + sp.lvl) + " · " +
       esc(sp.school) + " · " + esc(sp.time) + " · " + esc(sp.range) + "</span>" +
-    castBtn +
-    '<button class="bt cutsm" data-act="expand" data-id="s-' + k + '">' + (open ? "Less" : "More") + "</button>" +
-    (editable ? '<button class="bt cutsm dg" data-act="unprepare" data-key="' + k + '">Remove</button>' : "") +
-    "</div>" +
-    '<div>' + tagHTML(tags, true) + "</div>";
+    '<div class="cardtags">' + tagHTML(tags, true) + "</div>" +
+    '<div class="cardbtns">' + castBtn +
+      '<button class="bt cutsm" data-act="expand" data-id="s-' + k + '">' + (open ? "Less" : "More") + "</button>" +
+      (editable ? '<button class="bt cutsm dg" data-act="unprepare" data-key="' + k + '">Remove</button>' : "") +
+      wikiBtn(sp.slug) +
+    "</div>";
   if (open) {
-    out += '<div class="etext">' + esc(sp.text) + "</div>" +
-      '<div class="emeta" style="margin-top:5px">Duration: ' + esc(sp.dur) +
+    out += '<div class="carddetail">' + esc(sp.text) +
+      '<div class="cardmeta" style="margin-top:6px">Duration: ' + esc(sp.dur) +
       " · Components: " + esc(sp.comp) + "</div>";
     if (S.toggles.editMode) {
       out += '<div class="mrow" style="margin-top:7px"><span class="lbl">Tags</span>' +
         '<input style="flex:1" value="' + esc(tags.join(", ")) +
         '" data-act="editTags" data-id="spell:' + k + '"></div>';
     }
+    out += "</div>";
   }
   out += "</div>";
   return out;
@@ -1812,7 +1955,9 @@ function featuresTab() {
   const E = S.toggles.editMode;
   let out = filterPanel();
 
-  out += '<div class="pnl cut"><h3>Class &amp; subclass</h3>';
+  /* Condensed drops the locked, not-yet-reached features — useful when
+     you're reading what you have rather than what's coming. */
+  out += '<div class="pnl cut" data-condense="Unlocked"><h3>Class &amp; subclass</h3>';
   S.features.forEach(function (k) {
     const f = FEATURES[k];
     if (!f || !/Paladin|Oath/.test(f.src || "")) return;
@@ -1825,7 +1970,7 @@ function featuresTab() {
     if (!/Paladin|Oath/.test(f.src || "")) return;
     const tags = tagsOf("feature:" + k, f.tags);
     if (!matchesFilter(tags)) return;
-    out += '<div class="entry locked"><div class="eh"><span class="en">' + esc(f.name) +
+    out += '<div class="entry locked cnd-hide"><div class="eh"><span class="en">' + esc(f.name) +
       '</span><span class="emeta">Unlocks at level ' + f.unlockLevel +
       '</span><span class="esrc">' + esc(f.src) + "</span></div></div>";
   });
@@ -2288,7 +2433,7 @@ function mapPanel() {
   const pins = mapPins();
   const mode = MAP_MODES.filter(function (r) { return r[0] === m.mode; })[0] || MAP_MODES[0];
 
-  let out = '<div class="pnl cut"><h3>The Map <span class="cnt">Cyrnn</span>' +
+  let out = '<div class="pnl cut"><h3 class="headwrap">The Map <span class="cnt">Cyrnn</span>' +
     '<span class="calviews">' +
       '<button class="bt cutsm" data-act="mapZoom" data-d="-1">−</button>' +
       '<button class="bt cutsm" data-act="mapFit">Fit</button>' +
@@ -2678,8 +2823,15 @@ function calendarTab() {
   const holidays = CAL.allHolidaysFor(cal.day);
   const next = CAL.nextHoliday(sysKey, cal.day);
 
+  /* The calendar itself leads: it's the thing you came to the tab to look
+     at, and the reckoning switch belongs with it rather than filed under
+     the date controls at the bottom. Then today, then writing something
+     down, then the machinery for moving the party's date — which is the
+     rarest thing you do here and so goes last. */
+  let out = calBrowser();
+
   /* ---- Today ---- */
-  let out = '<div class="pnl cut"><h3>Today <span class="cnt">Day ' + cal.day +
+  out += '<div class="pnl cut"><h3>Today <span class="cnt">Day ' + cal.day +
     " of " + CAL.daysPerYear + "</span></h3>" +
     '<div class="calday">' + esc(CAL.format(sysKey, cal.day)) + "</div>" +
     '<div class="calsub">' + esc(CAL.yearLabel(sysKey, cal.year)) + " · " + esc(month.season) +
@@ -2715,6 +2867,9 @@ function calendarTab() {
   }
   out += "</div>";
 
+  /* ---- Write something down ---- */
+  out += calAddNotePanel();
+
   /* ---- Controls ---- */
   out += '<div class="pnl cut"><h3>Set the date</h3>' +
     '<div class="mrow"><span class="lbl">Time of day</span>' +
@@ -2744,16 +2899,8 @@ function calendarTab() {
     "</div>" +
     '<div class="foot">Editing these moves the party’s date, not just the view. ' +
       "The Common calendar reckons from the Great Fracture, so the campaign opens in 2022 PF.</div>" +
-    '<div class="mrow"><span class="lbl">Showing</span>' +
-    Object.keys(CAL.systems).map(function (k) {
-      return '<button class="bt cutsm' + (k === sysKey ? " pri" : "") +
-        '" data-act="calSystem" data-key="' + k + '">' + esc(CAL.systems[k].label) + "</button>";
-    }).join("") + "</div>" +
-    '<div class="foot">Both calendars count the same 364 days — switching only changes how the date reads.</div>' +
     "</div>";
 
-  /* ---- The browser: day / week / month / year ---- */
-  out += calBrowser();
   return out;
 }
 
@@ -2783,12 +2930,23 @@ function calBrowser() {
     nav = calNavRow(-CAL.daysPerYear, CAL.daysPerYear, "calStep", "This year");
   }
 
-  let out = '<div class="pnl cut"><h3>' + esc(title) +
+  let out = '<div class="pnl cut"><h3 class="headwrap">' + esc(title) +
     '<span class="calviews">' +
     [["day", "Day"], ["week", "Week"], ["month", "Month"], ["year", "Year"]].map(function (v) {
       return '<button class="bt cutsm' + (view === v[0] ? " pri" : "") +
         '" data-act="calView" data-view="' + v[0] + '">' + v[1] + "</button>";
-    }).join("") + "</span></h3>" + nav;
+    }).join("") + "</span></h3>" +
+    /* Which reckoning you're reading belongs with the calendar you're
+       reading it in, not filed under the date controls at the bottom of
+       the tab. Both systems count the same 364 days; this only changes
+       how they're named. */
+    '<div class="mrow calsys"><span class="lbl">Reckoning</span>' +
+    Object.keys(CAL.systems).map(function (k) {
+      return '<button class="bt cutsm' + (k === sysKey ? " pri" : "") +
+        '" data-act="calSystem" data-key="' + k + '">' + esc(CAL.systems[k].label) + "</button>";
+    }).join("") +
+    '<span class="foot" style="margin:0 0 0 4px">Same 364 days either way — this changes how the date reads.</span>' +
+    "</div>" + nav;
 
   if (view === "month") out += calMonthGrid(cur);
   else if (view === "week") out += calWeekList(cur);
@@ -2935,9 +3093,22 @@ function calDayPanel(cur) {
     out += '<div class="foot">Nothing written on this day yet.</div>';
   }
 
-  /* Add form. Fields are read at click time, so a re-render never
-     interrupts typing — same contract as the damage box. */
-  out += '<div class="daypadd">' +
+  /* The add form used to sit here, buried at the bottom of the browser.
+     It's a section of the tab in its own right now — see calAddNotePanel. */
+  return out + "</div>";
+}
+
+/* ---------- ADD A NOTE ----------
+   Writes to whichever day the browser is pointing at, which is today until
+   you go looking somewhere else. Fields are read at click time, so a
+   re-render never interrupts typing — same contract as the damage box. */
+function calAddNotePanel() {
+  const cur = calCursor();
+  const sysKey = S.calendar.system;
+  return '<div class="pnl cut"><h3>Add a note <span class="cnt">' +
+    esc(CAL.format(sysKey, cur.day)) +
+    (cursorIsToday() ? " · today" : "") + "</span></h3>" +
+    '<div class="daypadd">' +
     '<input type="text" id="cal-note" placeholder="Note for ' +
       esc(CAL.format(sysKey, cur.day)) + '…">' +
     '<select id="cal-note-time"><option value="">All day</option>' +
@@ -2949,9 +3120,10 @@ function calDayPanel(cur) {
     '<span class="lbl">Warn</span>' +
     '<input type="number" id="cal-note-lead" value="0" min="0" max="60" style="width:58px">' +
     '<span class="lbl">days ahead</span>' +
-    '<button class="bt cutsm pri" data-act="calAddNote">Add note</button></div>';
-
-  return out + "</div>";
+    '<button class="bt cutsm pri" data-act="calAddNote">Add note</button></div>' +
+    (cursorIsToday() ? "" :
+      '<div class="foot">The browser is on another day — this note lands there, not on today.</div>') +
+    "</div>";
 }
 
 /* ---------- FILTER PANEL (collapsible) ---------- */
@@ -2966,18 +3138,28 @@ function filterPanel() {
 
 /* ---------- TAG FILTER BAR ---------- */
 function tagFilterBar() {
-  /* Grouped so the colour families read as meaning, not decoration */
+  /* A row per axis, headings in their own column. The bar used to be one
+     wrapping flex line, so a long heading shoved the next group's tags onto
+     a ragged new row and the groups stopped reading as groups. In a grid
+     the heading column is fixed and the tags wrap within their own cell,
+     which makes heading length irrelevant. Colour still carries help vs
+     harm inside the Effect row. */
   let out = '<div class="tagbar">';
   Object.keys(TAG_GROUPS).forEach(function (g) {
-    out += '<span class="taggrp">' + esc(TAG_GROUPS[g]) + "</span>";
-    Object.keys(TAGS).forEach(function (t) {
-      if (TAGS[t].group !== g) return;
+    const tags = Object.keys(TAGS).filter(function (t) { return TAGS[t].group === g; });
+    if (!tags.length) return;
+    out += '<span class="taggrp">' + esc(TAG_GROUPS[g]) + "</span><span class=\"tagrow\">";
+    tags.forEach(function (t) {
       const on = UI.filter.indexOf(t) >= 0;
       out += '<span class="tag t-' + TAGS[t].color + (on ? " sel" : "") +
         '" data-act="filter" data-tag="' + t + '">' + esc(TAGS[t].label) + "</span>";
     });
+    out += "</span>";
   });
-  if (UI.filter.length) out += '<button class="bt cutsm" style="margin-left:6px" data-act="clearFilter">Clear</button>';
+  if (UI.filter.length) {
+    out += '<span class="taggrp"></span><span class="tagrow">' +
+      '<button class="bt cutsm" data-act="clearFilter">Clear ' + UI.filter.length + "</button></span>";
+  }
   out += "</div>";
   return out;
 }
@@ -2994,11 +3176,27 @@ function resourceRail() {
   out += '<div class="pnl cut"><h3 class="collapse" data-act="toggleRail">' +
     '<span>Resources</span><span class="chev">Hide</span></h3>';
 
+  /* One rectangle per five points, filling by fifths, so the pool reads as
+     the same kind of object as the pip rows under it instead of as a stray
+     form control with a thumb to hunt for. The buttons are the primary way
+     to spend — they're exact, and exact is what you want when the cleric
+     asks how much you have left — but the bar still drags at full
+     granularity, because everything else in this column is direct. */
+  const lohSegs = Math.max(1, Math.ceil(loh / 5));
+  let lohBar = '<div class="lohbar" role="slider" tabindex="0" aria-label="Lay on Hands pool"' +
+    ' aria-valuemin="0" aria-valuemax="' + loh + '" aria-valuenow="' + S.resources.layOnHands + '">';
+  for (let i = 0; i < lohSegs; i++) {
+    const from = i * 5, span = Math.min(5, loh - from);
+    const filled = Math.max(0, Math.min(span, S.resources.layOnHands - from));
+    lohBar += '<div class="lohseg"><i style="width:' +
+      (span > 0 ? (filled / span) * 100 : 0) + '%"></i></div>';
+  }
+  lohBar += "</div>";
+
   out += '<div class="res"><div class="rh"><span class="lbl">Lay on hands</span>' +
     '<span class="rv" data-act="prov" data-prov="loh">' + S.resources.layOnHands +
     "<small>/" + loh + "</small></span></div>" +
-    '<input class="slider" type="range" min="0" max="' + loh + '" value="' + S.resources.layOnHands +
-    '" data-act="lohSet">' +
+    lohBar +
     '<div class="qb"><button data-act="loh" data-d="-1">−1</button>' +
     '<button data-act="loh" data-d="-5">−5</button>' +
     '<button data-act="loh" data-d="-10">−10</button>' +
@@ -3040,26 +3238,14 @@ function resourceRail() {
       (v ? -1 : 1) + '"></button></div></div>';
   }
   out += "</div>";
-
-  /* Quick prepared list for at-a-glance casting. Respects the tag
-     filter so filtering is global, not just within the Spells tab. */
-  const granted = grantedSpellKeys();
-  out += '<div class="pnl cut"><h3>Prepared <span class="cnt">' +
-    (UI.filter.length ? "filtered" : "+ granted · at will") + "</span></h3>";
-  castableSpellKeys().forEach(function (k) {
-    const sp = SPELLS[k];
-    if (!matchesFilter(tagsOf("spell:" + k, sp.tags))) return;
-    /* Where a spell comes from is worth saying, or the panel reads as
-       if you'd spent a prepared slot on every line of it. */
-    const badge = (S.cantrips || []).indexOf(k) >= 0 ? "At will"
-                : (granted.indexOf(k) >= 0 ? "Granted" : "");
-    out += '<div class="entry" style="padding:6px 0"><div class="eh">' +
-      '<button class="namebtn en" data-act="use" data-kind="spell" data-id="' + k +
-      '">' + esc(sp.name) + "</button>" + wikiBtn(sp.slug) +
-      (badge ? '<span class="bdg">' + badge + "</span>" : "") + "</div>" +
-      "<div>" + tagHTML(tagsOf("spell:" + k, sp.tags), false) + "</div></div>";
-  });
-  out += "</div>";
+  /* The rail used to end with a "Prepared" list as well, which was an
+     exact subset of "What you can do now" — same spells, same Cast
+     action, 1177px of rail restating the panel beside it. Two lists that
+     answer almost the same question is how you end up casting from the
+     stale one. They're now split by the question each actually answers:
+     "what can I pay for right now" is the Combat tab's doable panel, and
+     "what have I got at all" is the Spells tab. The rail does resources,
+     which is what its header always said. */
   return out;
 }
 
@@ -3681,13 +3867,85 @@ document.addEventListener("change", function (e) {
   if (typeof fn === "function") fn(el);
 });
 
-/* Live slider feedback without a re-render storm */
-document.addEventListener("input", function (e) {
-  const el = e.target;
-  if (el.dataset && el.dataset.act === "lohSet") {
-    const out = el.closest(".res").querySelector(".rv");
-    if (out) out.firstChild.nodeValue = el.value;
-  }
+/* ---------- LAY ON HANDS BAR ----------
+   The bar paints itself while you drag and only commits when you let go.
+   Two reasons, both of which you'd feel: mutate() re-renders the whole
+   document, which is not something to do sixty times a second on an iPad;
+   and it pushes an undo step, so a single drag across the pool would bury
+   every earlier move under twenty entries of its own. */
+let lohDrag = null;
+
+function lohValueAt(bar, clientX) {
+  const r = bar.getBoundingClientRect();
+  const max = parseInt(bar.getAttribute("aria-valuemax"), 10) || 0;
+  if (!r.width || !max) return 0;
+  /* Full granularity: the segments are how it's drawn, not what it steps by. */
+  return Math.round(Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * max);
+}
+
+function lohPaint(bar, v) {
+  const max = parseInt(bar.getAttribute("aria-valuemax"), 10) || 0;
+  Array.prototype.forEach.call(bar.querySelectorAll(".lohseg > i"), function (fill, i) {
+    const from = i * 5, span = Math.min(5, max - from);
+    const filled = Math.max(0, Math.min(span, v - from));
+    fill.style.width = (span > 0 ? (filled / span) * 100 : 0) + "%";
+  });
+  bar.setAttribute("aria-valuenow", v);
+  const res = bar.closest(".res");
+  const out = res && res.querySelector(".rv");
+  if (out && out.firstChild) out.firstChild.nodeValue = v;
+}
+
+function lohCommit(v) {
+  mutate(function (st) { st.resources.layOnHands = v; });
+}
+
+document.addEventListener("pointerdown", function (e) {
+  const bar = e.target.closest && e.target.closest(".lohbar");
+  if (!bar) return;
+  const v = lohValueAt(bar, e.clientX);
+  lohDrag = { value: v };
+  lohPaint(bar, v);
+  e.preventDefault();
+});
+
+document.addEventListener("pointermove", function (e) {
+  if (!lohDrag) return;
+  /* Look the bar up fresh — an unrelated re-render mid-drag would have
+     replaced the node the gesture started on. */
+  const bar = document.querySelector(".lohbar");
+  if (!bar) { lohDrag = null; return; }
+  const v = lohValueAt(bar, e.clientX);
+  if (v !== lohDrag.value) { lohDrag.value = v; lohPaint(bar, v); }
+  e.preventDefault();
+});
+
+document.addEventListener("pointerup", function () {
+  if (!lohDrag) return;
+  const v = lohDrag.value;
+  lohDrag = null;
+  lohCommit(v);
+});
+document.addEventListener("pointercancel", function () { lohDrag = null; render(); });
+
+/* There is a keyboard, so the bar takes arrow keys like any other slider. */
+document.addEventListener("keydown", function (e) {
+  const bar = document.activeElement;
+  if (!bar || !bar.classList || !bar.classList.contains("lohbar")) return;
+  const max = parseInt(bar.getAttribute("aria-valuemax"), 10) || 0;
+  const cur = parseInt(bar.getAttribute("aria-valuenow"), 10) || 0;
+  let v = null;
+  if (e.key === "ArrowLeft" || e.key === "ArrowDown") v = cur - (e.shiftKey ? 5 : 1);
+  else if (e.key === "ArrowRight" || e.key === "ArrowUp") v = cur + (e.shiftKey ? 5 : 1);
+  else if (e.key === "Home") v = 0;
+  else if (e.key === "End") v = max;
+  if (v === null) return;
+  e.preventDefault();
+  lohCommit(Math.max(0, Math.min(max, v)));
+  /* Committing re-renders, which throws away the element the key was
+     pressed on — so hold the focus, or only the first arrow press lands. */
+  const again = document.querySelector(".lohbar");
+  if (again) again.focus();
 });
 
 /* Keyboard shortcuts — the keyboard case earns its keep */

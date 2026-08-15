@@ -78,7 +78,14 @@ function backupCfg() {
    Settings, not inside the backup modal itself — so reopening it fresh
    is always a two-step navigation, not a single button. */
 function closeAnyModal() { if (byAct("closeModal")) click(byAct("closeModal")); }
-function openBackupModal() { closeAnyModal(); click(byAct("settingsModal")); click(byAct("backupModal")); }
+/* Settings lives behind "More" now, so the top bar fits a tablet in two
+   rows instead of three. Open the drawer first if it isn't already. */
+function openSettings() {
+  let b = byAct("settingsModal");
+  if (!b) { click(byAct("expand", { id: "moreActions" })); b = byAct("settingsModal"); }
+  click(b);
+}
+function openBackupModal() { closeAnyModal(); openSettings(); click(byAct("backupModal")); }
 
 (async function () {
 
@@ -95,7 +102,7 @@ w.eval("save()"); /* force the main sheet key to exist before inspecting it */
 ok("main sheet state has no 'token'/'backup' field on it", !("token" in state()) && !("backup" in state()));
 
 console.log("\n=== SETTINGS SHOWS THE BACKUP ENTRY POINT ===");
-click(byAct("settingsModal"));
+openSettings();
 ok("settings lists a not-connected backup row", /Cloud backup .* not connected/.test(text()));
 click(byAct("backupModal"));
 ok("backup modal opens", /Cloud backup/.test(text()));
@@ -288,7 +295,7 @@ cfg = backupCfg();
 eq("sync marked failed", cfg.lastSyncOk, false);
 ok("error message explains a rejected token", /[Tt]oken rejected/.test(cfg.lastError));
 ok("failure surfaces in the (still open) backup modal", /Last attempt failed/.test(text()));
-click(byAct("settingsModal"));
+openSettings();
 ok("failure surfaces in Settings too", /Cloud backup .* sync failed/.test(text()));
 closeAnyModal();
 

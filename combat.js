@@ -272,13 +272,63 @@ EXT.partyPanel = function (forceOpen) {
   return out + "</div>";
 };
 
-/* ---------- WHAT CAN I DO NOW ------------------------------- */
+/* ---------- WHAT CAN I DO NOW -------------------------------
+   The busiest panel in the app, and it used to be one flat run of
+   twenty-three cards with the cost buried mid-line between the name and
+   the button. Three changes, all aimed at the same thing — being able to
+   answer "what have I got left for my bonus action" without reading:
+
+   The list is grouped by what it costs you, so that question is answered
+   by looking in one place rather than scanning every row.
+
+   Each card is a fixed shape: name, then cost on its own line so the
+   costs align down the column, then tags, with Cast and the wiki link
+   stacked at the bottom right. Nothing shifts position between cards.
+
+   Every entry already carried its rules text — spells from SPELLS, the
+   universal actions from ACTION_CATALOG — and the panel simply never
+   showed it. Tapping a name now opens it, which also means the generic
+   Expand all control appears here for free. */
+
+/* The universal actions every character has. They belong in the list —
+   you can always Dodge — but they're the ones you stop needing reminding
+   of, so the panel's condensed state is what drops them. Attack and Help
+   stay: one is most turns, the other is a feat you paid for. */
+const BASIC_ACTIONS = ["dash", "disengage", "dodge", "hide", "shove", "grapple", "opportunity"];
+
+const ECONOMY_GROUPS = [
+  ["action",   "Action"],
+  ["bonus",    "Bonus action"],
+  ["reaction", "Reaction"],
+  ["free",     "Free"]
+];
+
+function doableCard(x) {
+  const key = "d-" + x.kind + ":" + x.id;
+  const open = !!UI.expanded[key];
+  const basic = BASIC_ACTIONS.indexOf(x.id) >= 0;
+  const cost = costLabel(x.cost) + (x.free ? " · free" : "");
+  return '<div class="card doable' + (basic ? " cnd-hide" : "") + '">' +
+    '<button class="namebtn cardname" data-act="expand" data-id="' + key + '">' + esc(x.name) + "</button>" +
+    '<span class="cardmeta">' + esc(cost) + "</span>" +
+    '<div class="cardtags">' +
+      tagHTML(tagsOf((x.kind === "spell" ? "spell:" : "action:") + x.id, x.tags), false) + "</div>" +
+    '<div class="cardbtns">' +
+      '<button class="bt cutsm pri" data-act="use" data-kind="' + x.kind + '" data-id="' + x.id + '">' +
+      (x.kind === "spell" ? "Cast" : "Use") + "</button>" +
+      wikiBtn(x.slug) +
+    "</div>" +
+    (open && x.text ? '<div class="carddetail">' + esc(x.text) + "</div>" : "") +
+  "</div>";
+}
+
 EXT.canDoPanel = function () {
   const list = CALC.castables(S).filter(function (x) {
     if (x.afterHit && S.combat.active && !S.combat.turn.hitLanded) return false;
     return x.affordable;
   });
-  let out = '<div class="pnl cut"><h3>What you can do now <span class="cnt">' + list.length + "</span></h3>";
+  let out = '<div class="pnl cut" data-condense="Yours"><h3>What you can do now ' +
+    '<span class="cnt">' + list.length + "</span></h3>";
   if (S.combat.active) {
     const t = S.combat.turn;
     out += '<div class="foot" style="margin:0 0 8px">' +
@@ -286,16 +336,31 @@ EXT.canDoPanel = function () {
       (t.bonus ? "Bonus spent · " : "Bonus open · ") +
       (t.slotUsed ? "slot spent this turn" : "slot available") + "</div>";
   }
-  list.forEach(function (x) {
-    out += '<div class="doable"><div class="eh">' +
-      '<button class="namebtn en" data-act="use" data-kind="' + x.kind + '" data-id="' + x.id + '">' +
-      esc(x.name) + "</button>" + wikiBtn(x.slug) +
-      '<span class="emeta">' + esc(costLabel(x.cost)) + (x.free ? " · free cast" : "") + "</span>" +
-      '<button class="bt cutsm pri" data-act="use" data-kind="' + x.kind + '" data-id="' + x.id +
-      '">' + (x.kind === "spell" ? "Cast" : "Use") + "</button></div>" +
-      "<div>" + tagHTML(tagsOf((x.kind === "spell" ? "spell:" : "action:") + x.id, x.tags), false) + "</div>" +
-      "</div>";
+
+  ECONOMY_GROUPS.forEach(function (g) {
+    const inGroup = list.filter(function (x) { return (x.cost && x.cost.type) === g[0]; });
+    if (!inGroup.length) return;
+    /* A heading whose whole group disappears in the condensed view has to
+       disappear with it, the same way the skill groups do. */
+    const allBasic = inGroup.every(function (x) { return BASIC_ACTIONS.indexOf(x.id) >= 0; });
+    /* Two counts, one shown per state — otherwise a condensed group reads
+       "Action 15" over eight cards. */
+    const yours = inGroup.filter(function (x) { return BASIC_ACTIONS.indexOf(x.id) < 0; }).length;
+    out += '<div class="cardgrp' + (allBasic ? " cnd-hide" : "") + '">' + g[1] +
+      ' <span class="cardgrpn cnd-hide">' + inGroup.length + "</span>" +
+      '<span class="cardgrpn cnd-show">' + yours + "</span></div>";
+    inGroup.forEach(function (x) { out += doableCard(x); });
   });
+
+  /* Anything the engine offers with a cost shape we don't group — belt and
+     braces, so a new action can never silently vanish from the panel. */
+  const grouped = ECONOMY_GROUPS.map(function (g) { return g[0]; });
+  const ungrouped = list.filter(function (x) { return grouped.indexOf(x.cost && x.cost.type) < 0; });
+  if (ungrouped.length) {
+    out += '<div class="cardgrp">Other <span class="cardgrpn">' + ungrouped.length + "</span></div>";
+    ungrouped.forEach(function (x) { out += doableCard(x); });
+  }
+
   const hidden = CALC.castables(S).length - list.length;
   if (hidden > 0) out += '<div class="foot">' + hidden + " option(s) hidden — not affordable right now</div>";
   return out + "</div>";
@@ -1461,13 +1526,21 @@ render = function () {
     if (centre && S.effects.length) centre.insertAdjacentHTML("afterbegin", EXT.effectsPanel());
   }
 
-  /* Undo + session + settings at the end of the top bar */
+  /* Undo + session + settings at the end of the top bar.
+     Undo is a mid-turn control and stays first-class. Settings is a
+     once-a-month visit and lives behind More. Session sits between the
+     two: hidden while idle, but promoted to the bar the moment one is
+     running, because a recording session you can't see is a session you
+     forget to stop. */
   if (bar) {
-    bar.insertAdjacentHTML("beforeend",
-      '<button class="bt cutsm" data-act="undo">Undo</button>' +
-      '<button class="bt cutsm' + (S.session.active ? " pri" : "") + '" data-act="sessionModal">' +
-      (S.session.active ? "Session ●" : "Session") + "</button>" +
-      '<button class="bt cutsm" data-act="settingsModal">Settings</button>');
+    const moreOpen = !!UI.expanded.moreActions;
+    let extra = '<button class="bt cutsm" data-act="undo">Undo</button>';
+    if (S.session.active || moreOpen) {
+      extra += '<button class="bt cutsm' + (S.session.active ? " pri" : "") + '" data-act="sessionModal">' +
+        (S.session.active ? "Session ●" : "Session") + "</button>";
+    }
+    if (moreOpen) extra += '<button class="bt cutsm" data-act="settingsModal">Settings</button>';
+    bar.insertAdjacentHTML("beforeend", extra);
   }
 
   /* Panels injected above didn't exist when the base render folded

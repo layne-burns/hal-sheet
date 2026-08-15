@@ -132,7 +132,7 @@ ok("Bless has a separate wiki icon", !!blessWiki);
 let opened = null;
 w.open = function (u) { opened = u; };
 click(blessWiki);
-eq("the wiki icon opens Bless's actual page", opened, "http://dnd2024.wikidot.com/spell:bless");
+eq("the wiki icon opens Bless's actual page", opened, "https://dnd2024.wikidot.com/spell:bless");
 opened = null;
 /* Clicking the NAME must not also have opened the wiki */
 eq("clicking the wiki icon did not also cast the spell",
@@ -149,7 +149,7 @@ console.log("\n=== NAMES ACT (weapons open the attack roll, not the wiki) ===");
 function attackBtn() { return byAct("attackRoll", { id: "shortsword" }); }
 click(byAct("tab", { tab: "combat" }));
 ok("Shortsword's name opens the attack roll", !!attackBtn());
-const swordWiki = $$('.wikibtn').filter(function (b) { return b.dataset.slug === "equipment:weapons"; })[0];
+const swordWiki = $$('.wikibtn').filter(function (b) { return b.dataset.slug === "equipment:weapon"; })[0];
 ok("weapon row has its own wiki icon too", !!swordWiki);
 click(attackBtn());
 ok("attack modal opened", /Attack bonus/.test(text()));

@@ -124,15 +124,29 @@ input[type=number]{width:88px}
 .tab k{color:var(--dimmer);margin-left:6px;font-size:13.5px;font-style:normal}
 
 /* ---------- LAYOUT ---------- */
-.wrap{display:grid;grid-template-columns:206px minmax(0,1fr) 278px;gap:7px;align-items:start}
-.wrap.railoff{grid-template-columns:206px minmax(0,1fr) 32px}
-.wrap.leftoff{grid-template-columns:32px minmax(0,1fr) 278px}
+/* The stats column carries four numbers per row now that saves sit beside
+   the abilities they come from, so it takes 240. The resources column pays
+   for it: it dropped to 250 when the duplicate spell list left it, and all
+   it holds now are pools and pip rows. Net effect on the centre column is
+   nothing. */
+.wrap{display:grid;grid-template-columns:240px minmax(0,1fr) 250px;gap:7px;align-items:start}
+.wrap.railoff{grid-template-columns:240px minmax(0,1fr) 32px}
+.wrap.leftoff{grid-template-columns:32px minmax(0,1fr) 250px}
 .wrap.leftoff.railoff{grid-template-columns:32px minmax(0,1fr) 32px}
 .pnl{background:var(--panel);border:1px solid var(--line);padding:11px 13px;margin-bottom:7px}
 .pnl>h3{font-family:var(--m);font-size:14px;letter-spacing:.16em;text-transform:uppercase;color:var(--cyan);
-  margin-bottom:8px;font-weight:400;display:flex;align-items:center;gap:9px}
-.pnl>h3::after{content:"";flex:1;height:1px;background:var(--line)}
-.pnl>h3 .cnt{color:var(--dimmer);flex:none}
+  margin-bottom:8px;font-weight:400;display:flex;align-items:center;gap:9px;
+  /* A long heading in a narrow column used to shove the fold chip onto a
+     line of its own. The heading text shrinks and ellipsises instead; the
+     chip is the control, so it is the thing that must never move.
+     nowrap is needed twice over: once so the flex row doesn't break
+     between items, and once so the bare title text — an anonymous flex
+     item, which no selector can reach — doesn't break inside itself. The
+     count beside it absorbs the shrinking. */
+  flex-wrap:nowrap;white-space:nowrap;min-width:0}
+.pnl>h3::after{content:"";flex:1 1 0;min-width:0;height:1px;background:var(--line)}
+.pnl>h3 .cnt{color:var(--dimmer);flex:0 1 auto;min-width:0;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
 
 /* ---------- ABILITY / SAVE / SKILL ROWS ---------- */
 .row{display:flex;justify-content:space-between;align-items:center;font-family:var(--m);font-size:17px;
@@ -145,6 +159,34 @@ input[type=number]{width:88px}
 .row.unprof:hover{color:var(--cyan)}
 .row .sc{color:var(--dim);font-size:15.5px}
 .row .adv{color:var(--grn);font-size:13.5px;letter-spacing:.06em}
+/* A skill label wraps under itself, not under its bullet. The bullet used
+   to be an inline element inside the same box as the text, so the second
+   line of "Animal Handling" returned to the box edge and sat beneath the
+   dot. Making the label a flex box puts the dot and the text in separate
+   boxes, and the text wraps within its own. */
+.row>span:first-child{display:flex;align-items:flex-start;gap:7px;min-width:0}
+.row>span:first-child .dot{flex:none;margin-top:.45em}
+.row>span:last-child{flex:none;text-align:right}
+
+/* ---------- ABILITIES + SAVES ----------
+   Four columns: which ability, its score, its modifier, the save it feeds.
+   Fixed widths on the numbers so the six rows read as a table and the
+   signs line up under each other. */
+.abrow{display:grid;grid-template-columns:1fr 26px 38px 52px;gap:6px;align-items:center;
+  font-family:var(--m);font-size:17px;padding:4px 0;border-bottom:1px solid #1A242D}
+.abrow:last-child{border-bottom:none}
+.abrow>span:not(.abk){text-align:right;font-variant-numeric:tabular-nums}
+.abrow .abk{letter-spacing:.06em}
+.abrow .absc{color:var(--dim);font-size:15.5px;cursor:pointer}
+.abrow .abmod{cursor:pointer}
+.abrow .absv{cursor:pointer;display:flex;align-items:center;justify-content:flex-end;gap:5px}
+.abrow .absv.prof{color:var(--yel)}
+.abrow .absv:hover,.abrow .abmod:hover,.abrow .absc:hover{color:var(--cyan)}
+.abrow .absv .adv{color:var(--grn);font-size:12px;letter-spacing:.04em}
+.abrow input{width:100%;text-align:right}
+/* The caption row is a label, not a control. */
+.abrow.abhead{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--dimmer);
+  padding:0 0 4px;border-bottom:1px solid var(--line)}
 /* Ability heading above each block of skills it governs. */
 .grp{font-family:var(--m);font-size:13px;letter-spacing:.16em;color:var(--dimmer);
   margin:9px 0 2px;display:flex;align-items:center;gap:7px}
@@ -271,10 +313,19 @@ input[type=number]{width:88px}
    whole column, not one panel — but it reads as the same kind of thing,
    so it wears the same chip. */
 .pcol,h3.collapse .chev{font-family:var(--m);font-size:14px;letter-spacing:.1em;color:var(--dim);
-  border:1px solid var(--line2);padding:1px 8px;flex:none;cursor:pointer}
+  border:1px solid var(--line2);padding:1px 8px;flex:none;cursor:pointer;white-space:nowrap}
 .pcol:hover,h3.collapse:hover .chev,h3.collapse:active .chev{color:var(--cyan);border-color:var(--cyan)}
 .pnl.folded>*:not(h3){display:none}
 .pnl.folded>h3{margin-bottom:0}
+/* The middle state of a three-way panel: still open, showing only the rows
+   that matter most. Which rows those are is the panel's business — it marks
+   them — so one rule covers Skills, Conditions and locked features alike. */
+.pnl.condensed .cnd-hide{display:none}
+/* The mirror of cnd-hide: only shown once a panel is condensed. Used for
+   the counts beside a group heading, so "Action 15" doesn't sit above
+   eight cards the moment the basics are folded away. */
+.cnd-show{display:none}
+.pnl.condensed .cnd-show{display:inline}
 
 /* ---------- REMINDERS ----------
    Lives under the alert bar on every tab. Violet = the world's holidays,
@@ -287,7 +338,11 @@ input[type=number]{width:88px}
 .rmrow.hol .rmflag{color:var(--violet)}
 .rmname{flex:1;font-size:19px;cursor:pointer;min-width:0}
 .rmname:hover{color:var(--cyan)}
-.rmwhen{display:block;font-family:var(--m);font-size:14.5px;color:var(--dim);letter-spacing:.06em}
+/* On the same line as the title, not under it. There is always horizontal
+   room for a date, and stacking it doubled the height of the loudest strip
+   on the page. */
+.rmwhen{display:inline;margin-left:9px;font-family:var(--m);font-size:14.5px;
+  color:var(--dim);letter-spacing:.06em}
 .rmmore,.rmall{font-family:var(--m);font-size:14px;color:var(--dimmer);letter-spacing:.08em;
   margin-top:7px}
 .rmall{margin-top:8px}
@@ -299,9 +354,12 @@ input[type=number]{width:88px}
 /* ---------- CALENDAR BROWSER ---------- */
 /* Sits after the h3's hairline rule, same as every other panel button. */
 .calviews{display:flex;gap:5px;flex:none}
-/* Panel headings are a nowrap flex row, so anything added to one has to
-   be allowed to wrap or it pushes the whole panel sideways. */
-.pnl>h3{flex-wrap:wrap}
+/* Two headings carry a cluster of controls that has to stay whole — the
+   calendar's view switch and the map's zoom — so those are allowed to
+   wrap and to break their title text. This used to apply to every
+   heading, which meant a long source citation or a wide count could push
+   the fold chip onto a line of its own anywhere in the app. */
+.pnl>h3.headwrap{flex-wrap:wrap;white-space:normal}
 .calnav{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:10px}
 /* The jump row is the one place two bare labels sit side by side, and
    .mrow's gap is scoped to modals — so it lays itself out. */
@@ -448,11 +506,9 @@ input[type=number]{width:88px}
   filter:drop-shadow(0 0 5px rgba(252,238,10,.85))}
 .mpin.party .mlab{color:var(--yel);border:1px solid var(--yel)}
 
-@media (max-width:900px){
-  /* One column: the map gets the full width, and labels would crowd it,
-     so they shrink rather than being dropped — position still reads. */
-  .mpin .mlab{font-size:10px;max-width:84px}
-}
+/* Narrow: the map gets the full width, and labels would crowd it, so they
+   shrink rather than being dropped — position still reads. */
+body.onecol .mpin .mlab{font-size:10px;max-width:84px}
 
 /* ---------- TAGS ---------- */
 /* Three hue families plus gray. Shade carries the distinction
@@ -471,8 +527,12 @@ input[type=number]{width:88px}
 .tag.t-y4{border-color:#605440;color:#746654}
 .tag.t-g{border-color:#3A4854;color:#7E90A0}
 .tag.sel{background:var(--cyan);border-color:var(--cyan);color:#04141A}
+/* Two columns: a fixed heading gutter and a cell the tags wrap inside. The
+   headings can be any length now without disturbing the rows below them. */
+.tagbar{display:grid;grid-template-columns:auto minmax(0,1fr);gap:5px 10px;align-items:baseline}
 .taggrp{font-family:var(--m);font-size:12px;letter-spacing:.14em;text-transform:uppercase;
-  color:var(--dimmer);margin:0 4px 0 10px}
+  color:var(--dimmer);text-align:right;white-space:nowrap}
+.tagrow{display:flex;flex-wrap:wrap;gap:2px 3px;align-items:center}
 
 /* ---------- EDGE GLOW ---------- */
 #glow-root .glow{position:fixed;inset:0;pointer-events:none;z-index:40}
@@ -525,8 +585,38 @@ input[type=number]{width:88px}
 .ordrow .oi{font-family:var(--m);color:var(--dimmer);width:20px;flex:none}
 .ordrow .on{flex:1;font-size:18px}
 .ordrow .oinit{width:64px;font-size:18px}
-.doable{padding:7px 0;border-bottom:1px solid #1A242D}
-.doable:last-child{border-bottom:none}
+/* ---------- CARD ----------
+   One shape, used by everything that is "a thing you can do": the doable
+   list on Combat and the spell lists on Spells. Name, then its one line of
+   meta, then tags, down the left; the controls stacked at the bottom right
+   with the action on top and the wiki link under it.
+
+   The meta sits on its own line rather than mid-sentence between the name
+   and the buttons. That is the whole trick — it is what makes "Bonus
+   action" line up with "Bonus action" three cards down, instead of
+   starting wherever the name before it happened to end. */
+.card{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 12px;
+  padding:8px 10px;margin-bottom:5px;background:var(--panel2);border:1px solid var(--line)}
+.card:last-child{margin-bottom:0}
+.card>.cardname{grid-column:1;grid-row:1;font-size:19px;font-weight:600;text-align:left}
+.card>.cardmeta{grid-column:1;grid-row:2;font-family:var(--m);font-size:14px;color:var(--dim);
+  letter-spacing:.06em}
+.card>.cardtags{grid-column:1;grid-row:3;min-height:1px}
+/* Spans all three rows and sits at the bottom, so the controls land in the
+   same corner whether or not a card has tags. */
+.card>.cardbtns{grid-column:2;grid-row:1/span 3;align-self:end;display:flex;
+  flex-direction:column;align-items:stretch;gap:4px;min-width:98px}
+.card>.cardbtns .wikibtn{margin-left:0;text-align:center}
+.card>.carddetail{grid-column:1/-1;grid-row:4;font-size:17.5px;color:var(--dim);
+  line-height:1.45;margin-top:6px;border-top:1px solid var(--line);padding-top:6px}
+.card.locked{opacity:.4}
+/* The group heading above each run of cards — by action economy on Combat,
+   by where the spell came from on Spells. */
+.cardgrp{font-family:var(--m);font-size:12.5px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--cyan);margin:11px 0 5px;display:flex;align-items:center;gap:7px}
+.cardgrp::after{content:"";flex:1;height:1px;background:var(--line)}
+.cardgrp:first-of-type{margin-top:3px}
+.cardgrp .cardgrpn{color:var(--dimmer);flex:none;order:9}
 .rollcard{border:1px solid var(--cyan);padding:10px 12px;margin-bottom:7px;background:#0C1218}
 .rollcard.them{border-color:var(--mag)}
 .rollcard .rw{font-family:var(--m);font-size:13.5px;letter-spacing:.16em;text-transform:uppercase;
@@ -555,7 +645,10 @@ input[type=number]{width:88px}
 .vpick{font-family:var(--m);font-size:14.5px;letter-spacing:.08em;text-transform:uppercase;
   padding:6px 11px;border:1px solid var(--line2);color:var(--dim);background:transparent}
 .vpick.sel{border-color:var(--mag);color:var(--mag)}
-.tagbar{display:flex;flex-wrap:wrap;gap:2px;margin-bottom:9px;align-items:center}
+/* The grid that lays this out is defined with the tag styles above; only
+   the spacing belongs here. It used to say display:flex, which quietly
+   beat the grid by being the later rule. */
+.tagbar{margin-bottom:9px}
 .tagbar .tag{cursor:pointer;margin:0}
 
 /* ---------- ENTRY (spell / feature / item) ---------- */
@@ -595,10 +688,21 @@ h3.collapse::after{display:none}
 .pip{flex:1;height:13px;background:var(--cyan);border:none;min-width:8px}
 .pip.sp{background:#1C2731}
 .pip.y{background:var(--yel)} .pip.y.sp{background:#2A2800}
-.slider{width:100%;margin:5px 0 0;accent-color:var(--cyan)}
+/* Lay on Hands is a pool, not a form control. It wears the same rectangles
+   as the pip rows beneath it — same height, same empty colour, same cyan —
+   so the whole rail reads as one kind of object. One rectangle per five
+   points; the partly-spent one fills by fifths, so 16 of 20 is three solid
+   blocks and a fifth of a fourth rather than a thumb sitting at 80%. */
+.lohbar{display:flex;gap:3px;margin:6px 0 0;touch-action:none;cursor:ew-resize}
+.lohbar:focus-visible{outline:1px solid var(--cyan);outline-offset:2px}
+.lohseg{flex:1;height:13px;background:#1C2731;overflow:hidden}
+.lohseg i{display:block;height:100%;background:var(--cyan)}
 .qb{display:flex;gap:4px;margin-top:5px}
-.qb button{flex:1;font-family:var(--m);font-size:14.5px;padding:5px 0;background:var(--panel2);
-  border:1px solid var(--line2);color:var(--dim)}
+/* The buttons are the first thing you should reach for — spending is
+   almost always a known number — so they read at full strength rather
+   than as the dimmed afterthought they were. */
+.qb button{flex:1;font-family:var(--m);font-size:15px;padding:6px 0;background:var(--panel2);
+  border:1px solid var(--line2);color:var(--txt);letter-spacing:.06em}
 .qb button:hover{border-color:var(--cyan);color:var(--cyan)}
 
 /* ---------- MODAL ---------- */
@@ -668,14 +772,81 @@ textarea.notes{width:100%;min-height:140px;line-height:1.6;font-family:var(--f);
 .cmfeast::before{content:"› ";color:var(--violet)}
 .cmfeast.today{color:var(--violet)}
 
-@media (max-width:900px){
-  .wrap,.wrap.railoff,.wrap.leftoff,.wrap.leftoff.railoff{grid-template-columns:1fr}
-  /* Single column: the vertical edge tab would have nowhere to sit, so it
-     becomes a full-width bar. Collapsing still works — which matters most
-     here, where everything is stacked and the page is one long scroll. */
-  .railtab{position:static;min-height:0;width:auto;padding:9px 0;margin-bottom:7px}
-  .railtab span{writing-mode:horizontal-tb}
-}
+/* ---------- TABLET CHROME COMPACTION ----------
+   The iPad in landscape is 1080x740, and the chrome above the content was
+   eating 405px of that 740 — 55% of the screen spent on things that do not
+   change during a turn. Three separate wraps caused it: the identity block
+   claimed 431px of bar width so the buttons fell to a second row, the flex
+   spacer then forced a third, and eight tabs overflowed by a few pixels
+   into a second row of their own. Below 1200px we tighten all three.
+
+   Keyed off a class rather than a media query, because the sheet is read
+   at 80% zoom: the device viewport is 1080px but the layout is 1350px
+   wide, and a media query can only see the first number. render() does
+   the measuring and sets .compact — see the note there.
+
+   This block still lives at the end of the stylesheet. `body.compact X`
+   outranks a bare `X` on specificity, but several of these override rules
+   that are themselves compound, so ordering is what keeps it predictable. */
+/* The spacer earns its keep on a wide layout, where it separates status
+   from actions. Where room is short it costs an entire row of bar to do it. */
+body.compact .sp{display:none}
+body.compact .bar{gap:9px;padding:7px 11px}
+/* Name and lineage never change mid-session, so they yield space first.
+   Capped rather than merely shrinkable: the bar wraps instead of shrinking,
+   so without a ceiling the identity block keeps its full 387px and pushes
+   everything else down a row. The subtitle then truncates — the subclass is
+   on the Features tab, and losing its tail costs nothing at the table. */
+body.compact .idblk{min-width:0;flex:0 1 auto;max-width:250px}
+body.compact .nm{font-size:21px}
+body.compact .nmsub{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.compact .v .n{font-size:24px}
+/* Eight tabs overflow a narrow bar by a hair. Trimming the horizontal
+   padding buys back ~110px and returns them to one row; the keyboard hints
+   stay, because there is a keyboard. */
+body.compact .tab{padding:8px 11px;letter-spacing:.1em}
+/* Reminders stay loud enough to notice, quiet enough to not cost a fifth of
+   the viewport. The date rides on the same line as the title instead of
+   below it, which is the whole of the height difference. */
+body.compact .remind{padding:6px 11px}
+body.compact .rmname{font-size:17px}
+
+/* ---------- FEWER COLUMNS ----------
+   Both tiers are driven by the class render() sets from the real layout
+   width, not by a media query — see the note there. A media query measures
+   device pixels, which at this sheet's zoom is a different number from the
+   width the stylesheet is actually laying out in.
+
+   TWO COLUMNS (portrait): what you're doing sits beside what you spend,
+   and the stats drop to a full-width band underneath, laid out across
+   three sub-columns so six abilities and eighteen skills don't become a
+   thousand pixels of scrolling. Stats are a reference you consult, so
+   below the fold is where they belong. */
+body.twocol .wrap{grid-template-columns:minmax(0,1fr) 250px}
+body.twocol .wrap.railoff{grid-template-columns:minmax(0,1fr) 32px}
+body.twocol .wrap>div:nth-child(2){grid-column:1;grid-row:1}
+body.twocol .rrail{grid-column:2;grid-row:1}
+body.twocol .lrail{grid-column:1/-1;grid-row:2}
+body.twocol .lrail .railbody{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:0 7px;align-items:start}
+/* Full width, so its edge tab lies down like the one-column case. */
+body.twocol .wrap.leftoff .lrail .railtab{
+  position:static;min-height:0;width:auto;padding:9px 0;margin-bottom:7px}
+body.twocol .wrap.leftoff .lrail .railtab span{writing-mode:horizontal-tb}
+
+/* ONE COLUMN (a phone): ordered by what you reach for, which is not the
+   order the markup happens to be in — the content first, then the
+   resources you spend during it, and the stats last. */
+body.onecol .wrap,body.onecol .wrap.railoff,
+body.onecol .wrap.leftoff,body.onecol .wrap.leftoff.railoff{grid-template-columns:1fr}
+body.onecol .wrap>div:nth-child(2){order:1}
+body.onecol .rrail{order:2}
+body.onecol .lrail{order:3}
+/* The vertical edge tab has nowhere to sit in a single column, so it
+   becomes a full-width bar. Collapsing still works — which matters most
+   here, where everything is stacked and the page is one long scroll. */
+body.onecol .railtab{position:static;min-height:0;width:auto;padding:9px 0;margin-bottom:7px}
+body.onecol .railtab span{writing-mode:horizontal-tb}
 </style>
 </head>
 <body>

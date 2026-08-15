@@ -411,6 +411,18 @@ CALe("UI.map.zoom=1;UI.map.x=0;UI.map.y=0");
 
 console.log("\n=== CALENDAR TAB ===");
 click(byAct("tab", { tab: "calendar" }));
+/* The calendar you came to look at leads; the machinery for moving the
+   party's date is the rarest thing here and goes last. */
+const calPanels = $$(".wrap > div:nth-child(2) .pnl");
+ok("the browser leads the tab", !!calPanels[0].querySelector('[data-act="calView"]'));
+ok("the reckoning switch rides with the calendar, not the date controls",
+   !!calPanels[0].querySelector('[data-act="calSystem"]'));
+ok("then Today", /^Today/.test(calPanels[1].querySelector("h3").textContent.trim()));
+ok("then writing something down", !!calPanels[2].querySelector("#cal-note"));
+ok("and Set the date is last", !!calPanels[3].querySelector('[data-act="advanceDay"]'));
+eq("there are exactly four sections", calPanels.length, 4);
+ok("the date controls no longer carry a duplicate reckoning switch",
+   !calPanels[3].querySelector('[data-act="calSystem"]'));
 ok("shows the Jerbeen date by default", /Grub-Wake/.test(text()));
 ok("also shows the Common reckoning", /Dawnrise/.test(text()));
 ok("names today's holiday", /The Emergence/.test(text()));
@@ -729,26 +741,32 @@ ok("proficiency is now +3 in the UI", /\+3/.test($("#app").innerHTML));
 if (byAct("dismissAlert")) click(byAct("dismissAlert"));
 
 console.log("\n=== FAITHFUL STEED GRANTS A SPELL YOU CAN ACTUALLY REACH ===");
-/* The rail is what you cast from at the table. A granted spell that only
-   appears in the Spells tab may as well not have been granted. */
-function railSpells() {
-  return $$(".rrail .entry .namebtn").map(function (e) { return e.textContent.trim(); });
+/* "What you can do now" is the surface you act from at the table. A granted
+   spell that only appears in the Spells tab may as well not have been
+   granted. This used to be asserted against the rail's own copy of the
+   list; the copy is gone, so it is asserted against the real one. */
+click(byAct("tab", { tab: "combat" }));
+function doableSpells() {
+  return $$(".doable .namebtn").map(function (e) { return e.textContent.trim(); });
 }
-ok("Find Steed is in the right rail, not just the Spells tab",
-   railSpells().indexOf("Find Steed") >= 0);
-ok("so is the Magic Initiate spell", railSpells().indexOf("Find Familiar") >= 0);
-ok("granted spells are labelled as granted, not passed off as prepared",
-   /Granted/.test($(".rrail").innerHTML));
-eq("nothing is listed twice", railSpells().length, new Set(railSpells()).size);
-/* The guard that makes this class of bug impossible: the rail must hold
-   exactly the spells the engine says are castable — no more, no fewer.
-   Cantrips were the ones that slipped through the first time. */
-eq("the rail holds exactly what the engine says is castable",
-   CALe("castableSpellKeys().slice().sort().join(',')"),
-   CALe("CALC.castables(S).filter(function(c){return c.kind==='spell'}).map(function(c){return c.id}).sort().join(',')"));
+ok("Find Steed is in what you can do now, not just the Spells tab",
+   doableSpells().indexOf("Find Steed") >= 0);
+ok("so is the Magic Initiate spell", doableSpells().indexOf("Find Familiar") >= 0);
+eq("nothing is listed twice", doableSpells().length, new Set(doableSpells()).size);
 ok("cantrips are in it too — they're the ones you cast most",
-   railSpells().indexOf("Prestidigitation") >= 0 && railSpells().indexOf("Mage Hand") >= 0);
-ok("and they say they cost nothing", /At will/.test($(".rrail").innerHTML));
+   doableSpells().indexOf("Prestidigitation") >= 0 && doableSpells().indexOf("Mage Hand") >= 0);
+/* The duplicate is gone rather than kept in step: the rail carries
+   resources, and no second spell list that could fall out of date. */
+eq("the resources rail holds no spell list of its own",
+   $$(".rrail .entry .namebtn").length, 0);
+ok("the rail is still the place resources live", /Lay on hands/i.test($(".rrail").innerHTML));
+/* Where a spell comes from is still legible — it's carried by which panel
+   of the Spells tab it sits in rather than by a badge in the rail. */
+click(byAct("tab", { tab: "spells" }));
+ok("granted spells have their own section on the Spells tab",
+   /Always available/.test($("#app").textContent));
+ok("...and Find Steed is in it", /Always available[\s\S]*Find Steed/.test($("#app").textContent));
+click(byAct("tab", { tab: "combat" }));
 eq("the free cast starts full", st.resources.faithfulSteed, 1);
 /* "You can cast it once without a spell slot, regaining that use on a
    Long Rest" — the rest used to skip it, stranding the use at 0. */
@@ -952,27 +970,200 @@ function foldedKeys() {
   const u = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).ui;
   return Object.keys((u && u.folded) || {});
 }
+function mainFolded() { return $$(".wrap > div:nth-child(2) .pnl.folded"); }
 click(byAct("tab", { tab: "spells" }));
 ok("every panel gets a fold control", $$('[data-act="foldPanel"]').length > 4);
-ok("the rail's Prepared and the tab's Prepared are separate panels",
-   !!foldBtn("spells/rail/prepared") && !!foldBtn("spells/main/prepared"));
-click(foldBtn("spells/rail/prepared"));
-eq("folding one records exactly one key", foldedKeys(), ["spells/rail/prepared"]);
-ok("the folded panel is hidden", !!$(".rrail .pnl.folded"));
-ok("its neighbour in the same column is not", $$(".rrail .pnl.folded").length < $$(".rrail .pnl").length);
-ok("and the tab's own Prepared is untouched", !$(".wrap > div:nth-child(2) .pnl.folded"));
+/* The key still carries which column a panel lives in, so two panels that
+   share a name stay independent. Nothing collides today — the rail's
+   duplicate Prepared list was the collision, and it's gone — but the
+   scoping is what stops the next one being a bug. */
+ok("fold keys are scoped by column",
+   !!foldBtn("spells/main/prepared") && !!foldBtn("spells/lrail/skills"));
+click(foldBtn("spells/main/prepared"));
+eq("folding one records exactly one key", foldedKeys(), ["spells/main/prepared"]);
+ok("the folded panel is hidden", mainFolded().length === 1);
+ok("its neighbours in the same column are not",
+   mainFolded().length < $$(".wrap > div:nth-child(2) .pnl").length);
+ok("and the left rail is untouched", !$(".lrail .pnl.folded"));
 click(byAct("tab", { tab: "combat" }));
-ok("the same rail panel is open on a different tab", !$(".rrail .pnl.folded"));
-click(foldBtn("combat/rail/prepared"));
+ok("folding on one tab leaves another tab alone", mainFolded().length === 0);
+click(foldBtn("combat/main/weapons"));
 eq("each tab records its own", foldedKeys().sort(),
-   ["combat/rail/prepared", "spells/rail/prepared"]);
+   ["combat/main/weapons", "spells/main/prepared"]);
 click(byAct("tab", { tab: "spells" }));
-ok("...and the first tab kept its state", !!$(".rrail .pnl.folded"));
-click(foldBtn("spells/rail/prepared"));
-ok("unfolding shows it again", !$(".rrail .pnl.folded"));
-eq("and drops the key rather than storing false", foldedKeys(), ["combat/rail/prepared"]);
+ok("...and the first tab kept its state", mainFolded().length === 1);
+click(foldBtn("spells/main/prepared"));
+ok("unfolding shows it again", mainFolded().length === 0);
+eq("and drops the key rather than storing false", foldedKeys(), ["combat/main/weapons"]);
 click(byAct("tab", { tab: "combat" }));
-click(foldBtn("combat/rail/prepared"));
+click(foldBtn("combat/main/weapons"));
+
+console.log("\n=== ABILITIES AND SAVES ARE ONE TABLE, NOT TWO LISTS ===");
+click(byAct("tab", { tab: "combat" }));
+ok("there is no separate Saves panel any more",
+   !$$(".lrail .pnl h3").some(function (h) { return h.textContent.trim().indexOf("Saves") === 0; }));
+eq("six ability rows plus a caption row", $$(".lrail .abrow").length, 7);
+ok("the caption names the two number columns",
+   /Mod/.test($(".abrow.abhead").textContent) && /Save/.test($(".abrow.abhead").textContent));
+/* The row carries both numbers, and each is still its own provenance tap. */
+const chaRow = $$(".lrail .abrow").filter(function (r) {
+  const k = r.querySelector(".abk");
+  return k && k.textContent.trim() === "CHA";
+})[0];
+ok("the row exists", !!chaRow);
+eq("it shows the score", chaRow.querySelector(".absc").textContent.trim(), "18");
+eq("it shows the modifier", chaRow.querySelector(".abmod").textContent.trim(), "+4");
+/* Read the expected save off the engine rather than hardcoding it — the
+   suite has levelled Hal up by this point, so proficiency has moved. */
+const chaSave = CALe("CALC.savingThrow(S, 'cha').value");
+ok("it shows the save the engine computes",
+   chaRow.querySelector(".absv").textContent.indexOf("+" + chaSave) >= 0);
+ok("...and that save differs from the bare modifier, because Hal is proficient",
+   chaSave !== CALe("CALC.mod(S.abilities.cha)"));
+ok("the save cell is marked proficient", chaRow.querySelector(".absv").classList.contains("prof"));
+ok("the score still opens ability provenance",
+   chaRow.querySelector('[data-prov="ability:cha"]'));
+ok("and the save still opens save provenance",
+   chaRow.querySelector('[data-prov="save:cha"]'));
+/* A non-proficient save reads the same as its modifier. */
+const intRow = $$(".lrail .abrow").filter(function (r) {
+  const k = r.querySelector(".abk");
+  return k && k.textContent.trim() === "INT";
+})[0];
+ok("a non-proficient save is not marked", !intRow.querySelector(".absv").classList.contains("prof"));
+
+/* The bullet sits in its own box so a wrapped label lines up under itself
+   rather than under the dot. CSS does the aligning; this is the structure
+   that lets it. */
+const wrapRow = $$(".lrail [data-condense] .row").filter(function (r) {
+  return /Animal Handling/.test(r.textContent);
+})[0];
+ok("the skill label is a flex box, not text flowed around an inline bullet",
+   !!wrapRow && wrapRow.querySelector("span").querySelector("i.dot"));
+
+console.log("\n=== PANELS WITH A MIDDLE STATE CYCLE THROUGH THREE ===");
+function foldVal(k) {
+  const u = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).ui;
+  return ((u && u.folded) || {})[k];
+}
+function skillsFold() { return foldBtn("combat/lrail/skills"); }
+eq("skills names its condensed step instead of saying Hide twice",
+   skillsFold().textContent, "Proficient");
+eq("...and declares three steps", skillsFold().dataset.steps, "3");
+eq("all eighteen skills are listed to start", $$('.lrail [data-condense] .row').length, 18);
+ok("the non-proficient ones are the ones marked to drop",
+   $$('.lrail [data-condense] .row.unprof').length ===
+   $$('.lrail [data-condense] .row.unprof.cnd-hide').length);
+ok("a group with no proficient skill is marked to drop with them",
+   $$(".lrail .grp.cnd-hide").length > 0);
+
+click(skillsFold());
+ok("one tap condenses rather than hides",
+   !!$(".lrail .pnl.condensed") && !$(".lrail .pnl.folded"));
+eq("the condensed state records 1, not true", foldVal("combat/lrail/skills"), 1);
+eq("...and the button now offers to hide it", skillsFold().textContent, "Hide");
+ok("every skill is still in the DOM — the condensing is presentational",
+   $$('.lrail [data-condense] .row').length === 18);
+
+click(skillsFold());
+ok("the second tap hides the panel", !!$(".lrail .pnl.folded"));
+eq("hidden records 2", foldVal("combat/lrail/skills"), 2);
+eq("...and the button offers to show it", skillsFold().textContent, "Show");
+
+click(skillsFold());
+eq("the third tap returns to all eighteen and drops the key",
+   foldVal("combat/lrail/skills"), undefined);
+ok("nothing is folded or condensed", !$(".lrail .pnl.folded") && !$(".lrail .pnl.condensed"));
+
+/* Panels without a middle state must not grow one. Weapons has no useful
+   subset — every weapon you carry is one you might swing. */
+eq("a two-state panel still says Hide", foldBtn("combat/main/weapons").textContent, "Hide");
+eq("...and declares two steps", foldBtn("combat/main/weapons").dataset.steps, "2");
+click(foldBtn("combat/main/weapons"));
+eq("...and goes straight to hidden", foldVal("combat/main/weapons"), 2);
+click(foldBtn("combat/main/weapons"));
+eq("...and straight back", foldVal("combat/main/weapons"), undefined);
+
+/* Sheets written before the middle state existed stored a boolean. */
+w.eval("mutate(function (st) { st.ui.folded['combat/lrail/skills'] = true; })");
+ok("a sheet saved with the old boolean still reads as hidden", !!$(".lrail .pnl.folded"));
+eq("...and offers to show it", skillsFold().textContent, "Show");
+click(skillsFold());
+eq("...and cycles on from there cleanly", foldVal("combat/lrail/skills"), undefined);
+
+console.log("\n=== EXPAND ALL ===");
+click(byAct("tab", { tab: "spells" }));
+/* Spells render as cards now, sharing their shape with the doable list, so
+   an opened one shows a .carddetail rather than an .entry .etext. */
+function openTexts() { return $$(".wrap > div:nth-child(2) .carddetail").length; }
+function tabExpand() { return $('[data-act="expandAll"][data-scope="tab"]'); }
+eq("spell entries start closed", openTexts(), 0);
+ok("the Spells tab offers to open all of them at once", !!tabExpand());
+eq("...and says so", tabExpand().textContent, "Expand all spells");
+click(tabExpand());
+ok("every spell on the tab is now open", openTexts() > 8);
+eq("...and the control flips to the opposite", tabExpand().textContent, "Collapse all spells");
+click(tabExpand());
+eq("collapsing closes them again", openTexts(), 0);
+
+/* The same control appears per panel, so you can open just the cantrips. */
+function panelExpand(name) {
+  return $$(".wrap > div:nth-child(2) .pnl").filter(function (p) {
+    const h = p.querySelector("h3");
+    return h && h.textContent.indexOf(name) === 0;
+  }).map(function (p) {
+    return Array.from(p.querySelectorAll('h3 [data-act="expandAll"]'))[0];
+  })[0];
+}
+ok("each spell panel has its own Expand all", !!panelExpand("Cantrips"));
+/* The panel chrome uses the same expand action for things that aren't
+   entries; sweeping those up would toggle the Filter drawer as a side
+   effect of reading your spells. */
+const filterOpenBefore = !!$(".tagbar");
+click(panelExpand("Cantrips"));
+const afterCantrips = openTexts();
+ok("it opens that panel's entries", afterCantrips > 0);
+ok("...and leaves the other panels closed", afterCantrips < 8);
+eq("the filter drawer was left exactly as it was", !!$(".tagbar"), filterOpenBefore);
+
+console.log("\n=== LAY ON HANDS READS AS A POOL, NOT A FORM CONTROL ===");
+click(byAct("tab", { tab: "combat" }));
+function lohBar() { return $(".lohbar"); }
+function lohFills() { return $$(".lohbar .lohseg i").map(function (i) { return i.style.width; }); }
+ok("the range input and its thumb are gone", !$('input[type="range"]'));
+ok("a segmented bar stands in its place", !!lohBar());
+const lohMax = parseInt(lohBar().getAttribute("aria-valuemax"), 10);
+eq("one rectangle per five points", $$(".lohbar .lohseg").length, Math.ceil(lohMax / 5));
+
+/* The case that defines the design: four points down from a full pool is
+   whole rectangles and one fifth of the next, not a thumb at 80%. */
+w.eval("mutate(function (st) { st.resources.layOnHands = " + (lohMax - 4) + "; })");
+const partly = lohFills();
+eq("the untouched rectangles read full",
+   partly.slice(0, -1).join(","),
+   partly.slice(0, -1).map(function () { return "100%"; }).join(","));
+eq("and the one being spent fills by fifths", partly[partly.length - 1], "20%");
+eq("the bar reports its value for a screen reader too",
+   lohBar().getAttribute("aria-valuenow"), String(lohMax - 4));
+
+/* Buttons stay the exact way to spend. */
+click($('.qb button[data-d="-5"]'));
+eq("the −5 button spends five",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).resources.layOnHands, lohMax - 9);
+
+/* There is a keyboard, so the bar takes arrow keys — and keeps focus
+   across the re-render, or only the first press would land. */
+lohBar().focus();
+lohBar().dispatchEvent(new w.KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+eq("an arrow key spends a single point",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).resources.layOnHands, lohMax - 10);
+ok("the bar still holds focus afterwards", doc.activeElement === lohBar());
+lohBar().dispatchEvent(new w.KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+eq("so a second press lands as well",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).resources.layOnHands, lohMax - 11);
+lohBar().dispatchEvent(new w.KeyboardEvent("keydown", { key: "End", bubbles: true }));
+eq("End refills the pool",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).resources.layOnHands, lohMax);
 
 console.log("\n=== INSPIRATION ===");
 ok("there is an Inspiration toggle", !!byAct("toggle", { key: "inspiration" }));
@@ -1076,7 +1267,7 @@ ok("filter bar reappears on Spells tab", $$(".tagbar").length > 0);
 console.log("\n=== WIKI ACCESS (deliberate, secondary — never the default click) ===");
 /* Names are no longer <a href> wiki links — tapping a name now acts,
    and the wiki is reached through a separate, small, explicit control. */
-const bareWikiLinks = $$('a[href^="http://dnd2024.wikidot.com/"]');
+const bareWikiLinks = $$('a[href*="dnd2024.wikidot.com"]');
 eq("no name is a direct wiki <a> anymore", bareWikiLinks.length, 0);
 const wikiBtns = $$('[data-act="wiki"]');
 ok("wiki icon controls are rendered instead", wikiBtns.length > 5);
@@ -1085,8 +1276,19 @@ ok("a spell's wiki control carries its slug",
 let openedUrl = null;
 w.open = function (url) { openedUrl = url; };
 click(wikiBtns[0]);
-ok("tapping the wiki control opens the correct dnd2024 URL",
-   openedUrl && openedUrl.indexOf("http://dnd2024.wikidot.com/") === 0);
+ok("tapping the wiki control opens the correct https URL",
+   openedUrl && openedUrl.indexOf("https://dnd2024.wikidot.com/") === 0);
+/* A condition's control goes to the rules glossary instead, because the
+   wiki has no rules pages — that mismatch is the bug this replaced. */
+click(byAct("tab", { tab: "combat" }));
+const condWiki = $$('[data-act="wiki"]').filter(function (b) {
+  return /^srd:/.test(b.dataset.slug || "");
+})[0];
+ok("conditions and universal actions carry glossary slugs", !!condWiki);
+openedUrl = null;
+click(condWiki);
+ok("...and open the official 2024 glossary at the right anchor",
+   openedUrl && /^https:\/\/www\.dndbeyond\.com\/sources\/dnd\/br-2024\/rules-glossary#\w+$/.test(openedUrl));
 
 console.log("\n=== EXPORT / IMPORT ROUNDTRIP ===");
 const snapshot = w.localStorage.getItem("hal-briarshade-sheet-v1");

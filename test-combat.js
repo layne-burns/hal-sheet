@@ -41,6 +41,13 @@ function byAct(act, extra) {
     return !extra || Object.keys(extra).every(function (k) { return e.dataset[k] === extra[k]; });
   })[0];
 }
+/* Settings lives behind "More" now, so the top bar fits a tablet in two
+   rows instead of three. Open the drawer first if it isn't already. */
+function openSettings() {
+  let b = byAct("settingsModal");
+  if (!b) { click(byAct("expand", { id: "moreActions" })); b = byAct("settingsModal"); }
+  click(b);
+}
 function text() { return ($("#app").textContent + " " + $("#modal-root").textContent).replace(/\s+/g, " "); }
 function state() { return JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")); }
 function setVal(el, v) { el.value = v; el.dispatchEvent(new w.Event("change", { bubbles: true })); }
@@ -67,11 +74,19 @@ ok("out-of-combat strip shown", /Out of combat/.test(text()));
 ok("Enter combat button present", !!byAct("combatStart"));
 ok("What you can do now panel renders", /What you can do now/.test(text()));
 ok("Undo button in top bar", !!byAct("undo"));
-ok("Settings button in top bar", !!byAct("settingsModal"));
+/* Settings moved into the More drawer so the bar fits a tablet in two rows.
+   Undo stayed out, because it is a mid-turn control. */
+ok("Settings is not in the top bar by default", !byAct("settingsModal"));
+click(byAct("expand", { id: "moreActions" }));
+ok("Settings reachable under More", !!byAct("settingsModal"));
+click(byAct("expand", { id: "moreActions" }));
 
 console.log("\n=== TAG PALETTE ===");
 click(byAct("tab", { tab: "spells" }));
-ok("grouped tag headers render", /Helps you or an ally/.test(text()));
+/* Three axes, one word each — the old sentence-length headings were most
+   of why the bar read as a jumble. */
+ok("grouped tag headers render", /Effect/.test(text()) && /Cost/.test(text()) && /Reach/.test(text()));
+ok("each group is one row of the grid", $$(".tagbar .tagrow").length >= 3);
 ok("Damage tag present", /Damage/.test(text()));
 const tagEls = $$(".tag");
 ok("tags use the new 3-hue+gray classes", tagEls.some(function (e) {
@@ -80,6 +95,72 @@ ok("tags use the new 3-hue+gray classes", tagEls.some(function (e) {
 ok("no tag uses the old violet/mag/grn classes", !tagEls.some(function (e) {
   return /t-violet|t-mag(?!enta)|t-grn/.test(e.className);
 }));
+
+console.log("\n=== EVERY ACTION LINKS SOMEWHERE THAT EXISTS ===");
+/* The universal actions all pointed at combat:actions, a page the wiki
+   mirror has never had. Each one now deep-links the official 2024 rules
+   glossary by anchor; every target was checked against the live page. */
+const catalog = w.eval("ACTION_CATALOG");
+eq("no action still points at the page that 404s",
+   catalog.filter(function (a) { return a.slug === "combat:actions"; }).map(function (a) { return a.id; }), []);
+ok("every action has a slug", catalog.every(function (a) { return !!a.slug; }));
+eq("the universal actions resolve against the glossary",
+   catalog.filter(function (a) {
+     return ["dash", "disengage", "dodge", "hide", "shove", "grapple", "opportunity", "attack", "help"]
+       .indexOf(a.id) >= 0 && a.slug.indexOf("srd:") !== 0;
+   }).map(function (a) { return a.id; }), []);
+eq("Shove links to the unarmed strike rules, which is where 2024 puts it",
+   catalog.filter(function (a) { return a.id === "shove"; })[0].slug, "srd:UnarmedStrike");
+eq("Grapple likewise",
+   catalog.filter(function (a) { return a.id === "grapple"; })[0].slug, "srd:Grappling");
+ok("and the paladin features still point at the class pages",
+   catalog.filter(function (a) { return a.id === "layOnHands"; })[0].slug === "paladin:main");
+
+console.log("\n=== THE DOABLE LIST IS GROUPED, CARDED, AND READABLE ===");
+click(byAct("tab", { tab: "combat" }));
+/* Grouped by what it costs you, because "what have I got left for my bonus
+   action" is the question this panel exists to answer. */
+const grpText = $$(".cardgrp").map(function (g) { return g.textContent.replace(/\s+/g, " ").trim(); });
+ok("there is an Action group", grpText.some(function (t) { return /^Action/.test(t); }));
+ok("there is a Bonus action group", grpText.some(function (t) { return /^Bonus action/.test(t); }));
+ok("every card carries its cost on its own line", $$(".doable .cardmeta").length === $$(".doable").length);
+ok("every card ends with the wiki link under its action button",
+   $$(".doable").every(function (c) {
+     const kids = Array.from(c.querySelectorAll(".cardbtns > *"));
+     return kids.length >= 2 && kids[kids.length - 1].classList.contains("wikibtn");
+   }));
+/* Every action already carried its rules text; the panel just never
+   showed it. Opening one is also what makes Expand all work here. */
+const dashCard = $$(".doable").filter(function (c) {
+  const n = c.querySelector(".cardname");
+  return n && n.textContent.trim() === "Dash";
+})[0];
+ok("Dash is in the list", !!dashCard);
+ok("...and starts closed", !dashCard.querySelector(".carddetail"));
+click(dashCard.querySelector(".cardname"));
+ok("tapping the name reveals the rules text, which was there all along",
+   /extra movement equal to your Speed/.test(text()));
+ok("the panel therefore gets an Expand all like every other",
+   !!$('[data-condense="Yours"] [data-act="expandAll"]'));
+/* Condensed drops the universal actions you stopped needing reminding of. */
+const yoursFold = $$('[data-condense="Yours"] h3 .pcol').filter(function (b) {
+  return b.dataset.act === "foldPanel";
+})[0];
+eq("the condensed step is named for what it keeps", yoursFold.textContent, "Yours");
+ok("Dodge is marked as one of the universal actions",
+   $$(".doable").some(function (c) {
+     const n = c.querySelector(".cardname");
+     return n && n.textContent.trim() === "Dodge" && c.classList.contains("cnd-hide");
+   }));
+ok("Lay on Hands is not — it is yours",
+   $$(".doable").some(function (c) {
+     const n = c.querySelector(".cardname");
+     return n && n.textContent.trim() === "Lay on Hands" && !c.classList.contains("cnd-hide");
+   }));
+ok("each group heading carries both a full and a condensed count",
+   $$(".cardgrp").every(function (g) {
+     return g.querySelector(".cardgrpn.cnd-hide") && g.querySelector(".cardgrpn.cnd-show");
+   }));
 
 console.log("\n=== SMITE AVAILABILITY (2024: spells, not innate) ===");
 const castables = w.eval("CALC.castables(S)");
@@ -109,13 +190,13 @@ console.log("\n=== ATTACK, THEN SMITE (the whole point) ===");
 ok("smites hidden from 'what can I do' before a hit lands",
    !text().match(/Divine Smite[\s\S]{0,40}Cast/) || (function(){
      /* Divine Smite may appear elsewhere (Spells tab), so check the doable list specifically */
-     const doables = $$(".doable .en").map(function(e){return e.textContent;});
+     const doables = $$(".doable .cardname").map(function(e){return e.textContent;});
      return doables.indexOf("Divine Smite") === -1;
    })());
 click(byAct("logHit"));
 st = state();
 eq("hit logged", st.combat.turn.hitLanded, true);
-const doablesAfterHit = $$(".doable .en").map(function (e) { return e.textContent; });
+const doablesAfterHit = $$(".doable .cardname").map(function (e) { return e.textContent; });
 ok("Divine Smite now in the doable list", doablesAfterHit.indexOf("Divine Smite") >= 0);
 
 console.log("\n=== CAST DIVINE SMITE FREE (no slot spent) ===");
@@ -267,7 +348,7 @@ eq("the selected creature is marked hit after a confirmed hit",
 click(byAct("closeModal"));
 
 console.log("\n=== SETTINGS TOGGLE THE ENGINE ===");
-click(byAct("settingsModal"));
+openSettings();
 ok("settings modal lists roll prompts", /Roll prompts/.test(text()));
 ok("settings modal lists edge glow", /Screen edge glow/.test(text()));
 click(byAct("setting", { key: "rollPrompts" }));
@@ -283,12 +364,12 @@ const smiteBtn2 = byAct("use", { kind: "spell", id: "divineSmite" });
 if (smiteBtn2) click(smiteBtn2);
 ok("no roll modal when rollPrompts is off", !$("#hp-roll") && !/Radiant damage — add 1d8/.test(text()));
 /* restore */
-click(byAct("settingsModal"));
+openSettings();
 click(byAct("setting", { key: "rollPrompts" }));
 click(byAct("closeModal"));
 
 console.log("\n=== ECONOMY LOCKOUT TOGGLE ===");
-click(byAct("settingsModal"));
+openSettings();
 click(byAct("setting", { key: "economyLockout" }));
 st = state();
 eq("economyLockout off", st.settings.economyLockout, false);
@@ -301,7 +382,7 @@ if (dashBtn) click(dashBtn);
 const dodgeBtn = byAct("use", { kind: "action", id: "dodge" });
 if (dodgeBtn) click(dodgeBtn);
 ok("no override modal when economyLockout is off", !/Can't afford that/.test(text()));
-click(byAct("settingsModal"));
+openSettings();
 click(byAct("setting", { key: "economyLockout" }));
 click(byAct("closeModal"));
 
@@ -345,14 +426,14 @@ click(byAct("toggle", { key: "concentrating" }));
 ok("both glow classes combine under 20% HP + concentrating", /glow-both/.test(glowClass()));
 
 console.log("\n=== SETTINGS: EDGE GLOW OFF ===");
-click(byAct("settingsModal"));
+openSettings();
 click(byAct("setting", { key: "edgeGlow" }));
 click(byAct("closeModal"));
 ok("glow suppressed entirely when the setting is off", glowClass() === "");
 
 console.log("\n=== UI SCALE (WHOLE-UI ZOOM, NOT JUST FONT) ===");
 eq("starts at 100%", state().settings.uiScale, 100);
-click(byAct("settingsModal"));
+openSettings();
 ok("settings modal shows Display size at 100%", /Display size/.test(text()) && /100%/.test(text()));
 click(byAct("scaleUI", { dir: "1" }));
 eq("A+ bumps by 10", state().settings.uiScale, 110);
@@ -366,17 +447,28 @@ click(byAct("scaleUI", { dir: "1" }));
 click(byAct("scaleUI", { dir: "1" }));
 click(byAct("scaleUI", { dir: "1" }));
 eq("caps at 200%, never exceeds it", state().settings.uiScale, 200);
-eq("body zoom style reflects the scale", $("body").style.zoom, "200%");
+/* The setting is a multiple of the design size, not a raw zoom: 100% means
+   "the size this sheet is meant to be read at", which renders at 80%. */
+eq("body zoom applies the design baseline to the setting", $("body").style.zoom, "160%");
 click(byAct("resetUIScale"));
 eq("Reset returns to 100%", state().settings.uiScale, 100);
 click(byAct("scaleUI", { dir: "-1" }));
 for (let i = 0; i < 10; i++) click(byAct("scaleUI", { dir: "-1" }));
 eq("floors at 50%, never goes below it", state().settings.uiScale, 50);
 click(byAct("resetUIScale"));
+/* A sheet written before the baseline moved stored its size against the
+   old one. Rescaling it once is what stops the app shrinking under
+   someone who had deliberately set 80%. */
+eq("an old sheet at 80% becomes 100% and renders the same size",
+   w.eval("migrate({ schemaVersion: 1, settings: { uiScale: 80 } }).settings.uiScale"), 100);
+eq("an old sheet at 100% keeps the size it had",
+   w.eval("migrate({ schemaVersion: 1, settings: { uiScale: 100 } }).settings.uiScale"), 125);
+eq("a current sheet is left alone",
+   w.eval("migrate({ schemaVersion: 2, settings: { uiScale: 100 } }).settings.uiScale"), 100);
 click(byAct("closeModal"));
 
 console.log("\n=== UNDO DOES NOT FIRE ON COSMETIC CHANGES ===");
-click(byAct("settingsModal"));
+openSettings();
 click(byAct("setting", { key: "edgeGlow" }));
 click(byAct("closeModal"));
 const histBefore = JSON.parse(w.localStorage.getItem("hal-briarshade-history-v1") || "[]").length;
@@ -540,12 +632,12 @@ st = state();
 ok("a labeled action is logged while the session is active",
    st.session.log.some(function (e) { return /Add party member/.test(e.label); }));
 const logLenBefore = st.session.log.length;
-click(byAct("settingsModal"));
+openSettings();
 click(byAct("setting", { key: "rollPrompts" }));
 click(byAct("closeModal"));
 eq("an unlabeled toggle does not add a log line", state().session.log.length, logLenBefore);
 /* restore */
-click(byAct("settingsModal"));
+openSettings();
 click(byAct("setting", { key: "rollPrompts" }));
 click(byAct("closeModal"));
 
