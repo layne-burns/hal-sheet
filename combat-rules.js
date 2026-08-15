@@ -170,7 +170,7 @@ const SPELL_META = {
 /* ---------- NON-SPELL ACTIONS ------------------------------- */
 const ACTION_CATALOG = [
   { id: "attack", name: "Attack action", cost: { type: "action" }, tags: ["damage", "melee"],
-    slug: "combat:actions", text: "Make your weapon attacks. With Nick active, the off-hand Light attack happens inside this action." },
+    slug: "srd:AttackAction", text: "Make your weapon attacks. With Nick active, the off-hand Light attack happens inside this action." },
   { id: "layOnHands", name: "Lay on Hands", cost: { type: "bonus", res: "layOnHands" },
     tags: ["healing", "touch", "bonus"], slug: "paladin:main",
     text: "Touch a creature and restore HP from the pool. Or spend 5 to remove the Poisoned condition." },
@@ -189,24 +189,24 @@ const ACTION_CATALOG = [
     rolls: [{ who: "target", save: "str",
       label: "Strength saving throw for EACH target", why: "Nature's Wrath — Restrained on a failure" }] },
   { id: "help", name: "Help (Team Tactics)", cost: { type: "bonus" }, tags: ["support", "bonus"],
-    slug: "combat:actions", text: "Aid an ally: they gain Advantage on their next ability check or attack. Team Tactics makes this a Bonus Action for you." },
-  { id: "dash", name: "Dash", cost: { type: "action" }, tags: ["utility"], slug: "combat:actions",
+    slug: "srd:HelpAction", text: "Aid an ally: they gain Advantage on their next ability check or attack. Team Tactics makes this a Bonus Action for you." },
+  { id: "dash", name: "Dash", cost: { type: "action" }, tags: ["utility"], slug: "srd:DashAction",
     text: "Gain extra movement equal to your Speed for this turn." },
-  { id: "disengage", name: "Disengage", cost: { type: "action" }, tags: ["utility"], slug: "combat:actions",
+  { id: "disengage", name: "Disengage", cost: { type: "action" }, tags: ["utility"], slug: "srd:DisengageAction",
     text: "Your movement doesn't provoke Opportunity Attacks this turn." },
-  { id: "dodge", name: "Dodge", cost: { type: "action" }, tags: ["defense"], slug: "combat:actions",
+  { id: "dodge", name: "Dodge", cost: { type: "action" }, tags: ["defense"], slug: "srd:DodgeAction",
     text: "Attacks against you have Disadvantage and you have Advantage on DEX saves, until your next turn.",
     effect: { name: "Dodging", conc: false, rounds: 1,
       note: "Attacks against you have Disadvantage; Advantage on DEX saves." } },
-  { id: "hide", name: "Hide", cost: { type: "action" }, tags: ["utility"], slug: "combat:actions",
+  { id: "hide", name: "Hide", cost: { type: "action" }, tags: ["utility"], slug: "srd:HideAction",
     text: "Make a DC 15 Stealth check to gain the Invisible condition.",
     rolls: [{ who: "you", dice: "1d20", mod: "stealth", label: "Stealth check vs DC 15",
       why: "Hide — note scale mail gives Disadvantage" }] },
-  { id: "shove", name: "Shove", cost: { type: "action" }, tags: ["control", "melee"], slug: "combat:actions",
+  { id: "shove", name: "Shove", cost: { type: "action" }, tags: ["control", "melee"], slug: "srd:UnarmedStrike",
     text: "Athletics vs the target's Athletics or Acrobatics. On a success, push 5 ft or knock Prone." },
   { id: "opportunity", name: "Opportunity Attack", cost: { type: "reaction" }, tags: ["damage", "reaction", "melee"],
-    slug: "combat:actions", text: "When a creature you can see leaves your reach, make one melee attack against it." },
-  { id: "grapple", name: "Grapple", cost: { type: "action" }, tags: ["control", "melee"], slug: "combat:actions",
+    slug: "srd:OpportunityAttacks", text: "When a creature you can see leaves your reach, make one melee attack against it." },
+  { id: "grapple", name: "Grapple", cost: { type: "action" }, tags: ["control", "melee"], slug: "srd:Grappling",
     text: "Athletics vs the target's Athletics or Acrobatics. On a success it has the Grappled condition." }
 ];
 
@@ -291,7 +291,6 @@ Object.assign(CALC, {
     });
 
     ACTION_CATALOG.forEach(function (a) {
-      if (a.id === "attack" && false) return;
       const aff = CALC.affordable(S, a.cost);
       out.push({
         kind: "action", id: a.id, name: a.name, slug: a.slug, tags: a.tags, text: a.text,

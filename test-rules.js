@@ -174,12 +174,31 @@ eq("every feat has text", Object.keys(R.FEATS).every(k => R.FEATS[k].text.length
 eq("Shield of Faith is prepared (the added 5th)", S.preparedSpells.indexOf("shieldOfFaith") >= 0, true);
 
 console.log("\n=== LINKS ===");
-eq("base URL points at the 2024 wiki", R.WIKIA_BASE_URL, "http://dnd2024.wikidot.com/");
-eq("spell link builds correctly", R.wiki(SPELLS.bless.slug), "http://dnd2024.wikidot.com/spell:bless");
+eq("base URL points at the 2024 wiki over https", R.WIKIA_BASE_URL, "https://dnd2024.wikidot.com/");
+eq("spell link builds correctly", R.wiki(SPELLS.bless.slug), "https://dnd2024.wikidot.com/spell:bless");
 eq("null slug yields no link", R.wiki(null), null);
 const linkable = Object.keys(SPELLS).filter(k => SPELLS[k].slug);
 eq("all spells have slugs", linkable.length, Object.keys(SPELLS).length);
 eq("all feats have slugs", Object.keys(R.FEATS).every(k => !!R.FEATS[k].slug), true);
+
+/* The wiki mirror is classes, spells, feats and equipment — it has no
+   rules pages, so conditions and the universal actions used to point at
+   URLs that had never existed. They resolve against the official 2024
+   rules glossary instead, by anchor. Every target below was checked
+   against the live page; these assertions are what stop one drifting
+   back to a shape that 404s. */
+eq("an srd slug resolves against the glossary, not the wiki",
+   R.wiki("srd:ProneCondition"),
+   "https://www.dndbeyond.com/sources/dnd/br-2024/rules-glossary#ProneCondition");
+eq("every condition points at the glossary",
+   Object.keys(R.CONDITIONS).filter(k => R.CONDITIONS[k].slug.indexOf("srd:") !== 0), []);
+eq("no condition still points at a rules page the wiki does not have",
+   Object.keys(R.CONDITIONS).filter(k => /^condition:/.test(R.CONDITIONS[k].slug)), []);
+/* The mastery pages are equipment:weapon, singular — the plural 404s. */
+eq("weapon mastery links use the slug the wiki actually has",
+   Object.keys(R.MASTERIES).filter(k => R.MASTERIES[k].slug !== "equipment:weapon"), []);
+eq("nothing anywhere still points at combat:actions",
+   JSON.stringify(R.CONDITIONS).indexOf("combat:actions"), -1);
 
 console.log("\n=== TAGS ===");
 eq("Bless is Support + Concentration",

@@ -5,11 +5,29 @@
    localStorage. STATE (app.js) holds only what the player changes.
    ============================================================ */
 
-const WIKIA_BASE_URL = "http://dnd2024.wikidot.com/";
+/* https, not http: the sheet is served over https, and a plain-http link
+   from it gets downgraded or warned about depending on the browser. */
+const WIKIA_BASE_URL = "https://dnd2024.wikidot.com/";
+
+/* The wikidot mirror is a reference for classes, spells, feats and
+   equipment — that is the whole of its navigation. It has no rules pages,
+   so every condition and every universal action pointed at a URL that had
+   never existed: condition:prone, combat:actions and the rest were all
+   404. Those live in the official 2024 rules glossary instead, which
+   deep-links each one by anchor.
+
+   A slug carries its own home: "srd:ProneCondition" resolves against the
+   glossary, anything else against the wiki. */
+const SRD_GLOSSARY_URL = "https://www.dndbeyond.com/sources/dnd/br-2024/rules-glossary#";
+const SRD_PREFIX = "srd:";
 
 /* Link helper. Slugs are centralised here so a wrong URL is a
    one-line fix rather than a hunt through the render code. */
-function wiki(slug) { return slug ? WIKIA_BASE_URL + slug : null; }
+function wiki(slug) {
+  if (!slug) return null;
+  if (slug.indexOf(SRD_PREFIX) === 0) return SRD_GLOSSARY_URL + slug.slice(SRD_PREFIX.length);
+  return WIKIA_BASE_URL + slug;
+}
 
 /* ---------- TAG VOCABULARY ----------------------------------
    Three hue families plus gray, grouped by what the tag means:
@@ -19,71 +37,83 @@ function wiki(slug) { return slug ? WIKIA_BASE_URL + slug : null; }
      gray    — neutral descriptor (delivery, shape, range)
    Shade varies inside a family so members stay distinguishable
    without introducing another hue.                             */
+/* Three axes, one question each: what it does, what it costs you, how far
+   it reaches. The old fourth group was a grab-bag — Ranged and Melee are
+   about reach, but Utility and Summon are kinds of effect, and filing them
+   together meant neither group answered a single question.
+
+   Whether something helps an ally or hurts an enemy is still there, carried
+   by colour: the cyan family helps, the magenta family hurts. The palette
+   said it more clearly than the heading did, and saying it twice cost a
+   line of the bar. */
 const TAGS = {
-  /* helps — cyan family */
-  support:       { label: "Support",       color: "c1", group: "helps" },
-  healing:       { label: "Healing",       color: "c2", group: "helps" },
-  defense:       { label: "Defense",       color: "c3", group: "helps" },
-  /* hurts — magenta family */
-  damage:        { label: "Damage",        color: "m1", group: "hurts" },
-  smite:         { label: "Smite",         color: "m2", group: "hurts" },
-  control:       { label: "Control",       color: "m3", group: "hurts" },
-  /* costs — yellow family */
-  concentration: { label: "Concentration", color: "y1", group: "costs" },
-  bonus:         { label: "Bonus Action",  color: "y2", group: "costs" },
-  reaction:      { label: "Reaction",      color: "y3", group: "costs" },
-  ritual:        { label: "Ritual",        color: "y4", group: "costs" },
-  /* descriptors — gray */
-  ranged:        { label: "Ranged",        color: "g",  group: "how" },
-  touch:         { label: "Touch",         color: "g",  group: "how" },
-  melee:         { label: "Melee",         color: "g",  group: "how" },
-  aoe:           { label: "AoE",           color: "g",  group: "how" },
-  utility:       { label: "Utility",       color: "g",  group: "how" },
-  summon:        { label: "Summon",        color: "g",  group: "how" },
-  selfOnly:      { label: "Self",          color: "g",  group: "how" }
+  /* effect — helps (cyan) */
+  support:       { label: "Support",       color: "c1", group: "effect" },
+  healing:       { label: "Healing",       color: "c2", group: "effect" },
+  defense:       { label: "Defense",       color: "c3", group: "effect" },
+  /* effect — hurts (magenta) */
+  damage:        { label: "Damage",        color: "m1", group: "effect" },
+  smite:         { label: "Smite",         color: "m2", group: "effect" },
+  control:       { label: "Control",       color: "m3", group: "effect" },
+  /* effect — neither (gray) */
+  utility:       { label: "Utility",       color: "g",  group: "effect" },
+  summon:        { label: "Summon",        color: "g",  group: "effect" },
+  /* cost — yellow family */
+  concentration: { label: "Concentration", color: "y1", group: "cost" },
+  bonus:         { label: "Bonus Action",  color: "y2", group: "cost" },
+  reaction:      { label: "Reaction",      color: "y3", group: "cost" },
+  ritual:        { label: "Ritual",        color: "y4", group: "cost" },
+  /* reach — gray */
+  melee:         { label: "Melee",         color: "g",  group: "reach" },
+  touch:         { label: "Touch",         color: "g",  group: "reach" },
+  ranged:        { label: "Ranged",        color: "g",  group: "reach" },
+  aoe:           { label: "AoE",           color: "g",  group: "reach" },
+  selfOnly:      { label: "Self",          color: "g",  group: "reach" }
 };
+/* One word each. The old headings were sentences of four different lengths
+   wrapping inside a single flex row, which is most of why the bar read as
+   a jumble. */
 const TAG_GROUPS = {
-  helps: "Helps you or an ally",
-  hurts: "Hurts an enemy",
-  costs: "Costs or limits you",
-  how:   "How it's delivered"
+  effect: "Effect",
+  cost:   "Cost",
+  reach:  "Reach"
 };
 
 /* ---------- WEAPON MASTERIES -------------------------------- */
 const MASTERIES = {
-  vex:    { name: "Vex",    slug: "equipment:weapons",
+  vex:    { name: "Vex",    slug: "equipment:weapon",
             text: "On a hit, you have Advantage on your next attack roll against that creature before the end of your next turn." },
-  nick:   { name: "Nick",   slug: "equipment:weapons",
+  nick:   { name: "Nick",   slug: "equipment:weapon",
             text: "When you make the extra attack from the Light property, you can make it as part of the Attack action instead of as a Bonus Action. You can make this extra attack only once per turn." },
-  sap:    { name: "Sap",    slug: "equipment:weapons",
+  sap:    { name: "Sap",    slug: "equipment:weapon",
             text: "On a hit, the target has Disadvantage on its next attack roll before the start of your next turn." },
-  slow:   { name: "Slow",   slug: "equipment:weapons",
+  slow:   { name: "Slow",   slug: "equipment:weapon",
             text: "On a hit, the target's Speed is reduced by 10 feet until the start of your next turn. Doesn't stack." },
-  topple: { name: "Topple", slug: "equipment:weapons",
+  topple: { name: "Topple", slug: "equipment:weapon",
             text: "On a hit, the target makes a Constitution save against your spell save DC or has the Prone condition." },
-  push:   { name: "Push",   slug: "equipment:weapons",
+  push:   { name: "Push",   slug: "equipment:weapon",
             text: "On a hit, you can push the target up to 10 feet away if it is Large or smaller." },
-  graze:  { name: "Graze",  slug: "equipment:weapons",
+  graze:  { name: "Graze",  slug: "equipment:weapon",
             text: "On a miss, the target takes damage equal to your ability modifier. No damage type bonuses apply." },
-  cleave: { name: "Cleave", slug: "equipment:weapons",
+  cleave: { name: "Cleave", slug: "equipment:weapon",
             text: "On a hit against a creature, you can make one extra attack against a second creature within 5 feet of the first. Once per turn." }
 };
 
 /* ---------- WEAPONS ----------------------------------------- */
 const WEAPONS = {
-  shortsword:   { name: "Shortsword",    slug: "equipment:weapons", die: "1d6", type: "Piercing",
+  shortsword:   { name: "Shortsword",    slug: "equipment:weapon", die: "1d6", type: "Piercing",
                   mastery: "vex",  props: ["Finesse", "Light"], category: "Martial Melee", range: null },
-  scimitar:     { name: "Scimitar",      slug: "equipment:weapons", die: "1d6", type: "Slashing",
+  scimitar:     { name: "Scimitar",      slug: "equipment:weapon", die: "1d6", type: "Slashing",
                   mastery: "nick", props: ["Finesse", "Light"], category: "Martial Melee", range: null },
-  handCrossbow: { name: "Hand Crossbow", slug: "equipment:weapons", die: "1d6", type: "Piercing",
+  handCrossbow: { name: "Hand Crossbow", slug: "equipment:weapon", die: "1d6", type: "Piercing",
                   mastery: "vex",  props: ["Ammunition", "Light", "Loading"], category: "Martial Ranged",
                   range: "30/120 ft" },
-  rapier:       { name: "Rapier",        slug: "equipment:weapons", die: "1d8", type: "Piercing",
+  rapier:       { name: "Rapier",        slug: "equipment:weapon", die: "1d8", type: "Piercing",
                   mastery: "vex",  props: ["Finesse"], category: "Martial Melee", range: null },
-  dagger:       { name: "Dagger",        slug: "equipment:weapons", die: "1d4", type: "Piercing",
+  dagger:       { name: "Dagger",        slug: "equipment:weapon", die: "1d4", type: "Piercing",
                   mastery: "nick", props: ["Finesse", "Light", "Thrown"], category: "Simple Melee",
                   range: "20/60 ft" },
-  longsword:    { name: "Longsword",     slug: "equipment:weapons", die: "1d8", type: "Slashing",
+  longsword:    { name: "Longsword",     slug: "equipment:weapon", die: "1d8", type: "Slashing",
                   mastery: "sap",  props: ["Versatile (1d10)"], category: "Martial Melee", range: null }
 };
 
@@ -426,20 +456,20 @@ const FEATURES = {
 
 /* ---------- CONDITIONS (2024) ------------------------------- */
 const CONDITIONS = {
-  blinded:      { name:"Blinded",      slug:"condition:blinded",      text:"Can't see and automatically fail sight-based checks. Attacks against you have Advantage; your attacks have Disadvantage." },
-  charmed:      { name:"Charmed",      slug:"condition:charmed",      text:"Can't attack the charmer or target them with harmful effects. The charmer has Advantage on ability checks to interact with you socially." },
-  deafened:     { name:"Deafened",     slug:"condition:deafened",     text:"Can't hear and automatically fail hearing-based checks." },
-  frightened:   { name:"Frightened",   slug:"condition:frightened",   text:"Disadvantage on ability checks and attacks while the source is visible. Can't willingly move closer to it." },
-  grappled:     { name:"Grappled",     slug:"condition:grappled",     text:"Speed 0. Disadvantage on attacks against anyone but the grappler. Moves with the grappler." },
-  incapacitated:{ name:"Incapacitated",slug:"condition:incapacitated",text:"Can't take actions, Bonus Actions, or Reactions. Can't concentrate or speak. Initiative rolls have Disadvantage." },
-  invisible:    { name:"Invisible",    slug:"condition:invisible",    text:"You are Heavily Obscured for the purpose of hiding. Attacks against you have Disadvantage; your attacks have Advantage." },
-  paralyzed:    { name:"Paralyzed",    slug:"condition:paralyzed",    text:"Incapacitated, can't move or speak, and auto-fail STR and DEX saves. Attacks against you have Advantage and hits within 5 ft are Critical Hits." },
-  petrified:    { name:"Petrified",    slug:"condition:petrified",    text:"Turned to stone. Incapacitated, Resistance to all damage, Immunity to poison and disease, auto-fail STR and DEX saves." },
-  poisoned:     { name:"Poisoned",     slug:"condition:poisoned",     text:"Disadvantage on attack rolls and ability checks." },
-  prone:        { name:"Prone",        slug:"condition:prone",        text:"You can only crawl unless you stand up. Disadvantage on attacks. Attacks against you have Advantage within 5 ft, Disadvantage beyond." },
-  restrained:   { name:"Restrained",   slug:"condition:restrained",   text:"Speed 0. Attacks against you have Advantage; your attacks have Disadvantage. Disadvantage on DEX saves." },
-  stunned:      { name:"Stunned",      slug:"condition:stunned",      text:"Incapacitated, can't move, and can speak only falteringly. Auto-fail STR and DEX saves. Attacks against you have Advantage." },
-  unconscious:  { name:"Unconscious",  slug:"condition:unconscious",  text:"Incapacitated, can't move or speak, and unaware. Drop what you're holding and fall Prone. Auto-fail STR and DEX saves. Attacks have Advantage; hits within 5 ft are Critical Hits." }
+  blinded:      { name:"Blinded",      slug:"srd:BlindedCondition",      text:"Can't see and automatically fail sight-based checks. Attacks against you have Advantage; your attacks have Disadvantage." },
+  charmed:      { name:"Charmed",      slug:"srd:CharmedCondition",      text:"Can't attack the charmer or target them with harmful effects. The charmer has Advantage on ability checks to interact with you socially." },
+  deafened:     { name:"Deafened",     slug:"srd:DeafenedCondition",     text:"Can't hear and automatically fail hearing-based checks." },
+  frightened:   { name:"Frightened",   slug:"srd:FrightenedCondition",   text:"Disadvantage on ability checks and attacks while the source is visible. Can't willingly move closer to it." },
+  grappled:     { name:"Grappled",     slug:"srd:GrappledCondition",     text:"Speed 0. Disadvantage on attacks against anyone but the grappler. Moves with the grappler." },
+  incapacitated:{ name:"Incapacitated",slug:"srd:IncapacitatedCondition",text:"Can't take actions, Bonus Actions, or Reactions. Can't concentrate or speak. Initiative rolls have Disadvantage." },
+  invisible:    { name:"Invisible",    slug:"srd:InvisibleCondition",    text:"You are Heavily Obscured for the purpose of hiding. Attacks against you have Disadvantage; your attacks have Advantage." },
+  paralyzed:    { name:"Paralyzed",    slug:"srd:ParalyzedCondition",    text:"Incapacitated, can't move or speak, and auto-fail STR and DEX saves. Attacks against you have Advantage and hits within 5 ft are Critical Hits." },
+  petrified:    { name:"Petrified",    slug:"srd:PetrifiedCondition",    text:"Turned to stone. Incapacitated, Resistance to all damage, Immunity to poison and disease, auto-fail STR and DEX saves." },
+  poisoned:     { name:"Poisoned",     slug:"srd:PoisonedCondition",     text:"Disadvantage on attack rolls and ability checks." },
+  prone:        { name:"Prone",        slug:"srd:ProneCondition",        text:"You can only crawl unless you stand up. Disadvantage on attacks. Attacks against you have Advantage within 5 ft, Disadvantage beyond." },
+  restrained:   { name:"Restrained",   slug:"srd:RestrainedCondition",   text:"Speed 0. Attacks against you have Advantage; your attacks have Disadvantage. Disadvantage on DEX saves." },
+  stunned:      { name:"Stunned",      slug:"srd:StunnedCondition",      text:"Incapacitated, can't move, and can speak only falteringly. Auto-fail STR and DEX saves. Attacks against you have Advantage." },
+  unconscious:  { name:"Unconscious",  slug:"srd:UnconsciousCondition",  text:"Incapacitated, can't move or speak, and unaware. Drop what you're holding and fall Prone. Auto-fail STR and DEX saves. Attacks have Advantage; hits within 5 ft are Critical Hits." }
 };
 
 /* ============================================================
@@ -1106,7 +1136,11 @@ const CALC = {
    against the 2024 rules.
    ============================================================ */
 const SEED = {
-  schemaVersion: 1,
+  /* 2: the display-size baseline changed — 100% now renders at what used
+     to be 80%, which is the size this sheet is actually read at. Saved
+     sheets have their uiScale rescaled once so nothing changes size under
+     anyone; see migrate(). */
+  schemaVersion: 2,
   identity: {
     name: "Hal Briarshade", species: "Jerbeen", class: "Paladin",
     subclass: "Oath of the Ancients", background: "Abandoned",
