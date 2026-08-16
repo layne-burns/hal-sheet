@@ -41,6 +41,7 @@ const UI = { prov: null, modal: null, alert: null, filter: [], expanded: {},
              map: { zoom: 1, x: 0, y: 0, sel: null, mode: "look", q: "" },
              people: { q: "", standing: "", edit: {} },
              watch: { edit: {} },
+             modalScroll: 0,
              drag: null };
 
 function load() {
@@ -1799,8 +1800,48 @@ function render() {
       '</div>' +
     '</div>' +
     '<input type="file" id="import-file" accept="application/json" class="hide" data-act="doImport">';
-  document.getElementById("modal-root").innerHTML = modalHTML();
+  paintModal(modalHTML());
   applyPanelFolds();
+}
+
+/* Rewriting a modal's markup throws away where it was scrolled to, and
+   every state change in the app re-renders — so tapping anything inside a
+   long modal used to jump it back to the top. On a mouse that is an
+   annoyance; on an iPad, where the same gesture is also how you scroll, it
+   reads as the modal refusing to scroll at all.
+
+   So the scroll position is carried across the rewrite. Cheap, and it
+   makes a modal behave like a document rather than like something being
+   rebuilt underneath you. */
+function paintModal(html) {
+  const root = document.getElementById("modal-root");
+  /* A modal that combat.js owns gets painted TWICE in one render: this
+     file writes an empty shell first, because modalHTML() doesn't know
+     that type, and combat.js writes the real one a moment later. So the
+     position cannot be read off the element on the way in — by the second
+     paint the element it was on has already been thrown away. It is kept
+     here instead, and only forgotten when the modal actually closes. */
+  const old = root.querySelector(".mask");
+  if (!UI.modal) {
+    /* Closing. Forget where it was — the next modal is a different
+       document and should open at the top. Written as an else, because
+       the mask is still on screen at this moment with its old position
+       on it, and saving that would undo the forgetting. */
+    UI.modalScroll = 0;
+  } else if (old && old.scrollTop) {
+    UI.modalScroll = old.scrollTop;
+  }
+
+  root.innerHTML = html;
+
+  const mask = root.querySelector(".mask");
+  if (!mask || !UI.modalScroll) return;
+  /* Reading scrollHeight forces the layout that setting innerHTML just
+     invalidated. Without it the element is still zero-height at this
+     instant, so assigning scrollTop clamps to 0 and the restore is a
+     no-op — which looks exactly like not having written this at all. */
+  void mask.scrollHeight;
+  mask.scrollTop = UI.modalScroll;
 }
 
 /* ---------- PER-TAB PANEL FOLDING ----------
@@ -2941,31 +2982,58 @@ function followersTab() {
 
    TOKEN_COLS/ROWS have to match the sheet. If build-tokens.py ever emits
    a different shape, this is the other half of that change. */
-const TOKEN_COLS = 12, TOKEN_ROWS = 13;
+/* Two sheets, not one. Five hundred and fifty faces is more pixels than
+   WebKit will decode at full resolution — much past five megapixels it
+   subsamples, and a subsampled 112px tile is mush. So they are split at a
+   category boundary and each half stays under it. tokenStyle() decides
+   which sheet an index belongs to; nothing else has to know.
+
+   TOKEN_SPLIT, the column count and both row counts are printed by
+   tools/build-tokens.py. The two files have to agree. */
+const TOKEN_COLS = 12;
+const TOKEN_SPLIT = 336;          /* first index that lives on sheet two */
+const TOKEN_ROWS_1 = 28, TOKEN_ROWS_2 = 18;
 const TOKEN_PARTY = ["Qee", "Gill", "Dinos", "Karlie", "Sol"];
 
-/* A hundred and fifty faces is too many to scroll, so the picker is
-   banded — and the bands are the source grids, which were themed to
-   begin with. `from` is where each starts on the sheet; the ranges have
-   gaps (row 0 is the party and has seven spare slots) so that every band
-   begins on a row boundary and its index is arithmetic. The build script
-   prints these numbers; the two files have to agree. */
+/* Five hundred faces is far too many to scroll, so the picker is banded —
+   and the bands are the source grids, which were themed to begin with.
+   `from` is where each starts; the ranges have gaps (row 0 is the party
+   and has seven spare slots) so that every band begins on a row boundary
+   and its index stays arithmetic.
+
+   `use` is what the band is FOR, which is how the picker knows to open on
+   Familiars when you are naming a familiar and on Beasts when you are
+   naming a mount. A band with no `use` is a general one. */
 const TOKEN_BANDS = [
-  { id: "party",  label: "The party",   from: 0,   count: 5,
+  { id: "party",  label: "The party",   from: 0,   count: 5,   use: ["party"],
     note: "Fixed — these are who they are." },
-  { id: "faces",  label: "Faces",       from: 12,  count: 36,
+  { id: "faces",  label: "Faces",       from: 12,  count: 36,  use: ["npc"],
     note: "Painted portraits. Innkeepers, captains, the person across the table." },
-  { id: "class",  label: "Adventurers", from: 48,  count: 36,
+  { id: "guard",  label: "Soldiers",    from: 48,  count: 36,  use: ["npc"],
+    note: "Guards, men-at-arms, the watch, whoever the town sent." },
+  { id: "class",  label: "Adventurers", from: 84,  count: 72,  use: ["npc"],
     note: "Rival parties, hired swords, the guild that wants what you want." },
-  { id: "kin",    label: "Kin",         from: 84,  count: 36,
-    note: "Goblins, orcs, lizardfolk, drow, tieflings, beastfolk." },
-  { id: "beast",  label: "Monsters",    from: 120, count: 36,
-    note: "Dragons, the undead, things with too many eyes." }
+  { id: "caster", label: "Casters",     from: 156, count: 36,  use: ["npc"],
+    note: "Mages, cultists, clergy, and the ones who took it too far." },
+  { id: "kin",    label: "Kin",         from: 192, count: 144, use: ["foe"],
+    note: "Goblins, orcs, gnolls, drow, dwarves, tieflings, snakefolk." },
+  { id: "beast",  label: "Beasts",      from: 336, count: 36,  use: ["mount", "summon", "foe"],
+    note: "Horses, wolves, bears, big cats — mounts, pack animals and what hunts you." },
+  { id: "famil",  label: "Familiars",   from: 372, count: 36,  use: ["familiar", "summon"],
+    note: "The Find Familiar list: owls, cats, ravens, rats, frogs, spiders." },
+  { id: "mons",   label: "Monsters",    from: 408, count: 72,  use: ["foe"],
+    note: "Aberrations, constructs, devils, oozes, things with too many eyes." },
+  { id: "drag",   label: "Dragons",     from: 480, count: 36,  use: ["foe"],
+    note: "Every colour, and a few that have been dead a while." },
+  { id: "dead",   label: "Undead",      from: 516, count: 36,  use: ["foe"],
+    note: "Skeletons, zombies, mummies, spectres, liches." }
 ];
 
 /* Labels, band by band, in sheet order. They name a token in a tooltip
    and give the picker's search something to match; the picture is the
-   real identifier, so a label being approximate costs nothing. */
+   real identifier, so a label being approximate costs nothing — and a
+   band that runs past the names written for it falls back to numbering,
+   which is honest about the ones nobody has got round to naming. */
 const TOKEN_LABELS = {};
 TOKEN_PARTY.forEach(function (n, i) { TOKEN_LABELS[i] = n; });
 [
@@ -2981,6 +3049,16 @@ TOKEN_PARTY.forEach(function (n, i) { TOKEN_LABELS[i] = n; });
     "Bald elder", "White-haired sage",
     "Horned elder", "Red devil", "Northern warrior", "Golden helm captain",
     "Gilded elder", "Old campaigner"]],
+  ["guard", ["Knight", "Shieldmaiden", "Guard captain", "Helmed guard",
+    "Sergeant", "Woman-at-arms",
+    "Spearman", "Standard bearer", "Archer", "Halberdier", "Footman", "Scout",
+    "Crossbowman", "Crossbow woman", "Bowman", "Huntress", "Ranger", "Squire",
+    "Masked cleric", "Dark priestess", "Swordsman", "Torchbearer",
+    "Robed scribe", "Helmed soldier",
+    "Bald veteran", "Gilded knight", "Pikeman", "Blonde knight",
+    "Grizzled captain", "Young soldier",
+    "Bearded warrior", "Duelist", "Eyepatch veteran", "Mace bearer",
+    "Old soldier", "Recruit"]],
   ["class", ["Knight", "Woman-at-arms", "Horned warlord", "Helmed knight",
     "Paladin", "Elf paladin",
     "Wizard", "Sorceress", "Old sage", "Warlock", "Death cultist", "Witch",
@@ -2989,24 +3067,114 @@ TOKEN_PARTY.forEach(function (n, i) { TOKEN_LABELS[i] = n; });
     "Berserker", "Axe maiden",
     "Norse warrior", "Shieldmaiden", "Cleric", "Radiant priestess",
     "Hooded archer", "Elf archer",
-    "Antlered druid", "Green druid", "Bard", "Harpist", "Monk", "Martial artist"]],
+    "Antlered druid", "Green druid", "Bard", "Harpist", "Monk", "Martial artist",
+    /* second sheet of the same kind */
+    "Banner knight", "Red-haired knight", "Horned champion", "Helmed woman",
+    "Radiant paladin", "Sword of dawn",
+    "Blue mage", "Violet sorceress", "Old wizard", "Storm witch",
+    "Skull cultist", "Hat witch",
+    "Masked thief", "Veiled assassin", "Hooded bandit", "Twin blades",
+    "Green ranger", "Elf hunter",
+    "Horned vampire", "Violet warlock", "Bandanna fighter", "Braided archer",
+    "Bearded berserker", "Axe woman",
+    "Horned raider", "Copper shieldmaiden", "Praying cleric", "Golden saint",
+    "Green archer", "Elf scout",
+    "Stag druid", "Vine druid", "Lute bard", "Golden singer",
+    "Bald monk", "Braided monk"]],
+  ["caster", ["Archmage", "Red mage", "Green apprentice", "Old enchantress",
+    "Blue sage", "Violet mage",
+    "Fire mage", "Ice mage", "Storm mage", "Sand mage", "Lightning adept",
+    "Shadow sorceress",
+    "Hooded assassin", "Dagger woman", "Masked killer", "Flame cultist",
+    "Grey hood", "Violet hood",
+    "Bone mage", "Skull priestess", "Gaunt necromancer", "Death acolyte",
+    "Green lich", "Pale warlock",
+    "War cleric", "Veiled nun", "Priest", "Grey sister", "Old bishop",
+    "Golden abbess",
+    "Fire cultist", "Vampire lady", "Dark priest", "Violet witch",
+    "Pale scholar", "Black warlock"]],
   ["kin", ["Goblin", "Goblin scout", "Black dragonborn", "Hooded dragonborn",
     "Orc", "Half-orc woman",
     "Duergar", "Half-elf", "Gnoll", "Bugbear", "Lizardfolk", "Green lizardfolk",
     "Drow", "Drow noble", "Dwarf", "Braided warrior", "Red tiefling", "Blue tiefling",
     "Vampire", "Vampire lady", "Orc brute", "Kobold", "Orc soldier", "Half-elf warrior",
     "Leopard", "Lioness", "Goliath", "Braided fighter", "Satyr", "Faun",
-    "Kenku", "Blue kenku", "Cheetah", "Wildcat", "Frost giant", "Fire genasi"]],
-  ["beast", ["Red dragon", "Black dragon", "Blue dragon", "Green dragon",
-    "White dragon", "Brass dragon",
-    "Skeleton knight", "Zombie", "Lich", "Wraith", "Ghoul", "Death knight",
-    "Mind flayer", "Beholder", "Deep fish", "Crab horror", "Carrion crawler", "Ettin",
+    "Kenku", "Blue kenku", "Cheetah", "Wildcat", "Frost giant", "Fire genasi",
+    /* grid8 */
+    "Goblin snarler", "Hobgoblin", "Orc chief", "Orc woman", "Helmed orc", "Goblin elder",
+    "Red tiefling", "Bronze soldier", "Grey orc", "Braided orc", "Helmed goblin", "Pale elf",
+    "Gnoll", "Hyena-kin", "Bugbear", "Furred brute", "Bearded gnoll", "Black gnoll",
+    "Red dragonborn", "Hooded kobold", "Green dragonborn", "Blue dragonborn",
+    "Gold dragonborn", "Sand dragonborn",
+    "Green lizardfolk", "Feathered lizardfolk", "Grey lizardfolk", "Plumed lizardfolk",
+    "Marsh lizardfolk", "Pale lizardfolk",
+    "White troglodyte", "Grey troglodyte", "Horned grey", "Bone lizardfolk",
+    "Snarling grey", "Pale troglodyte",
+    /* grid9 */
+    "Orc warrior", "Tiefling raider", "Orc brute", "Orc huntress", "Green orc", "Orc shaman",
+    "Gnoll", "Gnoll matriarch", "Gnoll howler", "Gnoll scout", "Grey gnoll", "Red gnoll",
+    "Minotaur", "Minotaur woman", "Bull-kin", "Longhorn", "Black minotaur", "Brown minotaur",
+    "Half-orc", "Half-orc woman", "Bald brute", "Grey brute", "Scarred brute", "Green brute",
+    "Wolf", "Dire wolf", "Brown bear", "Grizzly", "Lynx", "Tiger",
+    "Orc raider", "Orc hunter", "Gnoll pack leader", "Bull-kin elder", "Half-orc chief", "Black wolf",
+    /* grid10 */
+    "Drow", "Drow priestess", "Drow blade", "Drow sorceress", "Drow scout", "Drow noble",
+    "Torch elf", "Green elf", "Pale elf", "Hooded elf", "Dark cleric", "Violet elf",
+    "Dwarf smith", "Dwarf woman", "Dwarf warrior", "Dwarf archer", "Old dwarf", "Dwarf blade",
+    "Torch dwarf", "Grey dwarf", "Blue-flame dwarf", "Duergar", "Duergar archer", "Duergar chief",
+    "Blue tiefling", "Fire tiefling", "Violet tiefling", "Red tiefling", "Yuan-ti", "Snake woman",
+    "Serpent", "Cobra-kin", "Vampire", "Vampire countess", "Pale noble", "Dark blade"]],
+  ["beast", ["Grey wolf", "Snarling wolf", "Brown bear", "Polar bear", "Lion", "Panther",
+    "Spider", "Boar", "Horse", "Crocodile", "Eagle", "Hyena",
+    "Bear", "Grizzly", "Tiger", "Leopard", "Jaguar", "Cheetah",
+    "White wolf", "Howling wolf", "Warhorse", "Lion", "Cougar", "Alligator",
+    "Hyena", "Laughing hyena", "Giant spider", "Scorpion", "Giant wasp", "Bald eagle",
+    "Lynx", "Bobcat", "Black panther", "Warthog", "Draft horse", "Great owl"]],
+  ["famil", ["Bat", "Calico cat", "Barn owl", "Raven", "Rat", "Green frog",
+    "Orange cat", "Owl", "Hawk", "Weasel", "Toad", "Snake",
+    "Iguana", "Spider", "Horned owl", "Black cat", "Bat", "Hermit crab",
+    "White rat", "Ferret", "Crow", "Horned lizard", "Viper", "Frog",
+    "Barn owl", "Weasel", "Red hawk", "Tarantula", "Black cat", "Green lizard",
+    "Bat", "Tree frog", "Great owl", "Rat", "Raven", "Crab"]],
+  ["mons", ["Mind flayer", "Beholder", "Deep fish", "Crab horror", "Carrion crawler", "Ettin",
     "Owl", "Eagle", "Lion", "Basilisk", "Wolf", "Yeti",
     "Dire wolf", "Werewolf", "Bull", "Axe beak", "Medusa", "Griffon",
-    "Stone golem", "Iron golem", "Ogre", "Frost ogre", "Devil", "Cockatrice"]]
+    "Stone golem", "Iron golem", "Ogre", "Frost ogre", "Devil", "Cockatrice",
+    "Red dragon", "Black dragon", "Blue dragon", "Green dragon", "White dragon", "Brass dragon",
+    "Skeleton knight", "Zombie", "Lich", "Wraith", "Ghoul", "Death knight",
+    /* grid13 */
+    "Beholder", "Mind flayer", "Deep one", "Octopoid", "Gibbering mouth", "Eye horror",
+    "Stone golem", "Iron sentinel", "Flesh golem", "Clay golem", "Scarecrow", "Brass automaton",
+    "Balor", "Fire devil", "Bloated devil", "Vrock", "Succubus", "Imp lord",
+    "Lich queen", "Vampire lord", "Mummy lord", "Death knight", "Ghoul lord", "Reaper",
+    "Red dragon", "Green wyrm", "Eagle", "Great owl", "Chimera", "Manticore",
+    "Hag", "Mimic", "Rust monster", "Green slime", "Chitin horror", "Purple worm"]],
+  ["drag", ["Red dragon", "Gold dragon", "Yellow dragon", "Black dragon",
+    "Green dragon", "White dragon",
+    "Shadow dragon", "Silver dragon", "Bone dragon", "Prismatic dragon",
+    "Amber dragon", "Emerald dragon",
+    "Blue dragon", "Bronze dragon", "Sapphire dragon", "Copper dragon",
+    "Obsidian dragon", "Ice dragon",
+    "Jade dragon", "Violet dragon", "Skeletal dragon", "Amethyst dragon",
+    "Crimson dragon", "Bleached dragon",
+    "Pale dragon", "Void dragon", "Verdant dragon", "Frost dragon",
+    "Azure dragon", "Onyx dragon",
+    "Ruby dragon", "Scarlet dragon", "Cobalt dragon", "Topaz dragon",
+    "Blood dragon", "Brass dragon"]],
+  ["dead", ["Red-eyed skull", "Blue-eyed skull", "Green-eyed skull", "Cracked skull",
+    "Helmed skull", "Hooded skull",
+    "Zombie", "Rotting zombie", "Ghoul", "Plague zombie", "Fresh zombie", "Plague doctor",
+    "Ghast", "Wight", "Draugr", "Revenant", "Feral ghoul", "Vampire spawn",
+    "Mummy", "Bandaged mummy", "Wrapped mummy", "Ancient mummy",
+    "Crowned mummy", "Pharaoh",
+    "Spectre", "Banshee", "Wraith", "Phantom", "Wailing spirit", "Poltergeist",
+    "Skeleton knight", "Iron skull", "Horned lich", "Crowned lich",
+    "Amethyst lich", "Ruby lich"]]
 ].forEach(function (pair) {
   const band = TOKEN_BANDS.filter(function (b) { return b.id === pair[0]; })[0];
-  pair[1].forEach(function (n, i) { TOKEN_LABELS[band.from + i] = n; });
+  pair[1].forEach(function (n, i) {
+    if (i < band.count) TOKEN_LABELS[band.from + i] = n;
+  });
 });
 
 /* Only the slots a band actually claims are real. The seven spares at the
@@ -3018,16 +3186,24 @@ function tokenBandOf(i) {
   })[0] || null;
 }
 function tokenLabel(i) {
-  return TOKEN_LABELS[i] || ("Token " + (i + 1));
+  if (TOKEN_LABELS[i]) return TOKEN_LABELS[i];
+  const b = tokenBandOf(i);
+  return b ? b.label + " " + (i - b.from + 1) : "Token " + (i + 1);
 }
+/* Which sheet a tile is on, and the class that names it. */
+function tokenSheet(i) { return i < TOKEN_SPLIT ? 1 : 2; }
 /* The inline style that puts tile `i` in a box. Percentages rather than
-   pixels so the same declaration works at 34px in the combat strip and at
-   64px in the picker. */
+   pixels so the same declaration works at 24px in a sub-badge and 60px in
+   a dossier card. The two sheets are different heights, so the vertical
+   percentage is against whichever one this tile is on. */
 function tokenStyle(i) {
-  const col = i % TOKEN_COLS, row = Math.floor(i / TOKEN_COLS);
+  const sheet = tokenSheet(i);
+  const local = sheet === 1 ? i : i - TOKEN_SPLIT;
+  const rows = sheet === 1 ? TOKEN_ROWS_1 : TOKEN_ROWS_2;
+  const col = local % TOKEN_COLS, row = Math.floor(local / TOKEN_COLS);
   return "background-position:" +
     (TOKEN_COLS > 1 ? (col / (TOKEN_COLS - 1)) * 100 : 0) + "% " +
-    (TOKEN_ROWS > 1 ? (row / (TOKEN_ROWS - 1)) * 100 : 0) + "%";
+    (rows > 1 ? (row / (rows - 1)) * 100 : 0) + "%";
 }
 function validToken(i) {
   return (typeof i === "number" && tokenBandOf(i)) ? i : null;
@@ -3050,7 +3226,7 @@ function tokenFace(opts) {
     const initial = (String(opts.name || "?").trim()[0] || "?").toUpperCase();
     return '<span class="' + cls + ' noface">' + esc(initial) + "</span>";
   }
-  return '<span class="' + cls + ' tok" style="' + tokenStyle(t) +
+  return '<span class="' + cls + ' tok sh' + tokenSheet(t) + '" style="' + tokenStyle(t) +
     '" title="' + esc(tokenLabel(t)) + '"></span>';
 }
 
@@ -5112,10 +5288,15 @@ document.addEventListener("pointerdown", function (e) {
   const ids = Object.keys(mapPointers);
 
   if (ids.length === 2) {
-    /* Second finger down: whatever was happening becomes a pinch. */
+    /* Two fingers: pinch AND pan, together. The centroid moving is a pan
+       and the distance changing is a zoom, and a real gesture is always
+       some of both — treating them as one thing is what makes the map
+       feel like paper under your hands rather than two modes. */
     const a = mapPointers[ids[0]], b = mapPointers[ids[1]];
     UI.drag = { kind: "pinch", moved: true,
                 dist: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+                cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2,
+                ox: UI.map.x, oy: UI.map.y,
                 zoom: UI.map.zoom };
     return;
   }
@@ -5126,8 +5307,22 @@ document.addEventListener("pointerdown", function (e) {
                 sx: e.clientX, sy: e.clientY, moved: false };
     return;
   }
-  UI.drag = { kind: "pan", sx: e.clientX, sy: e.clientY,
-              ox: UI.map.x, oy: UI.map.y, moved: false };
+  /* One finger no longer pans. It used to, and it meant the map was a
+     trap on a touch screen: the gesture for "scroll past this" and the
+     gesture for "fling the map" were the same one, so you could not read
+     the rest of the tab without shoving the map around first. One finger
+     now belongs to the page — the map takes two, which is the same
+     bargain every map on a phone makes.
+
+     A mouse has no such problem, so it keeps its drag-to-pan. */
+  if (e.pointerType === "mouse") {
+    UI.drag = { kind: "pan", sx: e.clientX, sy: e.clientY,
+                ox: UI.map.x, oy: UI.map.y, moved: false };
+    return;
+  }
+  /* Touch, one finger: remember where it started so a tap still lands,
+     but move nothing. */
+  UI.drag = { kind: "tap", sx: e.clientX, sy: e.clientY, moved: false };
 }, true);
 
 document.addEventListener("pointermove", function (e) {
@@ -5142,11 +5337,27 @@ document.addEventListener("pointermove", function (e) {
     const view = document.querySelector(".mapview");
     const r = view ? view.getBoundingClientRect() : null;
     const now = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+    /* Zoom about the point between the fingers, then carry the map by
+       however far that point has travelled. Zoom first, because
+       mapSetZoom moves the camera to keep the anchor still and the pan
+       is measured from where the gesture began, not from after it. */
     mapSetZoom(d.zoom * (now / d.dist),
                r ? (a.x + b.x) / 2 - r.left : null,
                r ? (a.y + b.y) / 2 - r.top : null);
+    const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
+    UI.map.x += cx - d.cx;
+    UI.map.y += cy - d.cy;
+    d.cx = cx; d.cy = cy;
+    if (view) mapClampPan(view.clientWidth, view.clientHeight);
     mapApplyCamera();
     e.preventDefault();
+    return;
+  }
+
+  /* One touch finger: the page is scrolling, not the map. Track it only
+     far enough to know this stopped being a tap. */
+  if (d.kind === "tap") {
+    if (Math.abs(e.clientX - d.sx) + Math.abs(e.clientY - d.sy) > MAP_TAP_SLOP) d.moved = true;
     return;
   }
 
@@ -5198,7 +5409,10 @@ document.addEventListener("pointerup", function (e) {
     return;
   }
 
-  if (d.kind === "pan") {
+  /* A mouse drag and a stationary finger end the same way: either it
+     moved, in which case the click that follows is part of the gesture
+     and must not also count as a tap, or it didn't, and it was a tap. */
+  if (d.kind === "pan" || d.kind === "tap") {
     if (d.moved) { UI.mapSwallowClick = true; return; }
     /* A tap on open map. In the two placing modes that means "here". */
     const at = mapPct(e.clientX, e.clientY);

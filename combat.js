@@ -109,21 +109,19 @@ EXT.glow = function () {
 };
 
 /* ---------- COMBAT BAR --------------------------------------
-   Two labels for one control: the long one, and the one it falls back to
-   when the strip runs out of room. Both are always in the markup and CSS
-   picks between them — which keeps the fit pass to adding one class,
-   rather than rewriting text in the DOM and having to remember what it
-   used to say. */
-function dual(long, short) {
-  return '<span class="lgw">' + esc(long) + "</span>" +
-    (short === long ? "" : '<span class="smw">' + esc(short) + "</span>");
-}
+   Short labels, always. They started as a fallback for when the strip ran
+   out of room, and then the strip was read at a table for a while and the
+   long ones turned out to be for nobody: you know what the third pip is,
+   and "Exit combat" was never ambiguous as "Exit". What the long form is
+   still good for is the tooltip, which is where it lives now.
+
+   Every control carries its long form as a title attribute. */
 
 EXT.combatBar = function () {
   const c = S.combat;
-  const orderBtn = '<button class="bt cutsm" data-act="orderModal">' +
-    (c.order.length ? dual("Turn order (" + c.order.length + ")", "Order " + c.order.length)
-                    : dual("Set turn order", "Order")) + "</button>";
+  const orderBtn = '<button class="bt cutsm" data-act="orderModal" title="' +
+    (c.order.length ? "Turn order — " + c.order.length + " in the fight" : "Set the turn order") +
+    '">' + (c.order.length ? "Order " + c.order.length : "Order") + "</button>";
   if (!c.active) {
     /* "Out of combat" is the absence of news. It used to sit above every
        tab in the app announcing that nothing was happening — a whole
@@ -142,26 +140,31 @@ EXT.combatBar = function () {
   }
   const t = c.turn;
   const slotNote = t.slotUsed ? "used" : "open";
+  /* One line, no state word. "OPEN" over "ACTION" said the same thing the
+     colour was already saying, in a second row of type that made every pip
+     twice the height of the buttons beside it. Spent is the strike-through
+     and the dimmed border, which is how spent looks everywhere else in the
+     app. The long form and the state are both in the tooltip. */
   function pip(used, label, key, short) {
     return '<button class="ecopip' + (used ? " used" : "") + '" data-act="econToggle" data-key="' +
       key + '" title="' + label + " — " + (used ? "spent" : "open") + '">' +
-      '<span class="ecoi">' + (used ? "spent" : "open") + "</span>" +
-      dual(label, short || label) + "</button>";
+      esc(short || label) + "</button>";
   }
   return '<div class="strip combat cut">' +
-    '<span class="rnd">' + dual("Round " + c.round, "R" + c.round) + "</span>" +
+    '<span class="rnd" title="Round ' + c.round + '">R' + c.round + "</span>" +
     orderBtn +
-    pip(t.action, "Action", "action", "Act") +
-    pip(t.bonus, "Bonus", "bonus", "Bns") +
-    pip(t.reaction, "Reaction", "reaction", "Rea") +
+    pip(t.action, "Action", "action") +
+    pip(t.bonus, "Bonus action", "bonus", "B/A") +
+    pip(t.reaction, "Reaction", "reaction") +
     '<span class="ecopip' + (t.slotUsed ? " used" : "") + '" title="Spell slot — ' + slotNote +
-      '"><span class="ecoi">' + slotNote + "</span>" + dual("Spell slot", "Slot") + "</span>" +
-    '<span class="mv"><span class="lbl mvlbl">Move</span> ' + (S.identity.speed - t.movementUsed) +
+      '">Slot</span>' +
+    '<span class="mv" title="Movement left this turn"><span class="lbl mvlbl">Move</span> ' +
+      (S.identity.speed - t.movementUsed) +
       "/" + S.identity.speed + '<span class="mvft"> ft</span>' +
       '<button class="bt cutsm" data-act="move" data-d="5">−5</button>' +
       '<button class="bt cutsm" data-act="move" data-d="-5">+5</button></span>' +
-    (t.hitLanded ? '<span class="hitflag">' + dual("Hit landed — smites available", "Hit landed") + "</span>"
-                 : '<button class="bt cutsm" data-act="logHit">' + dual("Log a hit", "Hit") + "</button>") +
+    (t.hitLanded ? '<span class="hitflag" title="Smites are available">Hit landed</span>'
+                 : '<button class="bt cutsm" data-act="logHit" title="Log a hit — arms your smites">Hit</button>') +
     /* The table runs its own initiative, so the turns between yours often
        pass without anyone touching the sheet. This catches it up in one
        press instead of four, and says how far it will jump so you can see
@@ -177,11 +180,12 @@ EXT.combatBar = function () {
         (skips ? "Skip the " + skips + " turn" + (skips === 1 ? "" : "s") + " between now and yours"
                : "Advance to your next turn") +
         (plan.wraps ? ", crossing into the next round" : "") +
-        '">' + dual("To my turn", "Mine") + (skips ? " <k>" + skips + "</k>" : "") + "</button>";
+        '">My turn' + (skips ? " <k>" + skips + "</k>" : "") + "</button>";
     })() +
-    '<button class="bt cutsm pri" style="margin-left:auto" data-act="endTurn">' +
-      dual(c.order.length ? "Next turn" : "End turn", "Next") + "</button>" +
-    '<button class="bt cutsm" data-act="combatEnd">' + dual("Exit combat", "Exit") + "</button>" +
+    '<button class="bt cutsm pri" style="margin-left:auto" data-act="endTurn" title="' +
+      (c.order.length ? "Next turn" : "End your turn") + '">' +
+      (c.order.length ? "Next" : "End turn") + "</button>" +
+    '<button class="bt cutsm" data-act="combatEnd" title="Exit combat">Exit</button>' +
     /* A line of its own, under the round counter. Sharing the row with
        the buttons meant it had to shrink to whatever was left over, and
        what was left over on an iPad was not enough to keep it to one
@@ -218,12 +222,11 @@ EXT.combatBar = function () {
    afford to hold its size while everything around it gives way. */
 const ORD_FITS = ["", "fit-1", "fit-2", "fit-3", "fit-4"];
 
-/* The controls above it get the same treatment, for the same reason and
-   in the same four steps: tighten the spacing, shrink the type, drop the
-   word under each pip (the colour already says open or spent), and last
-   of all fall back to the short labels. Everything it sheds is either
-   redundant or in a tooltip. */
-const BAR_FITS = ["", "bfit-1", "bfit-2", "bfit-3", "bfit-4"];
+/* The controls above it get the same treatment, for the same reason —
+   though there is much less to give up now that the labels are short and
+   the pips are one line to begin with. Two steps: tighten the spacing,
+   then the type. Both are recoverable; nothing is lost. */
+const BAR_FITS = ["", "bfit-1", "bfit-2"];
 
 /* Is a wrapping flex row on one line? Asked of the browser rather than
    predicted by adding widths up.
@@ -772,7 +775,7 @@ EXT.tokenModal = function () {
     hits.forEach(function (i) {
       body += '<button class="tokpick' + (cur === i ? " sel" : "") +
         '" data-act="tokenSet" data-i="' + i + '" title="' + esc(tokenLabel(i)) + '">' +
-        '<span class="face tok" style="' + tokenStyle(i) + '"></span>' +
+        '<span class="face tok sh' + tokenSheet(i) + '" style="' + tokenStyle(i) + '"></span>' +
         '<span class="tokname">' + esc(tokenLabel(i)) + "</span></button>";
     });
     body += "</div>";
@@ -2129,7 +2132,7 @@ render = function () {
       body += '<div class="mfoot"><button class="bt cutsm dg" data-act="undo">Undo last</button>' +
         '<button class="bt cutsm" data-act="closeModal">Close</button></div>';
     }
-    root.innerHTML = '<div class="mask"><div class="modal cut">' + modalClose() + body + "</div></div>";
+    paintModal('<div class="mask"><div class="modal cut">' + modalClose() + body + "</div></div>");
   }
 
   /* Glow overlay */

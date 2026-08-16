@@ -3,7 +3,7 @@
    Bump CACHE_VERSION whenever you upload changed files, or Safari
    will keep serving the old ones from cache.
    ============================================================ */
-const CACHE_VERSION = "hal-v36";
+const CACHE_VERSION = "hal-v37";
 const ASSETS = [
   "./",
   "./index.html",
@@ -18,6 +18,7 @@ const ASSETS = [
   "./manifest.json",
   "./map-cyrnn.jpg",
   "./tokens.jpg",
+  "./tokens2.jpg",
   "./icon-180.png",
   "./icon-192.png",
   "./icon-512.png",

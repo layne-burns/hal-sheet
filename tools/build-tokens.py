@@ -33,9 +33,15 @@ from PIL import Image
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(HERE, "portraits")
 OUT = os.path.join(HERE, "tokens.jpg")
+OUT2 = os.path.join(HERE, "tokens2.jpg")
 
-TILE = 160          # px per tile in the finished sheet
+# 545 tiles will not fit in one image an iPad is willing to decode at full
+# resolution — WebKit subsamples anything much past 5 megapixels, which
+# turns every face to mush. So the sheet is split in two, at a category
+# boundary, and each half stays comfortably under that.
+TILE = 112          # px per tile; the largest we ever draw one is 55 CSS px
 COLS = 12           # tiles per row; every source grid is 3 rows of these
+SPLIT_AFTER = 9     # grids in sheet one (plus the party row); rest go to two
 BG = (22, 29, 37)   # --panel2, so a portrait with alpha sits on the app's own dark
 
 # The party, in sheet order. `box` is the square crop taken from the
@@ -61,10 +67,21 @@ PARTY = [
 # tiles, as a fraction of the cell — the first grid is seamless and needs
 # none, the icon sheets are framed and do.
 GRIDS = [
-    ("portrait grid.png", 0.000),
-    ("grid2.jpg",         0.035),
-    ("grid3.jpg",         0.035),
-    ("grid4.jpg",         0.080),
+    ("portrait grid.png", 0.000),   # Faces        painted NPC portraits
+    ("grid5.jpg",         0.035),   # Soldiers     guards, men-at-arms
+    ("grid2.jpg",         0.035),   # Adventurers  class archetypes
+    ("grid6.jpg",         0.035),   # Adventurers
+    ("grid7.jpg",         0.035),   # Casters      mages, cultists, clergy
+    ("grid3.jpg",         0.035),   # Kin          goblinoids, elves, tieflings
+    ("grid8.jpg",         0.035),   # Kin
+    ("grid9.jpg",         0.035),   # Kin          orcs, gnolls, minotaurs
+    ("grid10.jpg",        0.035),   # Kin          drow, dwarves, yuan-ti
+    ("grid15.jpg",        0.035),   # Beasts       wolves, horses, big cats
+    ("grid14.jpg",        0.035),   # Familiars    the Find Familiar list
+    ("grid4.jpg",         0.080),   # Monsters
+    ("grid13.jpg",        0.035),   # Monsters     aberrations, constructs
+    ("grid11.jpg",        0.080),   # Dragons
+    ("grid12.jpg",        0.035),   # Undead
 ]
 GRID_COLS = GRID_ROWS = 6
 
@@ -97,6 +114,21 @@ def slice_grid(path, inset):
     return out
 
 
+def write_sheet(tiles, path):
+    rows = (len(tiles) + COLS - 1) // COLS
+    sheet = Image.new("RGB", (COLS * TILE, rows * TILE), BG)
+    for i, t in enumerate(tiles):
+        sheet.paste(t, ((i % COLS) * TILE, (i // COLS) * TILE))
+    sheet.save(path, "JPEG", quality=78, optimize=True, progressive=True)
+    mp = (sheet.width * sheet.height) / 1e6
+    print("  %-14s %dx%d  %d tiles, %d rows, %.1f MP, %.0f KB"
+          % (os.path.basename(path), sheet.width, sheet.height, len(tiles), rows,
+             mp, os.path.getsize(path) / 1024.0))
+    if mp > 5.0:
+        print("  WARNING: over 5 MP — WebKit may subsample this on an iPad")
+    return rows
+
+
 def main():
     blank = Image.new("RGB", (TILE, TILE), BG)
     tiles = []
@@ -110,23 +142,26 @@ def main():
     while len(tiles) % COLS:
         tiles.append(blank)
 
-    for fn, inset in GRIDS:
+    split_at = None
+    for n, (fn, inset) in enumerate(GRIDS):
         path = os.path.join(SRC, fn)
         if not os.path.exists(path):
             raise SystemExit("missing grid: " + path)
+        if n == SPLIT_AFTER:
+            split_at = len(tiles)
         start = len(tiles)
         tiles.extend(slice_grid(path, inset))
-        print("  %-20s index %3d - %3d" % (fn, start, len(tiles) - 1))
+        print("  %-20s index %4d - %4d%s" % (fn, start, len(tiles) - 1,
+              "   (sheet 2 starts here)" if n == SPLIT_AFTER else ""))
+    if split_at is None:
+        split_at = len(tiles)
 
-    rows = (len(tiles) + COLS - 1) // COLS
-    sheet = Image.new("RGB", (COLS * TILE, rows * TILE), BG)
-    for i, t in enumerate(tiles):
-        sheet.paste(t, ((i % COLS) * TILE, (i // COLS) * TILE))
-    sheet.save(OUT, "JPEG", quality=78, optimize=True, progressive=True)
-
-    print("tiles      %d in %d cols x %d rows" % (len(tiles), COLS, rows))
-    print("sheet      %dx%d" % (sheet.width, sheet.height))
-    print("written    %s (%.0f KB)" % (OUT, os.path.getsize(OUT) / 1024.0))
+    print("")
+    write_sheet(tiles[:split_at], OUT)
+    write_sheet(tiles[split_at:], OUT2)
+    print("")
+    print("app.js must match:  TOKEN_COLS = %d   TOKEN_SPLIT = %d   total = %d"
+          % (COLS, split_at, len(tiles)))
 
 
 if __name__ == "__main__":

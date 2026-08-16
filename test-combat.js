@@ -226,7 +226,7 @@ eq("combat active", st.combat.active, true);
 eq("round starts at 1", st.combat.round, 1);
 eq("fresh turn: nothing spent", st.combat.turn, CALC_snapshot());
 function CALC_snapshot() { return { action:false, bonus:false, reaction:false, movementUsed:0, slotUsed:false, hitLanded:false }; }
-ok("combat bar shows Round 1", /Round 1/.test(text()));
+ok("combat bar shows the round", /R1/.test(text()));
 ok("Action pip shows open", /Action/.test(text()));
 
 console.log("\n=== ATTACK, THEN SMITE (the whole point) ===");
@@ -946,8 +946,24 @@ if (byAct("combatEnd")) click(byAct("combatEnd"));
 enterCombat([18, 12, 9]);
 const barEl = $(".strip.combat");
 ok("the bar is drawn", !!barEl);
-ok("every control carries a short label to fall back on",
-   $$(".strip.combat .smw").length >= 5);
+/* Short labels are the default now; the long form is the tooltip, which
+   is the only place a control can still say what it is at length. */
+ok("controls are labelled briefly",
+   /^R\d+$/.test($(".strip.combat .rnd").textContent.trim()));
+ok("and carry the long form in a tooltip",
+   /Round/.test($(".strip.combat .rnd").getAttribute("title")));
+eq("the bonus pip reads B/A",
+   byAct("econToggle", { key: "bonus" }).textContent.trim(), "B/A");
+ok("with the full name in its tooltip",
+   /Bonus action/.test(byAct("econToggle", { key: "bonus" }).getAttribute("title")));
+/* No OPEN or SPENT anywhere in the row — the colour and the strike-through
+   were saying it already, in a second line of type that made every pip
+   twice the height of its neighbours. */
+ok("no pip says OPEN or SPENT",
+   !$$(".strip.combat .ecopip").some(function (p) { return /open|spent/i.test(p.textContent); }));
+eq("the pips read plainly",
+   $$(".strip.combat .ecopip").map(function (p) { return p.textContent.trim(); }),
+   ["Action", "B/A", "Reaction", "Slot"]);
 function barRows() {
   const kids = Array.from(barEl.children).filter(function (k) {
     return !k.classList.contains("ordstrip");
@@ -964,7 +980,7 @@ eq("and the controls come out on one line", barRows(), 1);
 /* jsdom reports no layout, so every element measures 0 and the first step
    always "fits" — which is the honest thing for it to report. What is
    worth asserting here is that the steps exist and are ordered. */
-eq("four steps, cheapest first", w.eval("BAR_FITS.length"), 5);
+eq("two steps left to give, both of them spacing", w.eval("BAR_FITS.length"), 3);
 eq("and it starts from no step at all", w.eval("BAR_FITS[0]"), "");
 console.log("\n=== AUTO-FLAGGED SIGNIFICANT EVENTS ===");
 click(byAct("damageModal"));
@@ -1086,19 +1102,49 @@ console.log("\n=== FACES: ONE SHEET, ADDRESSED BY INDEX ===");
    out and app.js addresses it — so the numbers agreeing is worth an
    assertion rather than a comment. */
 eq("the sheet is twelve wide", w.eval("TOKEN_COLS"), 12);
-eq("and thirteen tall", w.eval("TOKEN_ROWS"), 13);
-eq("five bands", w.eval("TOKEN_BANDS.length"), 5);
-eq("every band but the party is a full grid",
-   w.eval("TOKEN_BANDS.map(function(b){return b.count;})"), [5, 36, 36, 36, 36]);
+/* Two sheets, because five hundred faces at once is more than WebKit
+   will decode without subsampling. Both stay under five megapixels. */
+eq("sheet one is twenty-eight rows", w.eval("TOKEN_ROWS_1"), 28);
+eq("sheet two is eighteen", w.eval("TOKEN_ROWS_2"), 18);
+ok("neither is over five megapixels",
+   w.eval("TOKEN_COLS*112*TOKEN_ROWS_1*112") < 5e6 &&
+   w.eval("TOKEN_COLS*112*TOKEN_ROWS_2*112") < 5e6);
+ok("the split falls on a row boundary", w.eval("TOKEN_SPLIT % TOKEN_COLS") === 0);
+ok("tiles below the split are on sheet one", w.eval("tokenSheet(TOKEN_SPLIT-1)") === 1);
+ok("and at or above it on sheet two", w.eval("tokenSheet(TOKEN_SPLIT)") === 2);
+eq("eleven bands", w.eval("TOKEN_BANDS.length"), 11);
+/* A familiar and a mount both need a face, and the picker knows which
+   band to open on because each band says what it is for. */
+ok("Familiars and Beasts are among them", w.eval(
+   "TOKEN_BANDS.some(function(b){return b.id==='famil';}) && " +
+   "TOKEN_BANDS.some(function(b){return b.id==='beast';})"));
+ok("and every band says what it is for", w.eval(
+   "TOKEN_BANDS.every(function(b){return b.use && b.use.length;})"));
+ok("every band but the party is whole grids of thirty-six", w.eval(
+   "TOKEN_BANDS.slice(1).every(function(b){return b.count % 36 === 0;})"));
 ok("every band starts on a row boundary",
    w.eval("TOKEN_BANDS.every(function(b){return b.from % TOKEN_COLS === 0;})"));
-ok("no band runs off the sheet",
-   w.eval("TOKEN_BANDS.every(function(b){return b.from + b.count <= TOKEN_COLS * TOKEN_ROWS;})"));
+ok("no band runs off the end of the two sheets", w.eval(
+   "TOKEN_BANDS.every(function(b){return b.from + b.count <= " +
+   "TOKEN_COLS * (TOKEN_ROWS_1 + TOKEN_ROWS_2);})"));
+/* A band that straddled the split would need two background images for
+   one run of tiles, which nothing is written to handle. */
+ok("no band straddles the split", w.eval(
+   "TOKEN_BANDS.every(function(b){return tokenSheet(b.from) === tokenSheet(b.from+b.count-1);})"));
 ok("bands never overlap", w.eval(
    "TOKEN_BANDS.every(function(b,i){var p=TOKEN_BANDS[i-1];return !p || b.from >= p.from + p.count;})"));
-ok("every claimed slot has a label",
+/* Every one of the five hundred and forty-five has a written name, not a
+   number — which is what makes the picker's search worth having. The
+   band-and-number fallback exists for a grid added without labels; this
+   asserts it is not currently doing any work. */
+ok("every claimed slot has a written name",
    w.eval("TOKEN_BANDS.every(function(b){" +
      "for(var i=b.from;i<b.from+b.count;i++){if(!TOKEN_LABELS[i])return false;}return true;})"));
+ok("and the fallback still names an unwritten one",
+   /^Faces 6$/.test(w.eval(
+     "(function(){var b=TOKEN_BANDS[1],i=b.from+5,keep=TOKEN_LABELS[i];" +
+     "delete TOKEN_LABELS[i];var out=tokenLabel(i);" +
+     "TOKEN_LABELS[i]=keep;return out;})()")));
 /* The seven spares at the end of row 0 exist on the image but must never
    be choosable — a blank face would read as a bug. */
 eq("the spare slots are not valid tokens", w.eval("validToken(7)"), null);
@@ -1109,10 +1155,10 @@ eq("but a real one is", w.eval("validToken(84)"), 84);
 /* A tile's position is arithmetic on the index. Index 84 is column 0 of
    row 7, so 0% across and 7/12 down. */
 ok("tile 0 is the top-left corner", /background-position:0% 0%/.test(w.eval("tokenStyle(0)")));
-ok("tile 84 is the start of row seven",
-   /background-position:0% 58\.33/.test(w.eval("tokenStyle(84)")));
-ok("tile 11 is the far right of row zero",
-   /background-position:100% 0%/.test(w.eval("tokenStyle(11)")));
+ok("a tile at the start of a row sits at 0% across",
+   /background-position:0% /.test(w.eval("tokenStyle(TOKEN_COLS * 3)")));
+ok("and the last column of a row at 100%",
+   /background-position:100% 0%/.test(w.eval("tokenStyle(TOKEN_COLS - 1)")));
 
 console.log("\n=== THE PARTY'S FACES ARE FIXED ===");
 click(byAct("tab", { tab: "combat" }));
@@ -1124,7 +1170,8 @@ ok("and the panel offers to change it", !!byAct("tokenModal", { kind: "party" })
 click(byAct("tokenModal", { kind: "party", id: state().party.roster[0].id }));
 ok("the picker opens", /Pick a face/.test(text()));
 ok("banded rather than one long scroll", /Adventurers/.test(text()) && /Monsters/.test(text()));
-eq("every choosable face is offered", $$(".tokpick").length, 149);
+eq("every choosable face is offered", $$(".tokpick").length,
+   w.eval("TOKEN_BANDS.reduce(function(n,b){return n+b.count;},0)"));
 /* The labels exist so the picker can be searched — that is their whole
    job, so it is the thing worth testing about them. */
 setVal($("#tok-q"), "dragon");

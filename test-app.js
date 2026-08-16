@@ -1716,10 +1716,74 @@ const pid = state().people[0].id;
 click(byAct("peopleEdit", { id: pid }));
 ok("a record offers a face", !!byAct("tokenModal", { kind: "person", id: pid }));
 click(byAct("tokenModal", { kind: "person", id: pid }));
-ok("out of the same sheet the combat strip uses", $$(".tokpick").length === 149);
+/* Every claimed slot, out of the same two sheets the combat strip uses. */
+eq("out of the same sheets the combat strip uses", $$(".tokpick").length,
+   w.eval("TOKEN_BANDS.reduce(function(n,b){return n+b.count;},0)"));
 click(byAct("tokenSet", { i: "18" }));
 eq("picking writes it to the record", state().people[0].token, 18);
 ok("and the card wears it", !!$(".card.person .pface .face.tok"));
+
+console.log("\n=== MODALS SCROLL ON AN IPAD ===");
+/* The snap-back had two causes and both are load-bearing.
+
+   One: the scroller was a max-height box nested inside a fixed
+   full-screen overlay, which is the shape WebKit is worst at — a touch
+   landing a hair outside the inner box, or landing while the page is
+   under a CSS zoom, gets attributed to the overlay, which cannot scroll,
+   so the gesture rubber-bands. The overlay scrolls now and the modal has
+   no overflow of its own. */
+const maskCSS = fs.readFileSync(path.join(dir, "index.html"), "utf8");
+ok("the overlay is the scroller", /\.mask\{[^}]*overflow-y:auto/.test(maskCSS.replace(/\s+/g, "")));
+ok("with momentum on iOS", /-webkit-overflow-scrolling:touch/.test(maskCSS));
+ok("and it keeps its scrolling to itself", /\.mask\{[^}]*overscroll-behavior:contain/.test(maskCSS.replace(/\s+/g, "")));
+ok("the modal has no scroller of its own to fight with",
+   !/\.modal\{[^}]*overflow-y/.test(maskCSS.replace(/\s+/g, "")));
+/* Centring a flex child taller than its container overflows it off the
+   TOP, where it cannot be scrolled back to. */
+ok("a too-tall modal is reachable from the top",
+   /\.mask\{[^}]*align-items:flex-start/.test(maskCSS.replace(/\s+/g, "")));
+
+/* Two: every state change re-renders, and re-rendering rewrote the
+   modal's markup — which threw away where it was scrolled to. On a mouse
+   that is an annoyance; on a touch screen, where the same gesture is also
+   how you scroll, it reads as the modal refusing to scroll at all. */
+click(byAct("tab", { tab: "combat" }));
+click(byAct("partyAdd"));
+click(byAct("tokenModal", { kind: "party", id: state().party.roster[0].id }));
+const mask = $("#modal-root .mask");
+ok("the picker opens with an overlay to scroll", !!mask);
+mask.scrollTop = 400;
+/* jsdom has no layout, so scrollTop stays whatever it was set to — which
+   is enough to prove the value is carried rather than reset. */
+w.eval("render()");
+eq("re-rendering keeps the scroll position",
+   $("#modal-root .mask").scrollTop, 400);
+/* A modal that combat.js owns is painted twice per render — an empty
+   shell from app.js, then the real one — so the position cannot be read
+   off the element and has to be remembered across the gap. */
+ok("which survives the two-stage paint", w.eval("UI.modalScroll") === 400);
+click(byAct("closeModal"));
+eq("closing forgets it, so the next modal opens at the top",
+   w.eval("UI.modalScroll"), 0);
+click(byAct("partyDel", { i: "0" }));
+
+console.log("\n=== THE MAP TAKES TWO FINGERS ===");
+/* One finger used to pan the map, which made the map a trap on a touch
+   screen: the gesture for "scroll past this" and the gesture for "fling
+   the map" were the same one. */
+ok("vertical scrolling is handed back to the browser",
+   /\.mapview\{[^}]*touch-action:pan-y/.test(maskCSS.replace(/\s+/g, "")));
+ok("and not swallowed wholesale",
+   !/\.mapview\{[^}]*touch-action:none/.test(maskCSS.replace(/\s+/g, "")));
+const appSrc = fs.readFileSync(path.join(dir, "app.js"), "utf8");
+ok("a lone finger on the map moves nothing",
+   /kind: "tap", sx: e\.clientX/.test(appSrc));
+ok("a mouse keeps its drag-to-pan", /e\.pointerType === "mouse"/.test(appSrc));
+/* Two fingers do both at once, because a real gesture is always some of
+   each and treating them as separate modes is what makes a map feel like
+   a control panel instead of paper. */
+ok("two fingers pan as well as pinch",
+   /UI\.map\.x \+= cx - d\.cx/.test(appSrc));
 
 console.log("\n=== PWA WIRING ===");
 ok("manifest linked", !!$('link[rel="manifest"]'));

@@ -449,8 +449,13 @@ input[type=number]{width:88px}
    so instead it is darkened and tinted toward the panel colour, which
    keeps the drawing's own tones and lets the pins sit on top as the
    only saturated thing on screen. */
+/* touch-action:pan-y, not none. `none` meant the map ate every touch,
+   including the one you were using to scroll the page — so on an iPad you
+   could not get past the map without flinging it. Handing vertical panning
+   back to the browser makes a one-finger drag scroll the page, the way it
+   does over any other tall thing, and leaves two-finger gestures to us. */
 .mapview{position:relative;overflow:hidden;background:var(--panel2);
-  border:1px solid var(--line2);aspect-ratio:1138/897;touch-action:none;
+  border:1px solid var(--line2);aspect-ratio:1138/897;touch-action:pan-y;
   cursor:grab;user-select:none;-webkit-user-select:none}
 .mapview:active{cursor:grabbing}
 .mapstage{position:absolute;inset:0;transform-origin:0 0;will-change:transform}
@@ -579,10 +584,14 @@ body.onecol .mpin .mlab{font-size:10px;max-width:84px}
 /* ---------- COMBAT BAR ---------- */
 .strip.combat{gap:7px;border-color:var(--line2)}
 .rnd{font-family:var(--m);font-size:17px;letter-spacing:.12em;text-transform:uppercase;color:var(--yel)}
-.ecopip{font-family:var(--m);font-size:15.5px;letter-spacing:.08em;text-transform:uppercase;
-  padding:5px 10px;border:1px solid var(--cyan);color:var(--cyan);background:transparent;
-  display:flex;flex-direction:column;line-height:1.25}
-.ecopip .ecoi{font-size:12px;opacity:.75;letter-spacing:.14em}
+/* One line, and the same box as the buttons on either side of it — same
+   padding, same type size, same border. It used to stack the word "OPEN"
+   over the word "ACTION", which said the same thing twice and made every
+   pip twice the height of its neighbours. Spent is the strike-through and
+   the dimmed border, which is what spent looks like everywhere else. */
+.ecopip{font-family:var(--m);font-size:14.5px;letter-spacing:.1em;text-transform:uppercase;
+  padding:6px 11px;border:1px solid var(--cyan);color:var(--cyan);background:transparent;
+  display:inline-block;line-height:1.15;white-space:nowrap}
 .ecopip.used{border-color:var(--line2);color:var(--dimmer);text-decoration:line-through}
 .mv{font-family:var(--m);font-size:15.5px;color:var(--dim);display:flex;align-items:center;gap:5px}
 .hitflag{font-family:var(--m);font-size:14.5px;letter-spacing:.08em;text-transform:uppercase;
@@ -590,33 +599,21 @@ body.onecol .mpin .mlab{font-size:10px;max-width:84px}
 /* ---------- MAKING THE COMBAT BAR FIT ONE LINE ----------
    The controls wrapped to two rows on an iPad and the second held one
    button, which spends a whole band of a 740px screen on almost nothing.
-   fitCombatBar() steps through these until the row holds, in order of
-   what can be given up most cheaply.
-
-   Every control carries both its labels; .smw is the short one and is
-   hidden until the last step. Nothing is lost that isn't either redundant
-   or still in the element's tooltip. */
-.smw{display:none}
-.strip.combat.bfit-4 .lgw{display:none}
-.strip.combat.bfit-4 .smw{display:inline}
-/* 1: spacing. The cheapest thing in the row is the air around it. */
+   With short labels and one-line pips it usually fits outright; these two
+   steps are what is left to give if it doesn't, and both are spacing
+   rather than information. */
+/* 1: the air around it. */
 .strip.combat.bfit-1{gap:6px;padding:5px 10px}
-.strip.combat.bfit-1 .ecopip{padding:4px 8px}
+.strip.combat.bfit-1 .ecopip{padding:5px 8px}
 .strip.combat.bfit-1 .bt{padding:5px 8px}
-/* 2: type. */
+/* 2: the type, and the two words in the movement readout that the numbers
+   already imply. */
 .strip.combat.bfit-2{gap:5px;padding:4px 9px}
-.strip.combat.bfit-2 .ecopip{padding:3px 7px;font-size:14px}
+.strip.combat.bfit-2 .ecopip{padding:4px 7px;font-size:13.5px}
 .strip.combat.bfit-2 .bt{padding:4px 7px;font-size:13.5px}
 .strip.combat.bfit-2 .rnd{font-size:15px}
 .strip.combat.bfit-2 .mv{font-size:14px}
-/* 3: the word under each pip. The border colour and the strike-through
-   have said open or spent all along; the word was saying it twice. */
-.strip.combat.bfit-3 .ecoi{display:none}
-.strip.combat.bfit-3 .ecopip{line-height:1.2}
-.strip.combat.bfit-3 .mvlbl,.strip.combat.bfit-3 .mvft{display:none}
-/* 4: short labels. Round keeps a letter — a lone "1" at the left edge of
-   the strip is a number with nothing to say what it counts. */
-.strip.combat.bfit-4{gap:4px;padding:4px 8px}
+.strip.combat.bfit-2 .mvlbl,.strip.combat.bfit-2 .mvft{display:none}
 
 /* ---------- EFFECTS / CREATURES / PARTY / ORDER / DOABLE ---------- */
 .eff{padding:8px 0;border-bottom:1px solid #1A242D;border-left:2px solid var(--line2);padding-left:9px;
@@ -739,8 +736,13 @@ body.onecol .mpin .mlab{font-size:10px;max-width:84px}
    13 tall, which is the one number that has to match build-tokens.py. */
 .face{--face:32px;display:block;width:var(--face);height:var(--face);flex:none;
   border:1px solid var(--line2);background-color:var(--panel2);overflow:hidden}
-.face.tok{background-image:url(tokens.jpg);background-size:1200% 1300%;
-  background-repeat:no-repeat}
+/* Two sheets, because five hundred faces at once is more than WebKit will
+   decode without subsampling. background-size is the sheet in tiles: both
+   are twelve wide, and they differ in height, which is the only reason a
+   tile has to say which one it is on. */
+.face.tok{background-repeat:no-repeat}
+.face.tok.sh1{background-image:url(tokens.jpg);background-size:1200% 2800%}
+.face.tok.sh2{background-image:url(tokens2.jpg);background-size:1200% 1800%}
 .face.halface img{width:100%;height:100%;object-fit:cover;object-position:50% 12%;display:block}
 /* No token chosen: the initial, which is a portrait nobody has to pick. */
 .face.noface{display:flex;align-items:center;justify-content:center;font-family:var(--m);
@@ -1021,20 +1023,40 @@ h3.collapse::after{display:none}
 .card>.cardbtns .favstar{padding:1px 8px}
 
 /* ---------- MODAL ---------- */
-.mask{position:fixed;inset:0;background:rgba(5,8,11,.86);display:flex;align-items:center;
-  justify-content:center;z-index:50;padding:20px}
+/* THE SCROLLER IS THE MASK, NOT THE MODAL.
+   It used to be the other way round: a max-height box with overflow-y
+   inside a fixed full-screen overlay. On iPad that is the shape WebKit is
+   worst at — a touch that starts a hair outside the inner box, or lands
+   while the page is under a CSS zoom, gets attributed to the overlay
+   instead, which cannot scroll, so the gesture rubber-bands and the
+   content snaps back to the top.
+
+   A full-screen overlay that scrolls is the shape WebKit is best at. The
+   modal inside it is then just a block with a margin, with no height
+   constraint of its own and nothing to fight over.
+
+   align-items:flex-start rather than center, because a centred flex child
+   taller than its container overflows off the TOP, where it cannot be
+   scrolled back to. */
+.mask{position:fixed;inset:0;background:rgba(5,8,11,.86);z-index:50;padding:20px;
+  display:flex;align-items:flex-start;justify-content:center;
+  overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;
+  touch-action:pan-y}
 /* --appvh is the viewport height in the coordinate space the stylesheet
    actually lays out in; render() publishes it. Plain vh is the device
    height, which under zoom is a smaller number — it capped this at 70% of
    the screen and forced scrolling that wasn't necessary. The fallback
    keeps the old behaviour if the variable is ever missing. */
+/* No max-height and no overflow of its own — the mask above scrolls, and
+   two nested scrollers is exactly the collision that made touch
+   unreliable. margin:auto centres it while still letting it grow past the
+   viewport and be scrolled to. */
 .modal{background:var(--panel);border:1px solid var(--cyan);max-width:640px;width:100%;
-  max-height:calc(var(--appvh, 100vh) * 0.9);overflow-y:auto;padding:18px 20px;
-  position:relative;overscroll-behavior:contain}
+  padding:18px 20px;position:relative;margin:auto}
 /* The close control sits over the modal's own scroll, so it is reachable
    whatever the content is doing. A modal you can open and not close is
    worse than one you cannot open. */
-.modal .mx{position:sticky;top:-18px;float:right;margin:-8px -8px 0 8px;z-index:3;
+.modal .mx{position:sticky;top:0;float:right;margin:-8px -8px 0 8px;z-index:3;
   width:34px;height:34px;flex:none;display:flex;align-items:center;justify-content:center;
   font-size:22px;line-height:1;background:var(--panel2);border:1px solid var(--line2);
   color:var(--dim);cursor:pointer}
@@ -1055,6 +1077,10 @@ h3.collapse::after{display:none}
 .modal .mfoot{display:flex;gap:7px;margin-top:16px;padding:13px 0 18px;
   border-top:1px solid var(--line);flex-wrap:wrap;
   position:sticky;bottom:-18px;background:var(--panel);z-index:2}
+/* A modal short enough to fit needs no sticky footer, and a sticky one in
+   a scroller with nothing to scroll draws a line across the bottom of the
+   window for no reason. */
+@media (pointer:coarse){.modal .mfoot{bottom:-18px}}
 .gain{font-family:var(--m);font-size:16px;padding:4px 0;border-bottom:1px solid #1A242D;
   display:flex;gap:9px;align-items:baseline}
 .gain .gk{font-size:12px;letter-spacing:.1em;text-transform:uppercase;padding:0 5px;border:1px solid currentColor;flex:none}

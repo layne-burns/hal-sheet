@@ -14,7 +14,7 @@ After that, opening Hal is one tap and works with no internet.
 
 ## Before you start
 
-You need these 19 files. They are all in the `hal-sheet` folder:
+You need these 20 files. They are all in the `hal-sheet` folder:
 
 | File | What it is |
 |---|---|
@@ -25,7 +25,8 @@ You need these 19 files. They are all in the `hal-sheet` folder:
 | `app.js` | The buttons, saving, and level-up engine |
 | `combat.js` | Combat mode, casting, active effects, undo, settings |
 | `backup.js` | Local redundancy and optional automatic cloud backup |
-| `tokens.jpg` | Every combatant portrait, on one sheet |
+| `tokens.jpg` | Combatant portraits, sheet one |
+| `tokens2.jpg` | Combatant portraits, sheet two |
 | `sw.js` | Makes it work offline |
 | `manifest.json` | Makes it installable as an app |
 | `icon-180.png` | Home Screen icon |
@@ -80,9 +81,9 @@ You'll now be on a mostly empty page with setup instructions. Ignore all of it.
    - *If you can't find that link:* go to `https://github.com/YOUR-USERNAME/hal-sheet/upload/main` in your address bar, replacing `YOUR-USERNAME` with your GitHub username.
 2. You'll see a large dashed box that says **Drag files here to add them to your repository**.
 3. Open the `hal-sheet` folder on your computer.
-4. Select the 19 files listed in the table above. (Click the first, then hold **Ctrl** and click each of the others. On a Mac, hold **Cmd**.)
-5. Drag all 19 into the dashed box on the GitHub page.
-6. Wait for all 19 filenames to appear in a list. **Check the count is 19** before continuing.
+4. Select the 20 files listed in the table above. (Click the first, then hold **Ctrl** and click each of the others. On a Mac, hold **Cmd**.)
+5. Drag all 20 into the dashed box on the GitHub page.
+6. Wait for all 20 filenames to appear in a list. **Check the count is 20** before continuing.
 
 ### Step 1.5 — Commit the upload
 
@@ -92,7 +93,7 @@ Scroll down to the box titled **Commit changes**.
 2. Leave **Commit directly to the `main` branch** selected.
 3. Click the green **Commit changes** button.
 
-You should now see all 19 files listed. **Part 1 is done.**
+You should now see all 20 files listed. **Part 1 is done.**
 
 ---
 
@@ -276,11 +277,15 @@ A **carried item's** window shows how many you have and does both directions: ty
 
 **Tapping a name now does the useful thing, not the wiki.** Tap a spell to cast it, a weapon to open its attack roll, an active condition to remove it. The wiki is still one tap away — look for the small `wiki ↗` control next to the name.
 
-**The combat strip stays on one line.** It used to wrap to a second row holding one button, which spends a whole band of a 740px screen on almost nothing. It now measures itself and steps down until it fits: first the spacing, then the type size, then the word under each pip (the colour and the strike-through were already saying open or spent), and only if it still doesn't fit, short labels — "Order 8", "Hit", "Next", "Exit". Nothing that disappears is lost: it's either redundant or still in the control's tooltip. On a landscape iPad the full labels survive; in portrait it falls back to the short ones.
+**The combat strip stays on one line.** Labels are short by default — `R1`, `Order 8`, `Action`, `B/A`, `Reaction`, `Slot`, `Hit`, `My turn`, `Next`, `Exit` — with the long form in each control's tooltip. The pips no longer stack the word OPEN or SPENT above their name: the colour said it already, and the second line of type made every pip twice the height of the buttons beside it. Spent is now the strike-through and the dimmed border, as it is everywhere else. If the row still doesn't fit, it tightens the spacing and then the type, both of which are recoverable.
+
+**Scrolling inside a window** used to snap back to the top on the iPad. Two causes, both fixed: the scroller is now the full-screen overlay rather than a max-height box nested inside it (the shape WebKit handles reliably), and the scroll position now survives a re-render instead of being thrown away every time you tapped something.
+
+**The map takes two fingers.** One finger scrolls the page past it, the way it does over anything else tall; two fingers pan and zoom together. It used to swallow every touch, which meant the only way to get past the map was to fling it around first.
 
 **The turn order runs along the bottom of the combat strip.** Everyone in the fight, in initiative order, each with a portrait — whoever is up is bigger, brighter and in yellow; everyone else is dimmed, and the one immediately after them has a cyan edge. It's a readout, not a control: nothing in it is tappable, because a mis-tap mid-fight that silently changed whose turn it was would be worse than the problem it solved. Correcting the order is what **Turn order** is for. If a fight has too many people for one row, the other portraits shrink in steps until it fits — whoever is up never shrinks.
 
-**Portraits** all come from one image, `tokens.jpg`, in five banded groups: **The party** (Qee, Gill, Dinos, Karlie, Sol), **Faces** (painted portraits for innkeepers and captains), **Adventurers** (rival parties and hired swords), **Kin** (goblins, orcs, lizardfolk, drow, tieflings, beastfolk) and **Monsters** (dragons, undead, things with too many eyes) — 149 in all, searchable by name. Hal is the exception and keeps his own six portraits, which change as he gets hurt.
+**Portraits** come from two images, `tokens.jpg` and `tokens2.jpg`, in eleven banded groups — **The party** (Qee, Gill, Dinos, Karlie, Sol), **Faces**, **Soldiers**, **Adventurers**, **Casters**, **Kin**, **Beasts**, **Familiars**, **Monsters**, **Dragons** and **Undead** — 545 in all, every one named and searchable. (Two files rather than one because WebKit quietly downsamples anything much past five megapixels, which would turn every face to mush on the iPad.) Hal is the exception and keeps his own six portraits, which change as he gets hurt.
 
 A party member's face is set once, from the **Party** panel, and is theirs from then on; anyone named Qee, Gill, Dinos, Karlie or Sol is given theirs automatically. An enemy's is picked on the initiative sheet beside their name, and comes back with them next fight. People on the **People** tab wear faces from the same sheet — tap the portrait on any record to set it.
 
@@ -309,7 +314,7 @@ Whatever you fill in composes down to a single readable line, shown before you s
 ## If something goes wrong
 
 **The sheet is blank or half-broken.**
-One of the `.js` files probably didn't upload. Go to the **Code** tab and confirm all 19 files are listed with sensible sizes (`rules.js` and `app.js` should each be tens of KB, not 0; each portrait should be a few hundred KB, not 0).
+One of the `.js` files probably didn't upload. Go to the **Code** tab and confirm all 20 files are listed with sensible sizes (`rules.js` and `app.js` should each be tens of KB, not 0; each portrait should be a few hundred KB, not 0).
 
 **Changes aren't saving.**
 Check you're not in Safari Private Browsing — it blocks local storage. Open Hal from the Home Screen icon instead.
