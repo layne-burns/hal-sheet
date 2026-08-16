@@ -1343,10 +1343,27 @@ ok("stored state can be replaced",
 console.log("\n=== KEYBOARD SHORTCUTS ===");
 w.localStorage.setItem("hal-briarshade-sheet-v1", snapshot);
 function key(k) { doc.dispatchEvent(new w.KeyboardEvent("keydown", { key: k, bubbles: true })); }
+/* The digits index the tabs in the order they are drawn, groups included,
+   so 3 is Spells now that Followers sits second. Asserted on the tab's
+   own selected state rather than on words in the page — "Save DC" is in
+   the top bar on every tab, which is how this test used to pass no matter
+   which tab it actually landed on. */
+function selectedTab() {
+  const t = $$(".subtab").filter(function (b) { return b.getAttribute("aria-selected") === "true"; })[0];
+  return t ? t.dataset.tab : null;
+}
+key("4");
+eq("key 4 switches to Spells", selectedTab(), "spells");
+ok("and the Spells tab really is showing", /Spellcasting/i.test(text()));
 key("2");
-ok("key 2 switches to Spells", /Save DC/i.test(text()));
+eq("key 2 switches to Effects", selectedTab(), "effects");
+/* Ten tabs, ten digits — 0 sits at the end of the row and means the
+   tenth, the way it does on every other numbered row of keys. */
+key("0");
+eq("key 0 switches to the tenth tab", selectedTab(), "people");
 key("1");
-ok("key 1 switches to Combat", /Attack action/i.test(text()));
+eq("key 1 switches to Combat", selectedTab(), "combat");
+ok("and the Combat tab really is showing", /Attack action/i.test(text()));
 key("d");
 ok("key D opens the damage modal", !!$("#dmg-in"));
 key("Escape");
@@ -1385,6 +1402,248 @@ click($(".lrail .railtab"));
 ok("tapping the Stats tab reopens it", !/leftoff/.test($("#app").innerHTML));
 eq("left expanded state persisted",
    JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).toggles.leftRailCollapsed, false);
+
+console.log("\n=== TABS ARE GROUPED ===");
+click(byAct("tab", { tab: "combat" }));
+eq("three groups, not nine tabs", $$(".tabs > .tab").length, 3);
+eq("group labels", $$(".tabs > .tab").map(function (b) { return b.textContent; }),
+   ["Combat", "Character", "World"]);
+eq("every tab is still reachable in the markup", $$(".subtab").length, 10);
+eq("only the open group's subtabs are shown", $$(".subtabs:not(.hide)").length, 1);
+eq("the shown row is the one holding the open tab",
+   $$(".subtabs:not(.hide) .subtab").map(function (b) { return b.dataset.tab; }),
+   ["combat", "effects", "followers"]);
+ok("groups and tabs share one row", !!$(".tabs .subtabs"));
+/* Going into a group and back out should return you where you were,
+   not to the front of it. */
+click(byAct("tab", { tab: "inventory" }));
+eq("switching tab moves the open group", $(".tabs > .tab[aria-selected=true]").textContent, "Character");
+eq("and remembers it",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).ui.lastTab.self, "inventory");
+click(byAct("tab", { tab: "combat" }));
+const charBtn = $$(".tabs > .tab").filter(function (b) { return b.textContent === "Character"; })[0];
+eq("the group button points back at where you were", charBtn.dataset.go, "inventory");
+click(charBtn);
+eq("and pressing it takes you there",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).ui.tab, "inventory");
+
+console.log("\n=== PEOPLE: NOTHING IS REQUIRED BUT A NAME ===");
+click(byAct("tab", { tab: "people" }));
+ok("the People tab exists", /Who you know/i.test(text()));
+ok("it says so when empty", /Nobody yet/i.test(text()));
+$("#people-new").value = "Gill";
+click(byAct("peopleAdd", { kind: "person" }));
+const people1 = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).people;
+eq("a person is added with only a name", people1.length, 1);
+eq("and the name is what you typed", people1[0].name, "Gill");
+eq("with no fields at all", people1[0].fields.length, 0);
+ok("adding opens the editor", !!$(".card.carded.person"));
+ok("the editor offers labels rather than demanding them", $$(".hintchip").length > 4);
+ok("including an escape from the suggestions", /Something else/.test(text()));
+
+const gid0 = people1[0].id;
+click(byAct("peopleFieldAdd", { id: gid0, k: "Race" }));
+const fk = $('[data-act="peopleField"][data-id="' + gid0 + '"][data-i="0"][data-part="v"]');
+fk.value = "Locathah";
+fk.dispatchEvent(new w.Event("change", { bubbles: true }));
+eq("a detail you added holds what you typed",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).people[0].fields,
+   [{ k: "Race", v: "Locathah" }]);
+click(byAct("peopleStanding", { id: gid0 }));
+eq("standing cycles on tap",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).people[0].standing, "ally");
+click(byAct("peopleEdit", { id: gid0 }));
+ok("Done closes the editor", !$(".card.carded.person"));
+ok("the card shows the label with the value", /Race/.test(text()) && /Locathah/.test(text()));
+
+$("#people-new").value = "The Ashguard";
+click(byAct("peopleAdd", { kind: "group" }));
+const grpId = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).people[1].id;
+eq("a clan is the same shape, different kind",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).people[1].kind, "group");
+click(byAct("peopleEdit", { id: grpId }));
+click(byAct("peopleEdit", { id: gid0 }));
+click(byAct("peopleGroup", { id: gid0, g: grpId }));
+eq("a person can be put in a clan",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).people[0].groups, [grpId]);
+click(byAct("peopleEdit", { id: gid0 }));
+ok("the clan card counts its members", /1 member/.test(text()));
+ok("the person card names the clan they're in", /The Ashguard/.test(text()));
+
+$('[data-act="peopleSearch"]').value = "Locathah";
+$('[data-act="peopleSearch"]').dispatchEvent(new w.Event("change", { bubbles: true }));
+ok("search finds a person by a detail, not just a name", /Gill/.test(text()));
+ok("and hides the ones that don't match", /Nothing matches that/.test(text()));
+click(byAct("peopleSearchClear"));
+ok("clearing search brings everyone back", /The Ashguard/.test(text()));
+
+click(byAct("peopleEdit", { id: grpId }));
+click(byAct("peopleDel", { id: grpId }));
+const afterDel = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).people;
+eq("deleting a clan removes it", afterDel.length, 1);
+eq("and takes the membership with it", afterDel[0].groups, []);
+
+console.log("\n=== FAVOURITES: THE LIST YOU WRITE YOURSELF ===");
+click(byAct("tab", { tab: "combat" }));
+ok("the rail carries a Favourites panel", /Favourites/.test($(".rrail").textContent));
+ok("empty, it says how to fill it", /Tap ☆/.test($(".rrail").textContent));
+eq("nothing is pinned yet", $$(".rrail .fav").length, 0);
+
+ok("a doable card carries a star", !!$('.doable [data-act="favToggle"]'));
+click(byAct("favToggle", { kind: "action", id: "dodge" }));
+eq("pinning writes a pointer, not a copy",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).favourites,
+   [{ kind: "action", id: "dodge" }]);
+eq("and the rail shows it", $$(".rrail .fav").length, 1);
+ok("with a control that opens it", !!$('.rrail .fav [data-act="favUse"][data-id="dodge"]'));
+
+click(byAct("tab", { tab: "spells" }));
+click(byAct("favToggle", { kind: "spell", id: "cureWounds" }));
+click(byAct("tab", { tab: "features" }));
+click(byAct("favToggle", { kind: "feature", id: "layOnHands" }));
+click(byAct("favToggle", { kind: "feature", id: "nimbleness" }));
+eq("spells, actions and features all pin", $$(".rrail .fav").length, 4);
+ok("the rail follows you off the Combat tab", !!$(".rrail .fav.f-spell"));
+eq("every row opens the window rather than firing",
+   $$('.rrail .fav [data-act="favUse"]').length, $$(".rrail .fav").length * 2);
+
+console.log("\n=== FAVOURITES: THE USE WINDOW ===");
+/* Opening must cost nothing — the window is where the question gets
+   asked, not where the answer is assumed. */
+const slotsAtOpen = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).resources.slots["1"].used;
+click($('.rrail .fav.f-spell [data-act="favUse"]'));
+ok("the window opens", /Cure Wounds/.test($("#modal-root").textContent));
+ok("and carries the rules text",
+   /regains 2d8/.test($("#modal-root").textContent));
+eq("opening spends nothing",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).resources.slots["1"].used, slotsAtOpen);
+ok("with a control that pays for it", !!byAct("favCast"));
+click(byAct("favCast", { how: "normal" }));
+eq("casting from the window spends the slot",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).resources.slots["1"].used,
+   slotsAtOpen + 1);
+click(byAct("closeModal"));
+
+/* A passive feature has nothing to spend, so the window is a reader. */
+click($('.rrail .fav.f-feature [data-act="favUse"][data-id="nimbleness"]'));
+ok("a passive favourite opens as a reader", /always on/i.test($("#modal-root").textContent));
+ok("with no cast control at all", !byAct("favCast"));
+click(byAct("closeModal"));
+
+/* The Find Steed case this whole window exists for: a free cast is
+   available, so BOTH prices are offered and neither is assumed. */
+/* Divine Smite has a free cast (Free Smite) and a paid one (a level 1
+   slot), which is exactly the choice the engine used to make for you. */
+click(byAct("tab", { tab: "spells" }));
+click(byAct("favToggle", { kind: "spell", id: "divineSmite" }));
+click($('.rrail .fav [data-act="favUse"][data-id="divineSmite"]'));
+ok("a free cast offers the free price", !!byAct("favCast", { how: "free" }));
+ok("and the paid one beside it", !!byAct("favCast", { how: "paid" }));
+const freeBefore = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).resources.freeSmite;
+const slotsBeforePaid = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).resources.slots["1"].used;
+click(byAct("favCast", { how: "paid" }));
+eq("paying deliberately keeps the free cast",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).resources.freeSmite, freeBefore);
+eq("and spends the slot instead",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).resources.slots["1"].used,
+   slotsBeforePaid + 1);
+click(byAct("closeModal"));
+click($('.rrail .fav [data-act="favUse"][data-id="divineSmite"]'));
+click(byAct("favCast", { how: "free" }));
+eq("and the free price spends the free cast",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).resources.freeSmite, freeBefore - 1);
+click(byAct("closeModal"));
+click(byAct("favToggle", { kind: "spell", id: "divineSmite" }));
+
+/* A summon has questions of its own, and paying here would pay twice. */
+click(byAct("favToggle", { kind: "spell", id: "findFamiliar" }));
+click($('.rrail .fav [data-act="favUse"][data-id="findFamiliar"]'));
+ok("a summon hands off to its picker instead of casting", !!byAct("summonModal"));
+ok("and offers no price of its own", !byAct("favCast"));
+click(byAct("closeModal"));
+click(byAct("favToggle", { kind: "spell", id: "findFamiliar" }));
+
+console.log("\n=== FAVOURITES: CONSUMABLES ===");
+/* Edit lives behind More until it is on, and earlier tests may have left
+   More either way — so ask for the state rather than for a press. */
+function setEdit(on) {
+  if (JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).toggles.editMode === on) return;
+  if (!byAct("editMode")) click(byAct("expand", { id: "moreActions" }));
+  click(byAct("editMode"));
+}
+click(byAct("tab", { tab: "inventory" }));
+setEdit(true);
+click(byAct("addItem"));
+const invN = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).equipment.inventory.length - 1;
+const qtyIn = $('[data-act="editItem"][data-i="' + invN + '"][data-field="qty"]');
+qtyIn.value = "3";
+qtyIn.dispatchEvent(new w.Event("change", { bubbles: true }));
+click(byAct("itemConsumable", { i: String(invN) }));
+setEdit(false);
+const potion = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).equipment.inventory[invN];
+ok("carried gear has a stable id", !!potion.id);
+eq("consumable is a flag on the item", potion.consumable, true);
+ok("a consumable offers Use on its own tab",
+   !!$('[data-act="itemUse"][data-id="' + potion.id + '"]'));
+ok("a non-consumable does not",
+   !$('[data-act="itemUse"][data-id="' +
+      JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).equipment.inventory[0].id + '"]'));
+click(byAct("favToggle", { kind: "item", id: potion.id }));
+/* An item's window does both directions, because you drink potions and
+   you also come back from town with four. */
+click($('.rrail .fav.f-item [data-act="favUse"]'));
+ok("the item window says how many you have", /You have/.test($("#modal-root").textContent));
+ok("it can spend one", !!byAct("favItem", { d: "-1" }));
+ok("and it can add some", !!byAct("favItem", { d: "1" }));
+click(byAct("favItem", { d: "-1" }));
+eq("using a consumable from the window spends one",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).equipment.inventory[invN].qty, 2);
+$("#fav-qty").value = "4";
+click(byAct("favItem", { d: "1" }));
+eq("and buying four adds four",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).equipment.inventory[invN].qty, 6);
+$("#fav-qty").value = "99";
+click(byAct("favItem", { d: "-1" }));
+eq("spending more than you have stops at nothing",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).equipment.inventory[invN].qty, 0);
+click(byAct("closeModal"));
+
+console.log("\n=== FAVOURITES: THE LIST IS YOURS TO ORDER ===");
+click($('.rrail [data-act="favEdit"]'));
+ok("Edit reveals the reorder controls", !!$('.rrail [data-act="favMove"]'));
+const favsBefore = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).favourites
+  .map(function (f) { return f.id; });
+click($('.rrail [data-act="favMove"][data-i="4"][data-d="-1"]'));
+const favsAfter = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).favourites
+  .map(function (f) { return f.id; });
+eq("moving up swaps with the one above it",
+   [favsAfter[3], favsAfter[4]], [favsBefore[4], favsBefore[3]]);
+click($('.rrail [data-act="favToggle"][data-id="nimbleness"]'));
+ok("unpinning from the rail removes it",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).favourites
+     .every(function (f) { return f.id !== "nimbleness"; }));
+
+/* A pin outlives the thing being temporarily unavailable — it says why
+   rather than vanishing, which is the difference between "I unprepared
+   it" and "the app lost it". */
+click(byAct("tab", { tab: "spells" }));
+setEdit(true);
+click(byAct("unprepare", { key: "cureWounds" }));
+setEdit(false);
+ok("an unprepared spell keeps its pin",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).favourites
+     .some(function (f) { return f.id === "cureWounds"; }));
+ok("and says why it can't be cast", /not prepared/.test($(".rrail").textContent));
+ok("with no Cast button while it can't be", !$('.rrail .fav.f-spell [data-act="use"]'));
+
+/* A pointer at something genuinely gone must not survive. */
+click(byAct("tab", { tab: "inventory" }));
+setEdit(true);
+click(byAct("delItem", { i: String(invN) }));
+ok("deleting an item drops its pin",
+   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).favourites
+     .every(function (f) { return f.kind !== "item"; }));
+setEdit(false);
 
 console.log("\n=== PWA WIRING ===");
 ok("manifest linked", !!$('link[rel="manifest"]'));

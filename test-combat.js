@@ -1,5 +1,5 @@
 /* Integration tests for combat.js / combat-rules.js — action economy,
-   casting, effects, creatures, party, turn order, undo, glow, settings.
+   casting, effects, watched effects, party, turn order, undo, glow, settings.
    Run: NODE_PATH=/tmp/node_modules node test-combat.js */
 
 const fs = require("fs");
@@ -61,17 +61,32 @@ function orderName(st, o) {
     const m = st.party.roster.filter(function (x) { return x.id === o.ref.partyId; })[0];
     return m ? m.name : "(removed)";
   }
-  if (o.ref.type === "creature") {
-    const c = st.creatures.filter(function (x) { return x.id === o.ref.creatureId; })[0];
-    return c ? c.name : "(removed)";
-  }
+  if (o.ref.type === "foe") return o.ref.name || "Enemy";
   return "?";
+}
+
+/* Entering combat is now "everyone rolls", so it opens the initiative
+   sheet and commits nothing until you press the button in it. Every
+   place that used to press one button presses two. */
+function enterCombat(rolls) {
+  click(byAct("combatStart"));
+  (rolls || []).forEach(function (pair, i) {
+    const f = byAct("initValue", { i: String(i) });
+    if (f) setVal(f, String(pair));
+  });
+  click(byAct("initCommit"));
 }
 
 console.log("\n=== BOOT WITH COMBAT MODULE ===");
 ok("app still boots", $("#app").innerHTML.length > 2000);
 ok("out-of-combat strip shown", /Out of combat/.test(text()));
 ok("Enter combat button present", !!byAct("combatStart"));
+click(byAct("combatStart"));
+ok("it asks everyone to roll rather than reusing the last order", /Roll for initiative/.test(text()));
+ok("and it offers to add an enemy line", !!byAct("initAddFoe"));
+ok("nothing is committed by opening it", state().combat.active === false);
+click(byAct("closeModal"));
+ok("cancelling leaves you out of combat", state().combat.active === false);
 ok("What you can do now panel renders", /What you can do now/.test(text()));
 ok("Undo button in top bar", !!byAct("undo"));
 /* Settings moved into the More drawer so the bar fits a tablet in two rows.
@@ -205,7 +220,7 @@ ok("Divine Smite offers the free-cast resource",
 
 console.log("\n=== ENTER COMBAT / ACTION ECONOMY ===");
 click(byAct("tab", { tab: "combat" }));
-click(byAct("combatStart"));
+enterCombat();
 let st = state();
 eq("combat active", st.combat.active, true);
 eq("round starts at 1", st.combat.round, 1);
@@ -311,68 +326,117 @@ eq("Shield of Faith expired", st.effects.some(function (e) { return e.name === "
 eq("concentration cleared on expiry", st.toggles.concentrating, false);
 eq("AC back to 16 after expiry", w.eval("CALC.armorClass(S).value"), 16);
 
-console.log("\n=== NATURE'S WRATH -> CREATURE TRACKER ===");
+console.log("\n=== NATURE'S WRATH -> A NOTE ON WHO IT LANDED ON ===");
 click(byAct("combatEnd"));
-click(byAct("combatStart"));
+enterCombat();
 click(byAct("tab", { tab: "combat" }));
 const nwBtn = byAct("use", { kind: "action", id: "naturesWrath" });
 ok("Nature's Wrath is offered (Channel Divinity available)", !!nwBtn);
 click(nwBtn);
 st = state();
 eq("Channel Divinity spent", st.resources.channelDivinity, 1);
-ok("a creature auto-created", st.creatures.length >= 1);
-ok("creature carries the Restrained condition", st.creatures[st.creatures.length - 1].conditions.some(function (c) {
-  return /Nature's Wrath/.test(c.label);
-}));
-eq("condition repeats at end of turn", st.creatures[st.creatures.length - 1].conditions[0].repeat, "endOfTurn");
+/* It used to invent a creature record with an AC column. What it lands
+   is a condition on somebody, and that is a line in the notebook — the
+   name goes in once the DM says who failed. */
+ok("a note is written for what it landed", st.watch.length >= 1);
+const nwNote = st.watch[st.watch.length - 1];
+eq("the note names the spell", nwNote.what, "Channel Divinity: Nature's Wrath");
+function CALC_dc() { return w.eval("CALC.spellSaveDC(S).value"); }
+ok("and carries the repeating save with its DC",
+   new RegExp("DC " + CALC_dc()).test(nwNote.outcome));
+ok("and says when it repeats", /end of each of its turns/.test(nwNote.outcome));
 ok("roll prompt calls out EACH target", /EACH target/.test(text()));
 click(byAct("closeModal"));
 
+console.log("\n=== THE ACTIVE EFFECTS TAB ===");
+click(byAct("tab", { tab: "effects" }));
+ok("the Effects tab exists and shows your own effects", /On you/.test(text()));
+ok("and everyone else's", /Everyone else/.test(text()));
+ok("the note from Nature's Wrath is there", /Nature's Wrath/.test(text()));
+setVal($("#watch-who"), "Enemy mage");
+setVal($("#watch-what"), "Hold Person");
+setVal($("#watch-left"), "3");
+click(byAct("watchAdd"));
+st = state();
+const wid = st.watch[st.watch.length - 1].id;
+eq("a watched effect records who", st.watch[st.watch.length - 1].who, "Enemy mage");
+eq("and what", st.watch[st.watch.length - 1].what, "Hold Person");
+eq("and how long", st.watch[st.watch.length - 1].left, 3);
+eq("in rounds by default", st.watch[st.watch.length - 1].unit, "rounds");
+click(byAct("watchEdit", { id: wid }));
+setVal(byAct("watchField", { id: wid, f: "outcome" }), "Qee is Held");
+click(byAct("watchKind", { id: wid, k: "conc" }));
+st = state();
+const watched = st.watch.filter(function (x) { return x.id === wid; })[0];
+eq("the outcome is what it means, in your own words", watched.outcome, "Qee is Held");
+eq("and concentration is a kind it can be", watched.kind, "conc");
+click(byAct("watchEdit", { id: wid }));
+ok("the card reads as one sentence",
+   /Enemy mage/.test(text()) && /Concentrating on/.test(text()) && /Qee is Held/.test(text()));
+ok("no screen glow for someone else's concentration",
+   !$("#glow-root") || !/glow-conc/.test($("#glow-root").innerHTML));
+
+console.log("\n=== WATCHED CLOCKS TICK WITH THE FIGHT ===");
 click(byAct("tab", { tab: "combat" }));
-ok("creature tracker shows the save DC", new RegExp("DC " + CALC_dc()).test(text()));
-function CALC_dc() { return w.eval("CALC.spellSaveDC(S).value"); }
-const clearBtn = byAct("creatureCondClear", { i: (state().creatures.length - 1) + "", j: "0" });
-ok("Broke free control exists", !!clearBtn);
-click(clearBtn);
-st = state();
-eq("condition cleared after breaking free", st.creatures[st.creatures.length - 1].conditions.length, 0);
+function watchLeft(id) {
+  const e = state().watch.filter(function (x) { return x.id === id; })[0];
+  return e ? e.left : null;
+}
+/* Rounds tick on a lap of the order, not on every turn. */
+const orderLen = state().combat.order.length;
+eq("three rounds to go before anyone moves", watchLeft(wid), 3);
+for (let lap = 0; lap < orderLen; lap++) click(byAct("endTurn"));
+eq("a full lap of the order costs one round", watchLeft(wid), 2);
 
-console.log("\n=== MANUAL CREATURE MANAGEMENT ===");
-click(byAct("creatureAdd"));
-st = state();
-const before = st.creatures.length;
-click(byAct("creatureDel", { i: "0" }));
-eq("creature removed", state().creatures.length, before - 1);
-
-console.log("\n=== CREATURE AC + HIT TRACKING ===");
-click(byAct("creatureAdd"));
-st = state();
-const cIdx = st.creatures.length - 1;
-const acField = byAct("creatureAC", { i: cIdx + "" });
-ok("AC input exists on the creature row", !!acField);
-setVal(acField, "15");
-st = state();
-eq("creature AC saved", st.creatures[cIdx].ac, 15);
-ok("creature not yet marked hit", st.creatures[cIdx].hit === false);
-click(byAct("creatureHit", { i: cIdx + "" }));
-st = state();
-eq("creature hit toggled on", st.creatures[cIdx].hit, true);
-click(byAct("creatureHit", { i: cIdx + "" }));
-eq("creature hit toggled back off", state().creatures[cIdx].hit, false);
-
-console.log("\n=== ATTACK ROLL WIRES INTO THE SELECTED CREATURE ===");
+/* Turns tick every single turn, which is the other thing tables count in. */
+click(byAct("tab", { tab: "effects" }));
+setVal($("#watch-who"), "The lair");
+setVal($("#watch-what"), "erupts");
+setVal($("#watch-left"), "2");
+setVal($("#watch-unit"), "turns");
+click(byAct("watchAdd"));
+const lairId = state().watch[state().watch.length - 1].id;
+eq("the lair counts in turns", state().watch[state().watch.length - 1].unit, "turns");
 click(byAct("tab", { tab: "combat" }));
+click(byAct("endTurn"));
+eq("one turn is one turn off a turn clock", watchLeft(lairId), 1);
+click(byAct("endTurn"));
+eq("and it stops at zero rather than deleting itself", watchLeft(lairId), 0);
+ok("zero shouts", /DUE NOW/.test(text()));
+click(byAct("endTurn"));
+eq("zero is a floor, not a countdown into the negatives", watchLeft(lairId), 0);
+click(byAct("tab", { tab: "effects" }));
+click(byAct("watchDel", { id: lairId }));
+ok("clearing it removes it",
+   state().watch.every(function (x) { return x.id !== lairId; }));
+click(byAct("watchDel", { id: wid }));
+click(byAct("tab", { tab: "combat" }));
+
+console.log("\n=== THE ATTACK ROLL TOTALS, AND THE DM SAYS IF IT LANDS ===");
 function shortswordBtn() { return byAct("attackRoll", { id: "shortsword" }); }
 click(shortswordBtn());
-ok("creature picker appears when creatures exist", !!$("#atk-creature"));
-const lastCreature = state().creatures[state().creatures.length - 1];
-eq("AC autofilled from the selected creature", $("#atk-ac").value, String(lastCreature.ac || ""));
-$("#atk-d20").value = "20";
+ok("no AC field to type a number the character can't know", !$("#atk-ac"));
+ok("and nobody to pick as a target", !$("#atk-creature"));
+setVal($("#atk-d20"), "11");
 click(byAct("attackCheck"));
-ok("natural 20 is an automatic hit", /automatic hit/i.test(text()));
-st = state();
-eq("the selected creature is marked hit after a confirmed hit",
-   st.creatures[st.creatures.length - 1].hit, true);
+const toHit = w.eval("CALC.attackAction(S).rows.filter(function(r){return r.id==='shortsword';})[0].toHit");
+ok("it totals the roll for you", new RegExp(">" + (11 + toHit) + "<").test($("#modal-root").innerHTML));
+ok("and asks whether it landed", !!byAct("attackLanded", { v: "1" }));
+click(byAct("attackLanded", { v: "1" }));
+eq("saying it hit is what arms the smites", state().combat.turn.hitLanded, true);
+click(byAct("closeModal"));
+w.eval("mutate(function (st) { st.combat.turn.hitLanded = false; })");
+click(shortswordBtn());
+setVal($("#atk-d20"), "20");
+click(byAct("attackCheck"));
+ok("a natural 20 still says so", /automatic hit/i.test(text()));
+ok("and marks the crit", /CRIT/.test(text()));
+eq("and needs no asking about whether it landed", state().combat.turn.hitLanded, true);
+click(byAct("closeModal"));
+click(shortswordBtn());
+setVal($("#atk-d20"), "1");
+click(byAct("attackCheck"));
+ok("a natural 1 still says so", /automatic miss/i.test(text()));
 click(byAct("closeModal"));
 
 console.log("\n=== SETTINGS TOGGLE THE ENGINE ===");
@@ -385,7 +449,7 @@ eq("rollPrompts toggled off", st.settings.rollPrompts, false);
 click(byAct("closeModal"));
 
 click(byAct("combatEnd"));
-click(byAct("combatStart"));
+enterCombat();
 click(byAct("tab", { tab: "combat" }));
 click(byAct("logHit"));
 const smiteBtn2 = byAct("use", { kind: "spell", id: "divineSmite" });
@@ -402,7 +466,7 @@ click(byAct("setting", { key: "economyLockout" }));
 st = state();
 eq("economyLockout off", st.settings.economyLockout, false);
 click(byAct("closeModal"));
-click(byAct("combatEnd")); click(byAct("combatStart"));
+click(byAct("combatEnd")); enterCombat();
 click(byAct("tab", { tab: "combat" }));
 /* Spend the action, then try another action-cost item — should NOT block now */
 const dashBtn = byAct("use", { kind: "action", id: "dash" });
@@ -512,19 +576,20 @@ click(byAct("expand", { id: "partyCollapsed" }));
 ok("collapsing Party hides its contents", !byAct("partyAdd"));
 ok("but its header stays, so you can bring it back",
    !!byAct("expand", { id: "partyCollapsed" }));
-ok("collapsing Party leaves the Creatures panel alone", !!byAct("creatureAdd"));
+ok("collapsing Party leaves the effects panel alone",
+   !!byAct("expand", { id: "effectsCollapsed" }));
 click(byAct("expand", { id: "partyCollapsed" }));
 ok("Party comes back", !!byAct("partyAdd"));
-click(byAct("expand", { id: "creaturesCollapsed" }));
-ok("Creatures collapses on its own", !byAct("creatureAdd"));
-ok("Party is unaffected by the Creatures collapse", !!byAct("partyAdd"));
-click(byAct("expand", { id: "creaturesCollapsed" }));
+click(byAct("expand", { id: "effectsCollapsed" }));
+ok("Party is unaffected by the effects collapse", !!byAct("partyAdd"));
+click(byAct("expand", { id: "effectsCollapsed" }));
 
 console.log("\n=== SEED DATA HAS THE NEW FIELDS ===");
 ok("SEED includes settings", !!w.eval("SEED.settings"));
 ok("SEED includes combat block", !!w.eval("SEED.combat"));
 ok("SEED includes effects array", Array.isArray(w.eval("SEED.effects")));
-ok("SEED includes creatures array", Array.isArray(w.eval("SEED.creatures")));
+ok("the creature roster is gone from SEED", w.eval("SEED.creatures") === undefined);
+ok("SEED includes the watch list", Array.isArray(w.eval("SEED.watch")));
 ok("SEED includes a party roster", Array.isArray(w.eval("SEED.party.roster")));
 ok("SEED includes a turn order", Array.isArray(w.eval("SEED.combat.order")));
 
@@ -542,51 +607,77 @@ eq("member marked away", state().party.roster[0].present, false);
 click(byAct("partyPresent", { i: "0" }));
 eq("member marked present again", state().party.roster[0].present, true);
 
-console.log("\n=== TURN ORDER BUILDER ===");
-click(byAct("orderModal"));
-ok("order modal opens", /Turn order/.test(text()));
-ok("Hal is offered as a candidate", /Hal/.test(text()) || new RegExp(w.eval("SEED.identity.name") || "Hal").test(text()));
-click(byAct("orderToggle", { id: "hal" }));
-click(byAct("orderToggle", { id: "p:" + state().party.roster[0].id }));
+console.log("\n=== ROLLING INITIATIVE ===");
+if (byAct("combatEnd")) click(byAct("combatEnd"));
+click(byAct("combatStart"));
+ok("the sheet asks for rolls", /Roll for initiative/.test(text()));
+ok("you are on the list without being added", /Hal Briarshade/.test(text()));
+ok("and so is everyone present", /Gill/.test(text()));
+/* Enemies are one line, not one per body — the table rolls once for the
+   goblins and the sheet holds one entry for them. */
+click(byAct("initAddFoe"));
+setVal(byAct("initName", { i: "2" }), "Goblins");
+setVal(byAct("initValue", { i: "0" }), "9");
+setVal(byAct("initValue", { i: "1" }), "21");
+setVal(byAct("initValue", { i: "2" }), "14");
+ok("nothing is written until you commit", state().combat.active === false);
+click(byAct("initCommit"));
 st = state();
-eq("two combatants in the order", st.combat.order.length, 2);
-ok("Hal is in the order", st.combat.order.some(function (o) { return o.id === "hal"; }));
-ok("Gill is in the order", st.combat.order.some(function (o) { return orderName(st, o) === "Gill"; }));
-ok("order entries don't cache a name field", st.combat.order.every(function (o) { return !("name" in o); }));
-/* Reorder: move the second entry up */
-const secondName = orderName(st, st.combat.order[1]);
-click(byAct("orderMove", { i: "1", d: "-1" }));
-const afterMove = state();
-eq("order after moving entry 1 up", orderName(afterMove, afterMove.combat.order[0]), secondName);
+eq("committing starts the fight", st.combat.active, true);
+eq("at round 1", st.combat.round, 1);
+eq("three in the order", st.combat.order.length, 3);
+eq("sorted highest first",
+   st.combat.order.map(function (o) { return orderName(st, o); }), ["Gill", "Goblins", "Hal Briarshade"]);
+eq("initiative is kept, not just the position",
+   st.combat.order.map(function (o) { return o.initiative; }), [21, 14, 9]);
+eq("the top of the order is up immediately", st.combat.currentId, st.combat.order[0].id);
+ok("order entries don't cache a name field for people who have one",
+   st.combat.order.filter(function (o) { return o.ref.type !== "foe"; })
+     .every(function (o) { return !("name" in o); }));
+eq("a lumped enemy carries its name on the entry itself",
+   st.combat.order.filter(function (o) { return o.ref.type === "foe"; })[0].ref.name, "Goblins");
 
 console.log("\n=== TURN ORDER STAYS LIVE ACROSS A RENAME ===");
+click(byAct("tab", { tab: "combat" }));
 setVal(byAct("partyName", { i: "0" }), "Gilligan");
 const renamed = state();
 ok("the turn order reflects the rename immediately, no stale snapshot",
    renamed.combat.order.some(function (o) { return orderName(renamed, o) === "Gilligan"; }));
-ok("the stale name is gone from the order", !renamed.combat.order.some(function (o) { return orderName(renamed, o) === "Gill"; }));
+ok("the stale name is gone from the order",
+   !renamed.combat.order.some(function (o) { return orderName(renamed, o) === "Gill"; }));
 /* restore the name so later sections that assert on "Gill" still hold */
 setVal(byAct("partyName", { i: "0" }), "Gill");
+
+console.log("\n=== A FRESH FIGHT IS A FRESH SET OF ROLLS ===");
+click(byAct("orderModal"));
+ok("mid-fight the same sheet edits the running order", /Turn order/.test(text()));
+eq("seeded with the numbers already rolled", byAct("initValue", { i: "0" }).value, "21");
+click(byAct("closeModal"));
+click(byAct("combatEnd"));
+click(byAct("combatStart"));
+/* The name is in a field, so it is a value rather than page text. */
+ok("a new fight offers the enemies you named last time",
+   $$('[data-act="initName"]').some(function (f) { return f.value === "Goblins"; }));
+eq("but not their rolls — everyone rolls again",
+   $$('[data-act="initValue"]').filter(function (f) { return f.value !== ""; }).length, 0);
 click(byAct("closeModal"));
 
 console.log("\n=== END TURN ADVANCES THROUGH THE ORDER ===");
-if (byAct("combatEnd")) click(byAct("combatEnd"));
-click(byAct("combatStart"));
+enterCombat([15, 12, 8]);
 st = state();
-const orderNames = st.combat.order.map(function (o) { return o.id; });
-eq("currentId starts null before the first Next Turn", st.combat.currentId, null);
+const orderIds = st.combat.order.map(function (o) { return o.id; });
+eq("the fight opens on whoever rolled highest", st.combat.currentId, orderIds[0]);
 const roundBefore = st.combat.round;
 click(byAct("endTurn"));
 st = state();
-ok("currentId now points at the first entry in the order", orderNames.indexOf(st.combat.currentId) === 0);
-eq("round does not advance on the first Next Turn", st.combat.round, roundBefore);
+eq("Next Turn moves to the second entry", st.combat.currentId, orderIds[1]);
+eq("round does not advance yet", st.combat.round, roundBefore);
+click(byAct("endTurn"));
+eq("and then the third", state().combat.currentId, orderIds[2]);
 click(byAct("endTurn"));
 st = state();
-ok("currentId now points at the second entry", orderNames.indexOf(st.combat.currentId) === 1);
-click(byAct("endTurn"));
-st = state();
-eq("wrapping back to the first entry advances the round", st.combat.round, roundBefore + 1);
-eq("currentId wrapped back to the first entry", orderNames.indexOf(st.combat.currentId), 0);
+eq("wrapping back to the top advances the round", st.combat.round, roundBefore + 1);
+eq("currentId wrapped back to the first entry", st.combat.currentId, orderIds[0]);
 
 console.log("\n=== SKIPPING STRAIGHT TO YOUR OWN TURN ===");
 /* The table runs its own initiative, so the turns between yours go by
@@ -596,10 +687,7 @@ st = state();
 const halIdx = st.combat.order.findIndex(function (o) { return o.ref.type === "hal"; });
 ok("Hal is in this order", halIdx >= 0);
 /* Park the marker on somebody else, then jump. */
-click(byAct("orderModal"));
-click(byAct("closeModal"));
-while (state().combat.currentId === null ||
-       (state().combat.order.find(function (o) { return o.id === state().combat.currentId; }) || {}).ref.type === "hal") {
+while ((state().combat.order.find(function (o) { return o.id === state().combat.currentId; }) || {}).ref.type === "hal") {
   click(byAct("endTurn"));
 }
 const beforeJump = state();
@@ -639,30 +727,25 @@ eq("undo puts the round back", undone.combat.round, roundBeforeDecay);
 eq("undo puts the effect back", undone.effects.find(function (e) { return e.name === "Test aura"; }).rounds, 3);
 w.eval("mutate(function (st) { st.effects = st.effects.filter(function (e) { return e.name !== 'Test aura'; }); })");
 
-console.log("\n=== A NEW ENCOUNTER RESTARTS THE ORDER FROM THE TOP ===");
-ok("currentId is mid-order (not null) before ending this fight", state().combat.currentId !== null);
+console.log("\n=== A NEW ENCOUNTER IS A NEW ORDER, NOT A RESUMED ONE ===");
+ok("somebody is mid-order before this fight ends", state().combat.currentId !== null);
 click(byAct("combatEnd"));
-click(byAct("combatStart"));
+enterCombat([4, 19, 11]);
 st = state();
-eq("the saved order survives to the next fight", st.combat.order.length, 2);
-eq("but currentId resets, so Next Turn starts at the top again", st.combat.currentId, null);
+eq("the new rolls decide the new order",
+   st.combat.order.map(function (o) { return o.initiative; }), [19, 11, 4]);
+eq("and it opens at the top of it, not where the last fight left off",
+   st.combat.currentId, st.combat.order[0].id);
 
-console.log("\n=== REMOVING A CREATURE/PARTY MEMBER DROPS IT FROM THE ORDER ===");
+console.log("\n=== DROPPING SOMEBODY OUT OF THE ORDER ===");
 click(byAct("orderModal"));
-click(byAct("orderClear"));
-st = state();
-eq("order cleared", st.combat.order.length, 0);
-eq("currentId cleared with it", st.combat.currentId, null);
-click(byAct("closeModal"));
-click(byAct("creatureAdd"));
-st = state();
-const pruneCreature = st.creatures[st.creatures.length - 1];
-click(byAct("orderModal"));
-click(byAct("orderToggle", { id: "c:" + pruneCreature.id }));
-eq("creature added to the order", state().combat.order.length, 1);
-click(byAct("closeModal"));
-click(byAct("creatureDel", { i: (state().creatures.length - 1) + "" }));
-eq("deleting the creature also drops it from the order", state().combat.order.length, 0);
+const orderLenBefore = state().combat.order.length;
+click(byAct("initDrop", { i: "0" }));
+click(byAct("initCommit"));
+eq("removing a line removes them from the fight",
+   state().combat.order.length, orderLenBefore - 1);
+ok("and whoever is up is still someone in the order",
+   state().combat.order.some(function (o) { return o.id === state().combat.currentId; }));
 
 console.log("\n=== PARTY STATUS (healthy/bloodied/down, no exact HP tracked) ===");
 st = state();
@@ -861,26 +944,23 @@ click(byAct("damageModal"));
 setVal($("#dmg-in"), "999");
 click(byAct("heal"));
 
-console.log("\n=== SESSION STATS: TOUGHEST AC / HIGHEST DC (BOOKKEEPING, NOT LOGGED) ===");
+console.log("\n=== ROLLING AN ATTACK IS NOT BOOKKEEPING NOISE ===");
 click(byAct("tab", { tab: "combat" }));
 /* Out of combat so attackRoll's own "spend the Action" mutate doesn't
-   fire — isolating just the stat bookkeeping this section is about. */
+   fire — isolating just what a totalled roll costs the log. */
 if (byAct("combatEnd")) click(byAct("combatEnd"));
 const logLenBeforeAttacks = state().session.log.length;
 const histLenBeforeAttacks = JSON.parse(w.localStorage.getItem("hal-briarshade-history-v1") || "[]").length;
-[11, 9, 14].forEach(function (ac) {
+[11, 9, 14].forEach(function (roll) {
   click(byAct("attackRoll", { id: "shortsword" }));
-  setVal($("#atk-d20"), "11");
-  setVal($("#atk-ac"), String(ac));
+  setVal($("#atk-d20"), String(roll));
   click(byAct("attackCheck"));
   click(byAct("closeModal"));
 });
-eq("toughest AC faced recorded across several checks", state().session.stats.highestACFaced, 14);
-eq("stat bookkeeping alone does not add session log lines",
+eq("totalling a roll adds no session log lines",
    state().session.log.length, logLenBeforeAttacks);
-ok("stat bookkeeping alone does not burn undo-history slots either",
+ok("and burns no undo-history slots either",
    JSON.parse(w.localStorage.getItem("hal-briarshade-history-v1") || "[]").length <= histLenBeforeAttacks);
-
 console.log("\n=== END SESSION ARCHIVES AND RESETS THE LOG ===");
 const histCountBefore = state().sessionHistory.length;
 click(byAct("sessionModal"));
@@ -891,7 +971,6 @@ eq("live log reset after ending", st.session.log.length, 0);
 eq("one more entry archived", st.sessionHistory.length, histCountBefore + 1);
 const archived = st.sessionHistory[st.sessionHistory.length - 1];
 ok("archived entry kept its log", archived.log.length > 0);
-eq("archived entry kept the AC stat", archived.stats.highestACFaced, 14);
 eq("archived log opens with Start session", archived.log[0].label, "Start session");
 eq("archived log closes with End session", archived.log[archived.log.length - 1].label, "End session");
 ok("session modal now offers to export the last session", !!byAct("sessionExport"));
@@ -908,14 +987,12 @@ function seedLongOrder() {
     "st.party.roster = [{id:'p1',name:'Gill',status:'healthy',present:true}," +
                        "{id:'p2',name:'Mira',status:'healthy',present:true}," +
                        "{id:'p3',name:'Torv',status:'healthy',present:true}];" +
-    "st.creatures = [{id:'c1',name:'Bugbear',ac:16,hit:false,conditions:[]}," +
-                    "{id:'c2',name:'Goblin',ac:15,hit:false,conditions:[]}];" +
     "st.combat.active = true; st.combat.round = 1;" +
-    "st.combat.order = [{id:'o1',ref:{type:'creature',creatureId:'c1'}}," +
+    "st.combat.order = [{id:'o1',ref:{type:'foe',name:'Bugbear'}}," +
                        "{id:'o2',ref:{type:'party',partyId:'p1'}}," +
                        "{id:'hal',ref:{type:'hal'}}," +
                        "{id:'o3',ref:{type:'party',partyId:'p2'}}," +
-                       "{id:'o4',ref:{type:'creature',creatureId:'c2'}}," +
+                       "{id:'o4',ref:{type:'foe',name:'Goblins'}}," +
                        "{id:'o5',ref:{type:'party',partyId:'p3'}}];" +
     "st.combat.currentId = 'o3';" +
     "st.effects = [{name:'Bless',rounds:10,conc:true,note:'+1d4'}];" +

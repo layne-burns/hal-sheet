@@ -172,63 +172,50 @@ ok("poisoned condition card name is clickable", !!poisonedRow);
 click(poisonedRow);
 ok("clicking the condition name removed it", state().conditions.indexOf("poisoned") === -1);
 
-console.log("\n=== ATTACK ROLL MODAL: HIT/MISS ARITHMETIC ===");
+console.log("\n=== ATTACK ROLL MODAL: THE TOTAL, NOT THE VERDICT ===");
 click(attackBtn());
 ok("attack modal shows the bonus breakdown", /DEX modifier/.test(text()));
+/* No AC field: an armour class is a number the character has no way of
+   knowing, and typing it in was doing the DM's arithmetic for them. The
+   sheet totals the roll; the table says whether it lands. */
+ok("there is no AC field to fill in", !$("#atk-ac"));
 setVal($("#atk-d20"), "14");
-setVal($("#atk-ac"), "16");
 click(byAct("attackCheck"));
-/* Shortsword +5 (DEX+3, prof+2) at level 4; 14+5=19 vs AC16 -> hit by 3 */
-ok("19 vs AC 16 registers as a HIT", /HIT/.test(text()));
-ok("shows the margin", /beats it by 3/.test(text()));
-click(byAct("closeModal"));
-
-click(byAct("attackRoll", { id: "shortsword" }));
-setVal($("#atk-d20"), "8");
-setVal($("#atk-ac"), "16");
-click(byAct("attackCheck"));
-/* 8+5=13 vs AC16 -> miss by 3 */
-ok("13 vs AC 16 registers as a MISS", /MISS/.test(text()));
-ok("shows the shortfall", /short by 3/.test(text()));
+/* Shortsword +5 (DEX+3, prof+2) at level 4; 14+5 = 19 */
+ok("it totals the roll", />19</.test($("#modal-root").innerHTML));
+ok("and shows the arithmetic that got there", /14 on the die/.test(text()));
+ok("then asks the one thing it cannot know", !!byAct("attackLanded", { v: "1" }));
 click(byAct("closeModal"));
 
 console.log("\n=== NAT 1 / NAT 20 (2024: always miss / always hit+crit) ===");
 click(byAct("attackRoll", { id: "shortsword" }));
 setVal($("#atk-d20"), "1");
-setVal($("#atk-ac"), "5"); /* trivially low AC — would hit on the math alone */
 click(byAct("attackCheck"));
-ok("natural 1 is an automatic miss even against a low AC", /MISS/.test(text()));
-ok("explains why", /Natural 1/.test(text()));
+ok("natural 1 says it is an automatic miss", /automatic miss/i.test(text()));
+ok("and stops asking whether it landed", !byAct("attackLanded", { v: "1" }));
 click(byAct("closeModal"));
 
 click(byAct("attackRoll", { id: "shortsword" }));
 setVal($("#atk-d20"), "20");
-setVal($("#atk-ac"), "99"); /* absurdly high AC — would miss on the math alone */
 click(byAct("attackCheck"));
-ok("natural 20 is an automatic hit even against a huge AC", /HIT/.test(text()));
-ok("flags it as a critical", /critical/i.test(text()));
+ok("natural 20 says it is an automatic hit", /automatic hit/i.test(text()));
+ok("flags it as a critical", /CRIT/.test(text()));
 ok("damage section says to roll every die twice", /roll every damage die twice/.test(text()));
+ok("and needs no asking either", !byAct("attackLanded", { v: "1" }));
 click(byAct("closeModal"));
 
-console.log("\n=== ATTACK ROLL WITHOUT AN AC (still useful) ===");
-click(byAct("attackRoll", { id: "shortsword" }));
-setVal($("#atk-d20"), "11");
-click(byAct("attackCheck"));
-ok("shows the total when no AC was given", /Total 16/.test(text()));
-ok("prompts for the AC instead of guessing hit/miss", /Enter the target's AC/.test(text()));
-click(byAct("closeModal"));
-
-console.log("\n=== VEX ARMS ON A HIT ===");
+console.log("\n=== VEX IS A REMINDER, NOT A RECORD ===");
 click(byAct("attackRoll", { id: "shortsword" }));
 setVal($("#atk-d20"), "15");
-setVal($("#atk-ac"), "10");
 click(byAct("attackCheck"));
-ok("Vex offer appears on a hit with an active Vex weapon", /Arm Vex on target/.test(text()));
-click(byAct("armVex", { id: "shortsword" }));
-let st = state();
-ok("a creature now exists", st.creatures.length >= 1);
-eq("Vex is armed on it", st.creatures[st.creatures.length - 1].vex, true);
-
+ok("nothing about Vex until you say it landed",
+   !/until the end of your next turn/.test($("#modal-root").textContent));
+click(byAct("attackLanded", { v: "1" }));
+ok("saying it hit surfaces the Vex rule",
+   /until the end of your next turn/.test($("#modal-root").textContent));
+ok("which is the rule itself, with nobody to pin it on",
+   /Advantage on your next/.test($("#modal-root").textContent));
+click(byAct("closeModal"));
 console.log("\n=== VULNERABILITY / RESISTANCE TOGGLE (annotation, not a fabricated number) ===");
 click(byAct("attackRoll", { id: "shortsword" }));
 click(byAct("attackVuln", { v: "vulnerable" }));
@@ -242,6 +229,7 @@ click(byAct("closeModal"));
 
 console.log("\n=== ATTACKING AUTO-SPENDS THE ACTION ONCE, NEVER BLOCKS A SECOND SWING ===");
 click(byAct("combatStart"));
+click(byAct("initCommit"));
 st = state();
 eq("action not yet spent entering combat", st.combat.turn.action, false);
 click(byAct("attackRoll", { id: "shortsword" }));
@@ -258,7 +246,8 @@ click(byAct("combatEnd"));
 console.log("\n=== SEED / EXPORT SANITY AFTER ALL THIS ===");
 const exported = state();
 ok("export still round-trips as valid JSON", typeof JSON.stringify(exported) === "string");
-ok("creatures array present and well-formed", Array.isArray(exported.creatures));
+ok("watch list present and well-formed", Array.isArray(exported.watch));
+ok("no creature roster survives the migration", exported.creatures === undefined);
 ok("party roster present and well-formed", Array.isArray(exported.party.roster));
 
 console.log("\n" + "=".repeat(46));

@@ -1,5 +1,5 @@
 /* ============================================================
-   COMBAT UI — turn tracker, casting, effects, creatures, party,
+   COMBAT UI — turn tracker, casting, effects, party,
    turn order, undo, roll prompts, settings. Extends app.js.
    Loaded AFTER app.js; merges into ACT and exposes EXT.
    ============================================================ */
@@ -9,12 +9,14 @@ const EXT = {};
 /* ---------- ID / REF HELPERS --------------------------------- */
 let _idSeq = 0;
 function newId(prefix) { _idSeq += 1; return prefix + Date.now() + "_" + _idSeq; }
-/* Turn-order entries use composite ids so Hal/party/creatures can't
-   collide: "hal", "p:<partyId>", "c:<creatureId>". */
-function refFor(id, kind) {
+/* Turn-order entries use composite ids so Hal, party and foes can't
+   collide: "hal", "p:<partyId>", "f:<generated>". A foe's name lives on
+   its ref rather than in a roster somewhere — there is no roster, which
+   is the point. */
+function refFor(id, kind, name) {
   if (kind === "hal") return { type: "hal" };
   if (kind === "party") return { type: "party", partyId: id.slice(2) };
-  if (kind === "creature") return { type: "creature", creatureId: id.slice(2) };
+  if (kind === "foe") return { type: "foe", name: name || "Enemy" };
   return { type: kind };
 }
 
@@ -112,9 +114,18 @@ EXT.combatBar = function () {
   const orderBtn = '<button class="bt cutsm" data-act="orderModal">' +
     (c.order.length ? "Turn order (" + c.order.length + ")" : "Set turn order") + "</button>";
   if (!c.active) {
+    /* "Out of combat" is the absence of news. It used to sit above every
+       tab in the app announcing that nothing was happening — a whole
+       strip of a 740px screen spent saying so on the Calendar. It is a
+       control, not a status, so it lives where you would go looking for
+       it: the Combat tab. The IN-combat strip below still follows you
+       everywhere, because that one IS news. */
+    if (((S.ui && S.ui.tab) || "combat") !== "combat") return "";
+    /* No turn-order button out of combat: entering one now asks for
+       initiative outright, and an order left over from the last fight is
+       not something to curate between fights. */
     return '<div class="strip cut"><span class="lbl">Out of combat</span>' +
       '<button class="bt cutsm pri" data-act="combatStart">Enter combat</button>' +
-      orderBtn +
       (S.effects.length ? '<span class="lbl" style="margin-left:auto">' + S.effects.length +
         " active effect(s) — durations pause outside combat</span>" : "") + "</div>";
   }
@@ -183,22 +194,17 @@ function panelHead(title, count, key) {
   };
 }
 
+/* Yours and everyone else's in one panel, because mid-turn the question
+   is "what is running", not "whose". The full editors live on the
+   Effects tab; this is the read of the same two lists. */
 EXT.effectsPanel = function () {
-  if (!S.effects.length) return "";
-  const head = panelHead("Active effects", S.effects.length, "effectsCollapsed");
+  if (!S.effects.length && !S.watch.length) return "";
+  const total = S.effects.length + S.watch.length;
+  const head = panelHead("Active effects", total, "effectsCollapsed");
   if (head.collapsed) return head.html + "</div>";
   const mods = CALC.activeMods(S);
-  let out = head.html;
-  S.effects.forEach(function (e, i) {
-    const perm = e.rounds == null;
-    out += '<div class="eff' + (e.conc ? " conc" : "") + '">' +
-      '<div class="eh"><span class="en">' + esc(e.name) + "</span>" +
-      (e.conc ? '<span class="tag t-y1">Concentration</span>' : "") +
-      '<span class="emeta">' + (perm ? "until removed" :
-        (e.rounds > 100 ? Math.round(e.rounds / 10) + " min" : e.rounds + " rounds")) + "</span>" +
-      '<button class="bt cutsm dg" data-act="effectEnd" data-i="' + i + '">End</button></div>' +
-      (e.note ? '<div class="etext">' + esc(e.note) + "</div>" : "") + "</div>";
-  });
+  let out = head.html + ownEffectRows();
+
   const applied = [];
   if (mods.ac) applied.push((mods.ac > 0 ? "+" : "") + mods.ac + " AC");
   if (mods.attackFlat) applied.push("+" + mods.attackFlat + " attack");
@@ -208,41 +214,12 @@ EXT.effectsPanel = function () {
   if (applied.length && S.settings.autoApplyEffects) {
     out += '<div class="seqnote">Applied to your numbers: <b>' + esc(applied.join(" · ")) + "</b></div>";
   }
-  return out + "</div>";
-};
 
-/* ---------- CREATURE TRACKER --------------------------------- */
-EXT.creaturesPanel = function () {
-  if (!S.settings.creatureTracker) return "";
-  const head = panelHead("Creatures", S.creatures.length || "none", "creaturesCollapsed");
-  if (head.collapsed) return head.html + "</div>";
-  let out = head.html;
-  if (!S.creatures.length) {
-    out += '<div class="foot" style="margin:0 0 8px">Add who you\'re fighting to track AC, hits, and repeating saves.</div>';
-  }
-  S.creatures.forEach(function (c, i) {
-    out += '<div class="tgt' + (c.hit ? " hit" : "") + '"><div class="eh">' +
-      '<input class="rowname" value="' + esc(c.name) + '" data-act="creatureName" data-i="' + i + '">' +
-      '<input class="acinput" type="number" min="1" placeholder="AC" value="' + (c.ac == null ? "" : c.ac) +
-      '" data-act="creatureAC" data-i="' + i + '">' +
-      '<button class="bt cutsm' + (c.hit ? " pri" : "") + '" data-act="creatureHit" data-i="' + i + '">' +
-      (c.hit ? "Hit" : "No hit yet") + "</button>" +
-      (c.vex ? '<span class="tag t-c1">Vex armed</span>' : "") +
-      '<button class="bt cutsm dg" data-act="creatureDel" data-i="' + i + '">Clear</button></div>';
-    (c.conditions || []).forEach(function (cond, j) {
-      out += '<div class="tcond"><span class="tag t-m3">' + esc(cond.label) + "</span>" +
-        '<span class="emeta">repeats a ' + esc(ABILITY_NAMES[cond.save]) + " save vs DC " + cond.dc +
-        (cond.repeat === "endOfTurn" ? " at the end of each of its turns" : " as an action") + "</span>" +
-        '<button class="bt cutsm" data-act="creatureCondClear" data-i="' + i + '" data-j="' + j +
-        '">Broke free</button></div>';
-    });
-    out += "</div>";
-  });
-  out += '<div class="mrow"><button class="bt cutsm" data-act="creatureAdd">+ Add creature</button></div>';
-  if (S.combat.active && S.creatures.some(function (c) {
-    return (c.conditions || []).some(function (cond) { return cond.repeat === "endOfTurn"; });
-  })) {
-    out += '<div class="seqnote">At the end of each creature\'s turn, it repeats its save. Tap <b>Broke free</b> when one succeeds.</div>';
+  if (S.watch.length) {
+    out += '<div class="cardgrp">Everyone else <span class="cardgrpn">' + S.watch.length + "</span></div>";
+    S.watch.forEach(function (w) { out += watchCard(w, true); });
+    out += '<div class="foot"><button class="bt cutsm" data-act="tab" data-tab="effects">' +
+      "Open the Effects tab to edit these</button></div>";
   }
   return out + "</div>";
 };
@@ -333,6 +310,7 @@ function doableCard(x) {
     '<div class="cardbtns">' +
       '<button class="bt cutsm pri" data-act="use" data-kind="' + x.kind + '" data-id="' + x.id + '">' +
       (x.kind === "spell" ? "Cast" : "Use") + "</button>" +
+      favBtn(x.kind, x.id) +
       wikiBtn(x.slug) +
     "</div>" +
     (open && x.text ? '<div class="carddetail">' + esc(x.text) + "</div>" : "") +
@@ -390,8 +368,7 @@ EXT.settingsModal = function () {
     ["autoApplyEffects", "Auto-apply effects", "Active effects change your displayed AC and attack numbers."],
     ["economyLockout", "Grey out unaffordable", "In combat, dim what you can't pay for. You can still override."],
     ["confirmOverride", "Warn on override", "Ask before spending action economy you've already used."],
-    ["edgeGlow", "Screen edge glow", "Cyan rim while concentrating, red rim below 20% HP."],
-    ["creatureTracker", "Creature tracker", "Track creatures you've affected and their repeating saves."]
+    ["edgeGlow", "Screen edge glow", "Cyan rim while concentrating, red rim below 20% HP."]
   ];
   const scale = (S.settings && S.settings.uiScale) || 100;
   let body = "<h2>Settings</h2><div class=\"msub\">All of these are stored with your sheet.</div>";
@@ -483,32 +460,31 @@ EXT.attackModal = function () {
       attackRiders.map(function (r) { return r.die + " (" + r.from + ")"; }).join(", ") + "</div>";
   }
 
-  const selCreature = S.creatures.filter(function (c) { return c.id === m.creatureId; })[0] || null;
-  const acVal = selCreature && selCreature.ac != null ? selCreature.ac : "";
-  body += '<div class="mrow" style="margin-top:12px">';
-  if (S.creatures.length) {
-    body += '<select id="atk-creature" data-act="attackCreature">' +
-      '<option value="">— pick who you\'re attacking —</option>' +
-      S.creatures.map(function (c) {
-        return '<option value="' + c.id + '"' + (m.creatureId === c.id ? " selected" : "") + ">" +
-          esc(c.name) + (c.ac != null ? " (AC " + c.ac + ")" : "") + "</option>";
-      }).join("") + "</select>";
-  } else {
-    body += '<button class="bt cutsm" data-act="attackAddCreature">+ Add a creature to target</button>';
-  }
-  body += "</div>";
+  /* The roll, and what it came to. No AC field and nobody to point it
+     at: knowing a monster's armour class is a number the character has
+     no way of having, and typing it in turned every swing into a
+     calculation the DM was going to do anyway. You roll, the sheet adds
+     it up, and the DM says whether it lands.
 
-  body += '<div class="mrow">' +
+     What the sheet still owes you is the consequence of it landing —
+     Vex, and whether a smite is available — so it asks, once. */
+  body += '<div class="mrow" style="margin-top:12px">' +
     '<input type="number" id="atk-d20" placeholder="Your d20 result" min="1" max="20">' +
-    '<input type="number" id="atk-ac" placeholder="Target AC (if known)" min="1" value="' + acVal + '">' +
-    '<button class="bt cutsm pri" data-act="attackCheck">Check</button></div>';
+    '<button class="bt cutsm pri" data-act="attackCheck">Total it</button></div>';
 
   if (m.result) {
     const r = m.result;
-    const cls = r.hit ? "hitcard hit" : "hitcard miss";
-    body += '<div class="' + cls + '">' +
-      '<b>' + (r.hit ? "HIT" : "MISS") + "</b>" +
-      '<span>' + esc(r.note) + "</span></div>";
+    body += '<div class="atkbreak" style="margin-top:11px">' +
+      '<div class="tot"><span>' + esc(r.note) + '</span><b>' + r.total + "</b></div></div>";
+    if (r.crit) {
+      body += '<div class="hitcard hit" style="margin-top:9px"><b>CRIT</b>' +
+        "<span>Natural 20 — roll every damage die twice.</span></div>";
+    }
+    if (m.landed == null) {
+      body += '<div class="mrow" style="margin-top:11px"><span class="lbl">Did it land?</span>' +
+        '<button class="bt cutsm pri" data-act="attackLanded" data-v="1">Hit</button>' +
+        '<button class="bt cutsm" data-act="attackLanded" data-v="0">Miss</button></div>';
+    }
   }
 
   const dmgRiders = riders.filter(function (r) { return r.on === "damage"; });
@@ -532,10 +508,9 @@ EXT.attackModal = function () {
   if (vulnNote) body += '<div class="seqnote">' + esc(vulnNote) + "</div>";
   body += "</div>";
 
-  if (m.result && m.result.hit && row.mastery === "vex" && row.masteryActive) {
-    body += '<div class="warnbox" style="margin-top:12px">Vex: on this hit, you may arm Advantage on your ' +
-      'next attack against this target.</div>' +
-      '<button class="bt cutsm pri" data-act="armVex" data-id="' + row.id + '">Arm Vex on target</button>';
+  if (m.landed === true && row.mastery === "vex" && row.masteryActive) {
+    body += '<div class="warnbox" style="margin-top:12px">Vex — you have Advantage on your next ' +
+      'attack roll against that same creature, until the end of your next turn.</div>';
   }
 
   body += '<div class="mfoot"><button class="bt cutsm" data-act="closeModal">Done</button></div>';
@@ -555,57 +530,205 @@ EXT.lohModal = function () {
   return body;
 };
 
-/* ---------- TURN ORDER BUILDER ------------------------------- */
-EXT.orderModal = function () {
-  const order = S.combat.order;
-  function inOrder(id) { return order.some(function (o) { return o.id === id; }); }
-  function candBtn(id, name, ref) {
-    const on = inOrder(id);
-    return '<button class="pick' + (on ? " sel" : "") + '" data-act="orderToggle" data-id="' + id +
-      '" data-ref="' + ref + '"><div class="pn">' + esc(name) +
-      (on ? " — in order" : "") + "</div></button>";
-  }
-  let body = "<h2>Turn order</h2><div class=\"msub\">Pick who's in the fight — Hal, present party members, " +
-    "and any creatures you've added. Reorder and set initiative below.</div>";
-
-  body += '<div class="ph2">Available</div>';
-  body += candBtn("hal", S.identity.name || "Hal", "hal");
+/* Who to offer at the top of a fresh fight: you, whoever is present, and
+   the enemies you named last time — names only, never their rolls, since
+   the whole point is that everyone rolls again. Recycling the names is
+   free and usually right: it is often the same goblins. */
+function freshInitRows() {
+  const rows = [{ key: "hal", kind: "hal", name: S.identity.name || "Hal", init: null }];
   (S.party.roster || []).filter(function (m) { return m.present; }).forEach(function (m) {
-    body += candBtn("p:" + m.id, m.name, "party");
+    rows.push({ key: "p:" + m.id, kind: "party", name: m.name, init: null });
   });
-  if (!(S.party.roster || []).some(function (m) { return m.present; })) {
-    body += '<div class="foot">No party members marked Present. Add them from the Party panel.</div>';
-  }
-  S.creatures.forEach(function (c) {
-    body += candBtn("c:" + c.id, c.name, "creature");
+  S.combat.order.filter(function (o) { return o.ref && o.ref.type === "foe"; })
+    .forEach(function (o) {
+      rows.push({ key: newId("f:"), kind: "foe", name: o.ref.name || "", init: null });
+    });
+  return rows;
+}
+
+/* The order as it actually stands, for editing mid-fight. */
+function rowsFromOrder() {
+  return S.combat.order.map(function (o) {
+    const kind = o.ref ? o.ref.type : "foe";
+    return { key: o.id, kind: kind, name: CALC.combatantName(S, o.ref), init: o.initiative };
   });
-  if (!S.creatures.length) {
-    body += '<div class="foot">No creatures added yet. Add them from the Creatures panel.</div>';
+}
+
+/* ---------- THE FAVOURITES USE WINDOW ------------------------
+   A rail row is 250px wide and can hold one button, which forces every
+   pinned thing into a single unasked question with a single assumed
+   answer. Find Steed is the clean example: the engine prefers the free
+   Faithful Steed cast whenever one is available, so pinning it meant you
+   could never deliberately spend a slot and keep the free one for later.
+   A potion is the other shape of the same problem — you drink them, and
+   you also buy four of them, and the row could only ever do the first.
+
+   So the window asks. It also carries the rules text, which is the other
+   thing the row never had room for and the reason you'd want to look at
+   a pinned spell without casting it. */
+EXT.favUseModal = function () {
+  const m = UI.modal;
+  const castables = CALC.castables(S);
+  const r = favResolve({ kind: m.kind, id: m.id }, castables);
+  if (!r) return "<h2>Not found</h2><div class=\"msub\">This favourite points at something " +
+    "that is no longer on the sheet.</div>" +
+    '<div class="mfoot"><button class="bt cutsm" data-act="closeModal">Close</button></div>';
+
+  let body = "<h2>" + esc(r.name) + "</h2>";
+  if (r.meta) body += '<div class="msub">' + esc(r.meta) + "</div>";
+  /* An item's one-line note is both its meta and all the text it has, so
+     printing both says the same thing twice. */
+  if (r.text && r.text !== r.meta) {
+    body += '<div class="carddetail" style="border:none;padding:0;margin:0 0 4px">' +
+      esc(r.text) + "</div>";
   }
 
-  body += '<div class="ph2" style="margin-top:14px">Order <span class="cnt">' + order.length + "</span></div>";
-  if (!order.length) {
-    body += '<div class="foot">Nobody added yet. Tap names above.</div>';
+  /* --- Something you carry: spend one, or write down the ones you bought --- */
+  if (r.item) {
+    const it = r.item;
+    body += '<div class="ph2" style="margin-top:14px">You have <b class="mono">' + it.qty + "</b></div>";
+    body += '<div class="mrow"><span class="lbl">How many</span>' +
+      '<input type="number" id="fav-qty" min="1" value="1" style="width:84px">' +
+      '<button class="bt cutsm ' + (it.qty > 0 ? "pri" : "dim") + '" data-act="favItem" data-d="-1"' +
+        (it.qty > 0 ? "" : " disabled") + ">Use</button>" +
+      '<button class="bt cutsm" data-act="favItem" data-d="1">Gain</button></div>';
+    if (!it.consumable) {
+      body += '<div class="foot">This isn\'t marked Consumable, so the count is all this changes — ' +
+        "nothing is spent anywhere else. Mark it Consumable on the Inventory tab if it should be.</div>";
+    }
+    body += '<div class="mfoot"><button class="bt cutsm" data-act="closeModal">Done</button></div>';
+    return body;
   }
-  order.forEach(function (o, i) {
-    const isCurrent = S.combat.currentId === o.id;
-    body += '<div class="ordrow' + (isCurrent ? " cur" : "") + '">' +
+
+  /* --- A summon has its own questions, and they come first ---
+     Find Steed and Find Familiar ask what answers before anything is
+     spent, and that picker already knows how to charge for what you
+     chose. Casting one from here would pay twice. */
+  if (r.c && SPELLS[m.id] && SPELLS[m.id].summons) {
+    body += '<div class="foot" style="margin-top:12px">Costs ' +
+      esc(costLabel(r.c.rawCost || r.c.cost)) +
+      (r.c.free ? ", or nothing — you still have the free cast" : "") +
+      ". The picker asks what you're calling before it charges you.</div>";
+    body += '<div class="mfoot">' +
+      '<button class="bt cutsm pri" data-act="summonModal" data-spell="' +
+        esc(SPELLS[m.id].summons) + '">Choose what answers…</button>' +
+      '<button class="bt cutsm" data-act="closeModal">Close</button></div>';
+    return body;
+  }
+
+  /* --- Something you cast or do --- */
+  if (r.c) {
+    const c = r.c;
+    const verb = c.kind === "spell" ? "Cast" : "Use";
+    const afterHit = c.afterHit && S.combat.active && !S.combat.turn.hitLanded;
+
+    body += '<div class="ph2" style="margin-top:14px">What it costs</div>';
+    body += '<div class="mrow">';
+    /* Where a free cast exists, BOTH are offered and neither is assumed.
+       The free one leads because it is usually what you want, but the
+       whole reason this window exists is that sometimes it isn't. */
+    if (c.free) {
+      body += '<button class="bt cutsm pri" data-act="favCast" data-how="free">' +
+        verb + " free — no slot</button>" +
+        '<button class="bt cutsm" data-act="favCast" data-how="paid">' + verb + " with " +
+        esc(costLabel(c.rawCost) || "the usual cost") + "</button>";
+    } else {
+      body += '<button class="bt cutsm ' + (c.affordable && !afterHit ? "pri" : "dim") +
+        '" data-act="favCast" data-how="normal">' + verb + " · " +
+        esc(costLabel(c.cost) || "no cost") + "</button>";
+    }
+    body += "</div>";
+
+    if (afterHit) {
+      body += '<div class="warnbox" style="margin-top:11px">This one waits on a hit — ' +
+        'log one on the combat strip first. You can still use it anyway.</div>';
+    } else if (!c.affordable) {
+      body += '<div class="warnbox" style="margin-top:11px">' +
+        esc((c.reasons || []).join(" · ") || "You can't pay for this right now.") +
+        " You can still use it anyway.</div>";
+    }
+    if (c.effect) {
+      body += '<div class="foot">Leaves <b>' + esc(c.effect.name) + "</b> running" +
+        (c.effect.conc ? ", and takes your concentration" : "") + ".</div>";
+    }
+    body += '<div class="mfoot">' +
+      '<button class="bt cutsm" data-act="favUnpin" data-kind="' + esc(m.kind) +
+        '" data-id="' + esc(m.id) + '">Unpin</button>' +
+      '<button class="bt cutsm" data-act="closeModal">Close</button></div>';
+    return body;
+  }
+
+  /* --- Passive: a feature or feat pinned to be read --- */
+  body += '<div class="foot" style="margin-top:12px">Nothing to spend — this one is always on.</div>';
+  body += '<div class="mfoot">' +
+    '<button class="bt cutsm" data-act="favUnpin" data-kind="' + esc(m.kind) +
+      '" data-id="' + esc(m.id) + '">Unpin</button>' +
+    '<button class="bt cutsm" data-act="closeModal">Close</button></div>';
+  return body;
+};
+
+/* ---------- ROLLING INITIATIVE -------------------------------
+   A fight starts by everyone rolling, so entering combat asks for the
+   numbers rather than assuming last fight's order still means anything.
+   That is what it used to do: enter combat, open the builder, clear the
+   stale rolls, re-add whoever is here now, retype the numbers. Three
+   steps of undoing the last encounter before you could record this one.
+
+   Rows live on the modal, not on the sheet, until you press the button.
+   Nothing here writes to S.combat.order — a fight you started asking
+   about and then thought better of leaves no trace.
+
+   Enemies are one row each, not one per creature. The table lumps their
+   initiative, so "Goblins 14" is the whole of what the sheet needs to
+   know, and typing six goblins in to watch them all act at 14 was never
+   buying anything. */
+EXT.initiativeModal = function () {
+  const m = UI.modal;
+  const editing = !!m.editing;
+  const init = CALC.initiative(S);
+
+  let body = "<h2>" + (editing ? "Turn order" : "Roll for initiative") + "</h2>" +
+    '<div class="msub">' + (editing
+      ? "Adjust the numbers or who is in the fight. Highest goes first."
+      : "Everyone rolls. Type what they got — highest goes first, and anything left blank " +
+        "goes to the back.") + "</div>";
+
+  body += '<div class="ph2">Who is in it</div>';
+  m.rows.forEach(function (r, i) {
+    body += '<div class="ordrow">' +
       '<span class="oi">' + (i + 1) + "</span>" +
-      '<span class="on">' + esc(CALC.combatantName(S, o.ref)) +
-      (isCurrent ? ' <span class="tag t-c1">Current</span>' : "") + "</span>" +
-      '<input type="number" class="oinit" data-act="orderInit" data-i="' + i + '" placeholder="Init" value="' +
-      (o.initiative == null ? "" : o.initiative) + '">' +
-      '<button class="bt cutsm" data-act="orderMove" data-i="' + i + '" data-d="-1"' +
-      (i === 0 ? " disabled" : "") + ">↑</button>" +
-      '<button class="bt cutsm" data-act="orderMove" data-i="' + i + '" data-d="1"' +
-      (i === order.length - 1 ? " disabled" : "") + ">↓</button>" +
-      '<button class="bt cutsm dg" data-act="orderToggle" data-id="' + o.id + '">Remove</button>' +
+      (r.kind === "foe"
+        ? '<input class="on rowname" value="' + esc(r.name) +
+          '" placeholder="Goblins, the ogre…" data-act="initName" data-i="' + i + '">'
+        : '<span class="on">' + esc(r.name) +
+          (r.kind === "hal" ? ' <span class="emeta">' + sign(init.value) + " to the roll</span>" : "") +
+          "</span>") +
+      '<input type="number" class="oinit" data-act="initValue" data-i="' + i +
+        '" placeholder="Roll" value="' + (r.init == null ? "" : r.init) + '">' +
+      '<button class="bt cutsm dg" data-act="initDrop" data-i="' + i + '" title="Not in this fight">×</button>' +
       "</div>";
   });
-  body += '<div class="mrow" style="margin-top:8px">' +
-    '<button class="bt cutsm" data-act="orderSort">Sort by initiative</button>' +
-    '<button class="bt cutsm dg" data-act="orderClear">Clear all</button></div>';
-  body += '<div class="mfoot"><button class="bt cutsm pri" data-act="closeModal">Done</button></div>';
+  if (!m.rows.length) {
+    body += '<div class="foot">Nobody in the fight yet.</div>';
+  }
+
+  body += '<div class="mrow" style="margin-top:9px">' +
+    '<button class="bt cutsm" data-act="initAddFoe">+ Enemy</button>' +
+    '<button class="bt cutsm" data-act="initAddParty">+ Everyone present</button>' +
+    (m.rows.some(function (r) { return r.kind === "hal"; })
+      ? "" : '<button class="bt cutsm" data-act="initAddHal">+ ' + esc(S.identity.name || "Hal") + "</button>") +
+    "</div>";
+
+  const away = (S.party.roster || []).filter(function (x) { return !x.present; }).length;
+  if (away) {
+    body += '<div class="foot">' + away + " party member" + (away === 1 ? " is" : "s are") +
+      " marked Away and not offered. Change that on the Combat tab.</div>";
+  }
+
+  body += '<div class="mfoot">' +
+    '<button class="bt cutsm pri" data-act="initCommit">' +
+      (editing ? "Update order" : "Start the fight") + "</button>" +
+    '<button class="bt cutsm" data-act="closeModal">Cancel</button></div>';
   return body;
 };
 
@@ -613,7 +736,7 @@ EXT.orderModal = function () {
    A lightweight, timestamped event feed — not a structured combat
    log. It piggybacks on the labels every mutate() call already
    carries (see the mutate wrapper above), so casting, attacking,
-   resting, adding creatures, and so on all show up for free once a
+   resting, noting who is affected, and so on all show up for free once a
    session is running. `stats` are a couple of running highs, not a
    full breakdown. */
 function fmtTime(t) { return new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }
@@ -634,7 +757,6 @@ function sessionToMarkdown(s) {
   const sys = S.calendar.system;
   let out = "# Session — " + fmtDate(s.startedAt) + "\n\n";
   out += "*" + fmtTime(s.startedAt) + " to " + fmtTime(s.endedAt) + "*\n\n";
-  if (s.stats.highestACFaced != null) out += "- Toughest AC faced: **" + s.stats.highestACFaced + "**\n";
   if (s.stats.highestDCSet != null) out += "- Highest save DC set: **" + s.stats.highestDCSet + "**\n";
 
   const story = s.log.filter(isNarrative);
@@ -729,7 +851,6 @@ EXT.sessionModal = function () {
   if (s.active) {
     body += '<div class="msub">Started ' + fmtTime(s.startedAt) + " · " + s.log.length + " event(s) logged</div>";
     const stats = [];
-    if (s.stats.highestACFaced != null) stats.push("Toughest AC faced: " + s.stats.highestACFaced);
     if (s.stats.highestDCSet != null) stats.push("Highest save DC set: " + s.stats.highestDCSet);
     if (stats.length) body += '<div class="foot">' + esc(stats.join(" · ")) + "</div>";
     body += '<div class="foot" style="margin-top:2px">In-world it is <b>' +
@@ -770,12 +891,11 @@ EXT.sessionModal = function () {
     body += '<div class="mfoot"><button class="bt cutsm dg" data-act="sessionEnd">End session</button>' +
       '<button class="bt cutsm" data-act="closeModal">Keep playing</button></div>';
   } else {
-    body += '<div class="msub">A lightweight, automatic log of what happens at the table — casts, attacks, rests, and creature/party changes get a timestamped line while a session is running.</div>';
+    body += '<div class="msub">A lightweight, automatic log of what happens at the table — casts, attacks, rests, and party changes get a timestamped line while a session is running.</div>';
     body += '<div class="mrow"><button class="bt cutsm pri" data-act="preSessionModal">Start session</button></div>';
     if (S.sessionHistory.length) {
       const last = S.sessionHistory[S.sessionHistory.length - 1];
       const lastStats = [];
-      if (last.stats.highestACFaced != null) lastStats.push("toughest AC faced " + last.stats.highestACFaced);
       if (last.stats.highestDCSet != null) lastStats.push("highest DC set " + last.stats.highestDCSet);
       body += '<div class="ph2" style="margin-top:10px">Last session</div>';
       body += '<div class="foot">' + fmtDate(last.startedAt) + " · " + last.log.length + " events" +
@@ -849,15 +969,12 @@ EXT.preSessionModal = function () {
 Object.assign(ACT, {
 
   /* ---- Combat mode ---- */
+  /* Entering combat is rolling initiative, so it opens the roll sheet
+     rather than silently reusing whatever order the last fight left
+     behind. Nothing is written until you press the button in it. */
   combatStart() {
-    mutate(function (st) {
-      st.combat.active = true; st.combat.round = 1;
-      st.combat.turn = CALC.freshTurn();
-      /* A saved order (party/creatures) carries over between fights, but
-         who was "current" doesn't — a new encounter starts back at the
-         top of the order instead of resuming mid-list from last time. */
-      st.combat.currentId = null;
-    }, "Enter combat");
+    UI.modal = { type: "initiative", editing: false, rows: freshInitRows() };
+    render();
   },
   combatEnd() {
     mutate(function (st) {
@@ -876,8 +993,13 @@ Object.assign(ACT, {
       return e.rounds != null && e.rounds - 1 <= 0;
     }).map(function (e) { return { name: e.name, conc: e.conc }; }) : [];
 
+    /* One turn has gone by, and a round has if the order wrapped — which
+       is exactly the pair the watched clocks tick on. */
+    const due = watchDueAfter(S, 1, peek.wraps ? 1 : 0);
+
     mutate(function (st) {
       st.combat.currentId = peek.nextId;
+      tickWatch(st, 1, peek.wraps ? 1 : 0);
       if (peek.wraps) {
         st.combat.round += 1;
         st.effects = st.effects.filter(function (e) {
@@ -895,9 +1017,16 @@ Object.assign(ACT, {
       }
     }, S.combat.order.length ? "Next turn" : "End turn");
 
-    if (expired.length) {
-      UI.alert = { info: "Expired: " + expired.map(function (e) { return e.name; }).join(", ") };
+    const notes = [];
+    if (expired.length) notes.push("Expired: " + expired.map(function (e) { return e.name; }).join(", "));
+    /* A clock reaching zero is the loudest thing that can happen on a
+       turn advance, so it leads. */
+    if (due.length) {
+      notes.unshift("DUE NOW — " + due.map(function (w) {
+        return [w.who, w.what].filter(Boolean).join(": ");
+      }).join(" · "));
     }
+    if (notes.length) UI.alert = { info: notes.join(" · ") };
     render();
   },
   /* Skip straight to your next turn, however many other people's turns
@@ -918,8 +1047,14 @@ Object.assign(ACT, {
       return e.rounds != null && e.rounds - plan.wraps <= 0;
     }).map(function (e) { return { name: e.name, conc: e.conc }; }) : [];
 
+    /* A lap costs what walking it the slow way costs, and that has to
+       include the watched clocks or a countdown would survive being
+       skipped past. */
+    const due = watchDueAfter(S, plan.steps, plan.wraps);
+
     mutate(function (st) {
       st.combat.currentId = plan.nextId;
+      tickWatch(st, plan.steps, plan.wraps);
       if (plan.wraps) {
         st.combat.round += plan.wraps;
         st.effects = st.effects.filter(function (e) {
@@ -938,6 +1073,11 @@ Object.assign(ACT, {
 
     const skipped = plan.steps - 1;
     const notes = [];
+    if (due.length) {
+      notes.push("DUE NOW — " + due.map(function (w) {
+        return [w.who, w.what].filter(Boolean).join(": ");
+      }).join(" · "));
+    }
     if (skipped > 0) notes.push("Skipped " + skipped + " turn" + (skipped === 1 ? "" : "s"));
     if (expired.length) notes.push("expired: " + expired.map(function (e) { return e.name; }).join(", "));
     if (notes.length) UI.alert = { info: notes.join(" · ") };
@@ -1002,42 +1142,6 @@ Object.assign(ACT, {
     }, "End effect");
   },
 
-  /* ---- Creatures ---- */
-  creatureAdd() {
-    mutate(function (st) {
-      st.creatures.push({ id: newId("c"), name: "Enemy " + (st.creatures.length + 1),
-        ac: null, hit: false, conditions: [], vex: false });
-    }, "Add creature");
-  },
-  creatureDel(el) {
-    const i = parseInt(el.dataset.i, 10);
-    mutate(function (st) {
-      const removed = st.creatures[i];
-      st.creatures.splice(i, 1);
-      if (removed) {
-        const oid = "c:" + removed.id;
-        st.combat.order = st.combat.order.filter(function (o) { return o.id !== oid; });
-      }
-    }, "Clear creature");
-  },
-  creatureName(el) {
-    const i = parseInt(el.dataset.i, 10), v = el.value;
-    mutate(function (st) { st.creatures[i].name = v; });
-  },
-  creatureAC(el) {
-    const i = parseInt(el.dataset.i, 10);
-    const v = el.value === "" ? null : parseInt(el.value, 10);
-    mutate(function (st) { st.creatures[i].ac = (v == null || isNaN(v)) ? null : v; });
-  },
-  creatureHit(el) {
-    const i = parseInt(el.dataset.i, 10);
-    mutate(function (st) { st.creatures[i].hit = !st.creatures[i].hit; }, "Toggle hit");
-  },
-  creatureCondClear(el) {
-    const i = parseInt(el.dataset.i, 10), j = parseInt(el.dataset.j, 10);
-    mutate(function (st) { st.creatures[i].conditions.splice(j, 1); }, "Creature broke free");
-  },
-
   /* ---- Party roster ---- */
   partyAdd() {
     mutate(function (st) {
@@ -1081,59 +1185,116 @@ Object.assign(ACT, {
   },
 
   /* ---- Turn order ---- */
-  orderModal() { UI.modal = { type: "order" }; render(); },
-  orderToggle(el) {
-    const id = el.dataset.id;
-    /* Figure out the label (and the ref for a new entry) from the
-       CURRENT state before mutating — the label argument to mutate()
-       is evaluated at call time, so building it inside the mutator
-       function itself would be too late. */
-    const idx = S.combat.order.findIndex(function (o) { return o.id === id; });
-    let label;
-    if (idx >= 0) {
-      label = "Remove " + CALC.combatantName(S, S.combat.order[idx].ref) + " from turn order";
-    } else {
-      const ref = refFor(id, el.dataset.ref);
-      label = "Add " + CALC.combatantName(S, ref) + " to turn order";
-    }
-    mutate(function (st) {
-      const i = st.combat.order.findIndex(function (o) { return o.id === id; });
-      if (i >= 0) {
-        st.combat.order.splice(i, 1);
-      } else {
-        st.combat.order.push({ id: id, ref: refFor(id, el.dataset.ref), initiative: null });
-      }
-    }, label);
+  /* Mid-fight edits go through the same sheet, seeded from the order
+     that is actually running so the numbers you already typed are
+     there to correct rather than to retype. */
+  orderModal() {
+    UI.modal = { type: "initiative", editing: true, rows: rowsFromOrder() };
     render();
   },
-  orderMove(el) {
-    const i = parseInt(el.dataset.i, 10), d = parseInt(el.dataset.d, 10);
-    mutate(function (st) {
-      const j = i + d;
-      if (j < 0 || j >= st.combat.order.length) return;
-      const tmp = st.combat.order[i];
-      st.combat.order[i] = st.combat.order[j];
-      st.combat.order[j] = tmp;
-    }, "Reorder turn order");
+  /* ---- The favourites use window ----
+     Opening it is free and spends nothing; every button inside goes
+     through the same doUse() the rest of the app does. */
+  favUse(el) {
+    UI.modal = { type: "favUse", kind: el.dataset.kind, id: el.dataset.id };
     render();
   },
-  orderInit(el) {
-    const i = parseInt(el.dataset.i, 10);
+  favUnpin(el) {
+    UI.modal = null;
+    ACT.favToggle(el);
+  },
+  /* "how" is which price you chose. `rawCost` is what the thing costs
+     before any free cast is applied, and it rides on the castable entry
+     already, so paying deliberately is a substitution rather than a
+     second cost calculation that could drift from the first. */
+  favCast(el) {
+    const m = UI.modal;
+    const r = favResolve({ kind: m.kind, id: m.id }, CALC.castables(S));
+    if (!r || !r.c) return;
+    const how = el.dataset.how;
+    const item = how === "paid"
+      ? Object.assign({}, r.c, { cost: r.c.rawCost || r.c.cost, free: false })
+      : r.c;
+    UI.modal = null;
+    doUse(item, true);
+  },
+  favItem(el) {
+    const m = UI.modal;
+    const d = parseInt(el.dataset.d, 10);
+    const box = document.getElementById("fav-qty");
+    const n = Math.max(1, parseInt(box ? box.value : "1", 10) || 1);
+    const id = m.id;
+    const it = S.equipment.inventory.filter(function (x) { return x.id === id; })[0];
+    if (!it) return;
+    const delta = d > 0 ? n : -Math.min(n, it.qty);
+    if (!delta) return;
+    mutate(function (st) {
+      const x = st.equipment.inventory.filter(function (y) { return y.id === id; })[0];
+      if (x) x.qty = Math.max(0, x.qty + delta);
+    }, (delta > 0 ? "Gained " : "Used ") + Math.abs(delta) + " × " + it.name);
+    render();
+  },
+
+  /* ---- Rolling initiative ----
+     All of these edit the modal's own rows. Only initCommit touches the
+     sheet, which is what makes Cancel mean cancel. */
+  initName(el) { UI.modal.rows[parseInt(el.dataset.i, 10)].name = el.value; },
+  initValue(el) {
     const v = el.value === "" ? null : parseInt(el.value, 10);
-    mutate(function (st) { st.combat.order[i].initiative = (v == null || isNaN(v)) ? null : v; });
+    UI.modal.rows[parseInt(el.dataset.i, 10)].init = (v == null || isNaN(v)) ? null : v;
   },
-  orderSort() {
-    mutate(function (st) {
-      st.combat.order.sort(function (a, b) {
-        const av = a.initiative == null ? -Infinity : a.initiative;
-        const bv = b.initiative == null ? -Infinity : b.initiative;
-        return bv - av;
-      });
-    }, "Sort turn order");
+  initDrop(el) { UI.modal.rows.splice(parseInt(el.dataset.i, 10), 1); render(); },
+  initAddFoe() {
+    UI.modal.rows.push({ key: newId("f:"), kind: "foe", name: "", init: null });
     render();
   },
-  orderClear() {
-    mutate(function (st) { st.combat.order = []; st.combat.currentId = null; }, "Clear turn order");
+  initAddHal() {
+    UI.modal.rows.unshift({ key: "hal", kind: "hal", name: S.identity.name || "Hal", init: null });
+    render();
+  },
+  initAddParty() {
+    const have = {};
+    UI.modal.rows.forEach(function (r) { have[r.key] = true; });
+    (S.party.roster || []).filter(function (m) { return m.present; }).forEach(function (m) {
+      if (!have["p:" + m.id]) {
+        UI.modal.rows.push({ key: "p:" + m.id, kind: "party", name: m.name, init: null });
+      }
+    });
+    render();
+  },
+  /* The one write. Sorts by the roll, highest first; a blank goes to the
+     back, because "we never got their number" is not "they went first".
+     Ties keep the order they were typed in, which is the order you heard
+     them called out. */
+  initCommit() {
+    const rows = UI.modal.rows.filter(function (r) {
+      return r.kind !== "foe" || r.name.trim() !== "";
+    });
+    if (!rows.length) { UI.modal.err = true; render(); return; }
+    const sorted = rows.slice().sort(function (a, b) {
+      const av = a.init == null ? -Infinity : a.init;
+      const bv = b.init == null ? -Infinity : b.init;
+      return bv - av;
+    });
+    const order = sorted.map(function (r) {
+      return { id: r.key, initiative: r.init,
+               ref: refFor(r.key, r.kind, r.name.trim()) };
+    });
+    const editing = !!UI.modal.editing;
+    mutate(function (st) {
+      st.combat.order = order;
+      /* Mid-fight, whoever's turn it is keeps it if they're still in the
+         order; otherwise — and always at the start of a fight — the top
+         of the order is up. */
+      const keep = editing && order.some(function (o) { return o.id === st.combat.currentId; });
+      if (!keep) st.combat.currentId = order.length ? order[0].id : null;
+      if (!editing) {
+        st.combat.active = true;
+        st.combat.round = 1;
+        st.combat.turn = CALC.freshTurn();
+      }
+    }, editing ? "Update turn order" : "Roll initiative");
+    UI.modal = null;
     render();
   },
 
@@ -1146,90 +1307,48 @@ Object.assign(ACT, {
     if (S.combat.active && !S.combat.turn.action) {
       mutate(function (st) { st.combat.turn.action = true; }, "Attack action");
     }
-    /* Default to whichever creature was added or picked most recently. */
-    const defaultCreature = S.creatures.length ? S.creatures[S.creatures.length - 1].id : null;
-    UI.modal = { type: "attack", id: id, result: null, vuln: "normal", creatureId: defaultCreature };
-    render();
-  },
-  attackCreature(el) {
-    UI.modal.creatureId = el.value || null;
-    render();
-  },
-  attackAddCreature() {
-    mutate(function (st) {
-      st.creatures.push({ id: newId("c"), name: "Enemy " + (st.creatures.length + 1),
-        ac: null, hit: false, conditions: [], vex: false });
-    }, "Add creature");
-    UI.modal.creatureId = S.creatures[S.creatures.length - 1].id;
+    UI.modal = { type: "attack", id: id, result: null, vuln: "normal", landed: null };
     render();
   },
   attackCheck() {
     const d20 = parseInt(document.getElementById("atk-d20").value, 10);
-    const ac = parseInt(document.getElementById("atk-ac").value, 10);
     if (!d20 || d20 < 1 || d20 > 20) {
-      UI.modal.result = { hit: false, crit: false, note: "Enter your d20 result, 1 through 20." };
+      UI.modal.result = { total: 0, crit: false, note: "Enter your d20 result, 1 through 20." };
       render(); return;
     }
     const a = CALC.attackAction(S);
     const row = a.rows.filter(function (r) { return r.id === UI.modal.id; })[0];
     const total = d20 + row.toHit;
-    const nat20 = d20 === 20, nat1 = d20 === 1;
-    let hit, note, crit = nat20;
-    if (nat1) { hit = false; note = "Natural 1 — automatic miss, regardless of AC."; }
-    else if (nat20) { hit = true; note = "Natural 20 — automatic hit and a critical."; }
-    else if (ac) { hit = total >= ac; note = "Total " + total + " vs AC " + ac +
-        (hit ? " — beats it by " + (total - ac) : " — short by " + (ac - total)); }
-    else { hit = null; note = "Total " + total + ". Enter the target's AC to compare."; }
-    UI.modal.result = { hit: hit, crit: crit, note: note };
-    /* A confirmed hit marks the selected creature, so the Creatures
-       panel shows who's already been hit this fight. */
-    if (hit === true && UI.modal.creatureId) {
-      const cid = UI.modal.creatureId;
-      const c0 = S.creatures.filter(function (x) { return x.id === cid; })[0];
-      mutate(function (st) {
-        const c = st.creatures.filter(function (x) { return x.id === cid; })[0];
-        if (c) c.hit = true;
-      }, c0 ? "Mark hit: " + c0.name : "Mark hit");
+    /* Natural 1 and 20 still mean something without an AC to compare
+       against — one cannot land whatever the total says, the other
+       always does and doubles the dice. */
+    const note = d20 === 1 ? "Natural 1 — an automatic miss"
+      : d20 === 20 ? "Natural 20 — an automatic hit"
+      : d20 + " on the die " + sign(row.toHit);
+    UI.modal.result = { total: total, crit: d20 === 20, note: note };
+    if (d20 === 1) UI.modal.landed = false;
+    if (d20 === 20) { UI.modal.landed = true; ACT.attackLanded({ dataset: { v: "1" } }); return; }
+    render();
+  },
+  /* The DM answers this, not the sheet. It matters because a landed hit
+     is what makes a smite available, and Vex arms off it too. */
+  attackLanded(el) {
+    const hit = el.dataset.v === "1";
+    UI.modal.landed = hit;
+    if (hit && !S.combat.turn.hitLanded) {
+      mutate(function (st) { st.combat.turn.hitLanded = true; }, "Hit landed");
     }
-    /* Session stat: the toughest AC you attacked into this session. This
-       is pure bookkeeping, not a player action — it goes through the
-       BASE mutate (bypassing the undo/session-log wrapper) so a long
-       string of attack rolls doesn't crowd real actions out of the
-       20-entry undo ring or spam the log with entries that just say
-       "Change". */
-    if (ac && S.session.active) {
-      _mutate(function (st) {
-        if (st.session.stats.highestACFaced == null || ac > st.session.stats.highestACFaced) {
-          st.session.stats.highestACFaced = ac;
-        }
-      });
+    if (hit && S.settings.rollPrompts) {
+      const smites = CALC.castables(S).filter(function (x) { return x.afterHit && x.affordable; });
+      if (smites.length) {
+        UI.alert = { info: "Hit landed. Smites available: " +
+          smites.map(function (x) { return x.name; }).join(", ") + " — Bonus Action, after the hit." };
+      }
     }
     render();
   },
   attackVuln(el) {
     UI.modal.vuln = el.dataset.v;
-    render();
-  },
-  armVex(el) {
-    const id = el.dataset.id;
-    const preselected = UI.modal && UI.modal.creatureId;
-    const pre = preselected ? S.creatures.filter(function (x) { return x.id === preselected; })[0] : null;
-    /* Figure out (before mutating) what the vexed creature will be
-       named, whether it's an existing pick or the "Enemy 1" that's
-       about to get auto-created — so the label is meaningful either way. */
-    const vexName = pre ? pre.name : (S.creatures.length ? S.creatures[S.creatures.length - 1].name : "Enemy 1");
-    mutate(function (st) {
-      let c = preselected ? st.creatures.filter(function (x) { return x.id === preselected; })[0] : null;
-      if (!c) {
-        if (!st.creatures.length) {
-          st.creatures.push({ id: newId("c"), name: "Enemy 1", ac: null, hit: false, conditions: [], vex: false });
-        }
-        c = st.creatures[st.creatures.length - 1];
-      }
-      c.vex = true;
-    }, "Arm Vex: " + vexName);
-    UI.alert = { info: "Vex armed on " + vexName + " — Advantage on your next attack against it." };
-    UI.modal = null;
     render();
   },
 
@@ -1284,7 +1403,7 @@ Object.assign(ACT, {
       st.session.active = true;
       st.session.startedAt = Date.now();
       st.session.log = [];
-      st.session.stats = { highestACFaced: null, highestDCSet: null };
+      st.session.stats = { highestDCSet: null };
     }, "Start session");
     UI.modal = null;
     render();
@@ -1306,7 +1425,7 @@ Object.assign(ACT, {
       st.session.active = false;
       st.session.startedAt = null;
       st.session.log = [];
-      st.session.stats = { highestACFaced: null, highestDCSet: null };
+      st.session.stats = { highestDCSet: null };
     }, "End session");
     UI.modal = { type: "session" };
     render();
@@ -1472,16 +1591,18 @@ function doUse(item, overridden) {
         mods: item.effect.mods || null, note: item.effect.note || ""
       });
     }
-    /* Apply a tracked condition to a creature */
-    if (item.applyToTarget && st.settings.creatureTracker) {
+    /* Something you just landed on someone else. It used to become a
+       condition on a tracked creature; with the roster gone it becomes
+       what it always really was — a line in the notebook of what is
+       running on whom, which you fill in with the name once the DM says
+       who failed. */
+    if (item.applyToTarget) {
       const dc = CALC.spellSaveDC(st).value;
-      if (!st.creatures.length) {
-        st.creatures.push({ id: newId("c"), name: "Enemy 1", ac: null, hit: false, conditions: [], vex: false });
-      }
-      st.creatures[st.creatures.length - 1].conditions.push({
-        label: item.applyToTarget.label, save: item.applyToTarget.save,
-        dc: dc, repeat: item.applyToTarget.repeat
-      });
+      st.watch.push({ id: uid("w"), who: "", what: item.name, kind: "effect",
+        outcome: item.applyToTarget.label + " — repeats a " +
+          ABILITY_NAMES[item.applyToTarget.save] + " save vs DC " + dc +
+          (item.applyToTarget.repeat === "endOfTurn" ? " at the end of each of its turns" : " as an action"),
+        left: null, unit: "rounds", note: "" });
     }
   }, (item.kind === "spell" ? "Cast " : "Use ") + item.name);
 
@@ -1533,14 +1654,15 @@ render = function () {
      so a later throw in the glow/bar/panel steps below can never leave a
      half-open modal shell on screen with no content and no way to close it. */
   const root = document.getElementById("modal-root");
-  if (UI.modal && ["roll", "override", "settings", "loh", "history", "attack", "order", "session", "preSession"].indexOf(UI.modal.type) >= 0) {
+  if (UI.modal && ["roll", "override", "settings", "loh", "history", "attack", "initiative", "favUse", "session", "preSession"].indexOf(UI.modal.type) >= 0) {
     let body = "";
     if (UI.modal.type === "roll") body = EXT.rollModal();
     else if (UI.modal.type === "override") body = EXT.overrideModal();
     else if (UI.modal.type === "settings") body = EXT.settingsModal();
     else if (UI.modal.type === "loh") body = EXT.lohModal();
     else if (UI.modal.type === "attack") body = EXT.attackModal();
-    else if (UI.modal.type === "order") body = EXT.orderModal();
+    else if (UI.modal.type === "initiative") body = EXT.initiativeModal();
+    else if (UI.modal.type === "favUse") body = EXT.favUseModal();
     else if (UI.modal.type === "session") body = EXT.sessionModal();
     else if (UI.modal.type === "preSession") body = EXT.preSessionModal();
     else if (UI.modal.type === "history") {
@@ -1579,7 +1701,7 @@ render = function () {
     if (centre) {
       centre.insertAdjacentHTML("afterbegin", EXT.canDoPanel() + EXT.effectsPanel());
       centre.insertAdjacentHTML("beforeend",
-        EXT.followersPanel() + EXT.partyPanel() + EXT.creaturesPanel());
+        EXT.followersPanel() + EXT.partyPanel());
     }
   } else {
     const centre = app.querySelector(".wrap > div:nth-child(2)");

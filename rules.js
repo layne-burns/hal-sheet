@@ -1171,16 +1171,29 @@ const SEED = {
     weapons: ["shortsword", "scimitar", "handCrossbow"],
     activeMasteries: ["shortsword", "scimitar"],
     weaponBonuses: {},
+    /* `id` is what a favourite points at, so it has to outlive a rename
+       and a reordering — hence a stable key on the record rather than the
+       array index the edit rows use. `consumable` is what separates "spend
+       one" from "you own one": a favourited potion offers Use, a favourited
+       sword doesn't, because nobody wants a sword that can be pressed
+       down to zero. */
     inventory: [
-      { name: "Shortsword", qty: 1, tags: ["melee","damage"], note: "Finesse, Light — Vex" },
-      { name: "Scimitar", qty: 1, tags: ["melee","damage"], note: "Finesse, Light — Nick" },
-      { name: "Hand Crossbow", qty: 1, tags: ["ranged","damage"], note: "30/120 ft, Loading — Vex" },
-      { name: "Scale Mail", qty: 1, tags: ["defense"], note: "AC 14 + DEX (max 2). Disadvantage on Stealth." },
-      { name: "Holy Symbol", qty: 1, tags: ["utility"], note: "Spellcasting focus" },
-      { name: "Cook's Utensils", qty: 1, tags: ["utility"], note: "Proficient" },
-      { name: "Priest's Pack", qty: 1, tags: ["utility"], note: "" },
-      { name: "A shard of metal that doesn't reflect your face", qty: 1, tags: ["utility"],
-        note: "Trinket from before Gill found you" }
+      { id: "i-shortsword", name: "Shortsword", qty: 1, tags: ["melee","damage"],
+        note: "Finesse, Light — Vex", consumable: false },
+      { id: "i-scimitar", name: "Scimitar", qty: 1, tags: ["melee","damage"],
+        note: "Finesse, Light — Nick", consumable: false },
+      { id: "i-handcrossbow", name: "Hand Crossbow", qty: 1, tags: ["ranged","damage"],
+        note: "30/120 ft, Loading — Vex", consumable: false },
+      { id: "i-scalemail", name: "Scale Mail", qty: 1, tags: ["defense"],
+        note: "AC 14 + DEX (max 2). Disadvantage on Stealth.", consumable: false },
+      { id: "i-holysymbol", name: "Holy Symbol", qty: 1, tags: ["utility"],
+        note: "Spellcasting focus", consumable: false },
+      { id: "i-cooksutensils", name: "Cook's Utensils", qty: 1, tags: ["utility"],
+        note: "Proficient", consumable: false },
+      { id: "i-priestspack", name: "Priest's Pack", qty: 1, tags: ["utility"],
+        note: "", consumable: false },
+      { id: "i-shard", name: "A shard of metal that doesn't reflect your face", qty: 1,
+        tags: ["utility"], note: "Trinket from before Gill found you", consumable: false }
     ],
     coins: { cp: 0, sp: 0, ep: 0, gp: 130, pp: 0 }
   },
@@ -1222,6 +1235,30 @@ const SEED = {
      just at session start. Used to build the turn order. */
   party: { roster: [] },
 
+  /* Everyone the campaign has introduced, and every clan, guild or order
+     behind them. Deliberately shapeless: a record is a name plus whatever
+     you happen to know, held as an ordered list of label/value pairs
+     rather than fixed columns, because the usual state of knowledge about
+     an NPC is "a name, a face, and one useful fact". Nothing but the name
+     is ever required, and a field you never fill in never appears.
+
+       { id, kind: "person" | "group", name,
+         standing, status,          how they regard you, and whether
+                                    they're still around
+         fields: [{k,v}],           what you know, in the order you
+                                    learned it
+         groups: [groupId],         which clans/guilds a person belongs to
+         note: "" }                 the long-form remainder
+  */
+  people: [],
+
+  /* The things you actually reach for, pinned to the right column so they
+     are one tap away from any tab. Entries are {kind,id} pointers into
+     the spell list, the action catalogue, your features, your feats or
+     your pack — never copies, so a favourite can't go stale. Order is the
+     player's own; the list is curated, not sorted. */
+  favourites: [],
+
   /* Combat mode — action economy per turn, plus the 2024
      one-spell-slot-per-turn budget, plus an optional turn order.
      order/currentId stay empty for quick solo play; when order is
@@ -1235,21 +1272,36 @@ const SEED = {
   /* Active effects with round countdowns. Numeric mods are applied
      automatically by CALC.activeMods. */
   effects: [],
-  /* Creatures you're fighting: name, AC if known (autofills the attack
-     roll), whether you've hit them yet, conditions with save reminders. */
-  creatures: [],
+
+  /* What everyone ELSE has running. The sheet already shouts when YOU are
+     concentrating; the thing that actually decides a fight is knowing the
+     enemy mage is, and on what, and what breaking it would undo. None of
+     it is derived — the DM says it out loud and you write it down — so
+     the shape is deliberately four plain sentences rather than a model of
+     someone else's character:
+
+       { id, who, what, kind, outcome, left, unit, note }
+
+     "Mage" / "Hold Person" / concentrating / "Qee is Held", with an
+     optional countdown. `unit` is "rounds" or "turns" because both come
+     up — a spell lasts rounds, a lair action fires in so many turns —
+     and `left` ticks down as the fight advances. It stops at zero and
+     stays there rather than deleting itself: a thing that is due NOW is
+     the single most important line on the screen, and vanishing is the
+     one thing it must not do. */
+  watch: [],
 
   /* Session log: a lightweight, labeled, timestamped event feed —
      not a structured combat log. Bookended by Start/End Session. It
      reuses the same short labels the undo history already produces,
-     so there's no separate instrumentation to maintain. `stats` is a
-     couple of running highs (toughest AC you attacked into, highest
-     save DC you set for someone else) — a memory aid, not full math.
+     so there's no separate instrumentation to maintain. `stats` is one
+     running high (the highest save DC you set for someone else) — a
+     memory aid, not full math.
      Ended sessions get archived into sessionHistory (capped) so past
      recaps stick around without the live log growing forever. */
   session: {
     active: false, startedAt: null, log: [],
-    stats: { highestACFaced: null, highestDCSet: null }
+    stats: { highestDCSet: null }
   },
   sessionHistory: [],
 
@@ -1294,7 +1346,6 @@ const SEED = {
     autoApplyEffects: true, /* effects change AC / attack numbers */
     economyLockout: true,   /* grey out what you can't afford */
     edgeGlow: true,         /* concentration and low-HP screen rim */
-    creatureTracker: true,
     confirmOverride: true,  /* warn before spending economy you don't have */
     uiScale: 100            /* percent — whole-UI zoom, not just font */
   },

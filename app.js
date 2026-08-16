@@ -32,9 +32,15 @@ let S = load();
    moved. It never touches S until the gesture ends, because every write
    to S re-renders the page and would yank the map out from under the
    finger doing the dragging. */
+/* `people` is how the People tab is being READ right now — what you have
+   typed into its search box, which standing you have narrowed to, and
+   which records are open for editing. None of it is part of the campaign,
+   so none of it is saved; the records themselves live on S.people. */
 const UI = { prov: null, modal: null, alert: null, filter: [], expanded: {},
              cal: { day: null, year: null },
              map: { zoom: 1, x: 0, y: 0, sel: null, mode: "look", q: "" },
+             people: { q: "", standing: "", edit: {} },
+             watch: { edit: {} },
              drag: null };
 
 function load() {
@@ -68,13 +74,48 @@ function migrate(st) {
   out.combat.order = (st.combat || {}).order || [];
   out.combat.currentId = (st.combat || {}).currentId || null;
   out.effects = st.effects || [];
-  /* "creatures" replaces the earlier "targets" field; tolerate old saves. */
-  out.creatures = st.creatures || st.targets || [];
+  out.watch = st.watch || [];
+
+  /* The creature roster is gone. It carried an AC per enemy, which turned
+     "does that hit?" into a number the character has no way of knowing —
+     and once the AC went, so did the reason to track enemies one at a
+     time, because the table lumps their initiative anyway.
+
+     Anyone who was actually IN a turn order is still in a fight, so they
+     survive the change as a plain named entry; the roster behind them
+     doesn't. Their conditions come across as watch entries, which is
+     where "who is Restrained and until when" now lives. */
+  const oldCreatures = st.creatures || st.targets || [];
+  if (oldCreatures.length) {
+    const byId = {};
+    oldCreatures.forEach(function (c) { byId[c.id] = c; });
+    out.combat.order = out.combat.order.map(function (o) {
+      if (!o.ref || o.ref.type !== "creature") return o;
+      const c = byId[o.ref.creatureId];
+      return { id: o.id, initiative: o.initiative,
+               ref: { type: "foe", name: (c && c.name) || "Enemy" } };
+    });
+    oldCreatures.forEach(function (c) {
+      (c.conditions || []).forEach(function (cond) {
+        out.watch.push({ id: "w-" + c.id + "-" + cond.label, who: c.name, what: cond.label,
+          kind: "effect", outcome: "Repeats a " + cond.save.toUpperCase() + " save vs DC " + cond.dc,
+          left: null, unit: "rounds", note: "" });
+      });
+    });
+  }
+  delete out.creatures;
+  delete out.targets;
+  delete out.settings.creatureTracker;
   out.party = Object.assign({ roster: [] }, st.party || {});
   /* Backfill status on party rosters saved before the status field existed. */
   out.party.roster = (out.party.roster || []).map(function (m) {
     return Object.assign({ status: "healthy" }, m);
   });
+  /* Both arrived after the map did, so an older save simply has neither —
+     start them empty rather than letting Object.assign hand back the
+     seed's arrays by reference. */
+  out.people = st.people || [];
+  out.favourites = st.favourites || [];
   out.session = Object.assign({}, base.session, st.session || {});
   out.session.stats = Object.assign({}, base.session.stats, (st.session || {}).stats || {});
   out.sessionHistory = st.sessionHistory || [];
@@ -213,6 +254,80 @@ function clampState(st) {
     f.tempHP = Math.max(0, f.tempHP || 0);
     return f.hp > 0;
   });
+  /* Carried gear predates having ids, so anything without one is given
+     one here rather than at every call site that might create an item.
+     Boot saves once (see the bottom of this file) so the id a favourite
+     was pinned against is the same id on the next launch. */
+  if (!Array.isArray(st.equipment.inventory)) st.equipment.inventory = [];
+  st.equipment.inventory.forEach(function (it) {
+    if (!it.id) it.id = uid("i");
+  });
+
+  /* People: a record is only ever required to have an id, a kind and a
+     name — everything else is optional by design, so the clamp fills
+     shape rather than content. */
+  if (!Array.isArray(st.people)) st.people = [];
+  const peopleIds = {};
+  st.people.forEach(function (p) {
+    if (!p.id) p.id = uid("p");
+    peopleIds[p.id] = p.kind === "group" ? "group" : "person";
+    p.kind = peopleIds[p.id];
+    p.name = typeof p.name === "string" ? p.name : "";
+    p.standing = PEOPLE_STANDING.indexOf(p.standing) >= 0 ? p.standing : "unknown";
+    p.status = PEOPLE_STATUS.indexOf(p.status) >= 0 ? p.status : "unknown";
+    p.note = typeof p.note === "string" ? p.note : "";
+    p.fields = (Array.isArray(p.fields) ? p.fields : []).map(function (f) {
+      return { k: String((f && f.k) || ""), v: String((f && f.v) || "") };
+    });
+    p.groups = Array.isArray(p.groups) ? p.groups : [];
+  });
+  /* A person can't belong to a clan that has since been deleted, and a
+     clan can't belong to anything — drop both rather than render a chip
+     pointing at nothing. */
+  st.people.forEach(function (p) {
+    p.groups = p.kind === "person"
+      ? p.groups.filter(function (g) { return peopleIds[g] === "group"; })
+      : [];
+  });
+
+  /* A favourite is a pointer, so it lives exactly as long as what it
+     points at. Unprepare a spell and the entry stays — the spell still
+     exists and you may prepare it again — but delete the item and the
+     pin goes with it. */
+  if (!Array.isArray(st.favourites)) st.favourites = [];
+  const favSeen = {};
+  st.favourites = st.favourites.filter(function (f) {
+    if (!f || !f.kind || !f.id) return false;
+    const key = f.kind + ":" + f.id;
+    if (favSeen[key]) return false;
+    favSeen[key] = true;
+    if (f.kind === "spell") return !!SPELLS[f.id];
+    if (f.kind === "feature") return !!FEATURES[f.id];
+    if (f.kind === "feat") return !!FEATS[f.id];
+    if (f.kind === "item") {
+      return st.equipment.inventory.some(function (it) { return it.id === f.id; });
+    }
+    if (f.kind === "action") {
+      return typeof ACTION_CATALOG !== "undefined" &&
+        ACTION_CATALOG.some(function (a) { return a.id === f.id; });
+    }
+    return false;
+  });
+
+  /* Someone else's effect is four sentences and an optional clock, so the
+     clamp fills shape and stops the clock at zero. Zero means "now" and is
+     a state worth sitting in — it is not an expiry. */
+  if (!Array.isArray(st.watch)) st.watch = [];
+  st.watch.forEach(function (e) {
+    if (!e.id) e.id = uid("w");
+    ["who", "what", "outcome", "note"].forEach(function (k) {
+      e[k] = typeof e[k] === "string" ? e[k] : "";
+    });
+    e.kind = WATCH_KINDS.indexOf(e.kind) >= 0 ? e.kind : "effect";
+    e.unit = e.unit === "turns" ? "turns" : "rounds";
+    e.left = (typeof e.left === "number" && isFinite(e.left)) ? Math.max(0, Math.round(e.left)) : null;
+  });
+
   if (!Array.isArray(st.calendar.events)) st.calendar.events = [];
   if (!Array.isArray(st.calendar.acked)) st.calendar.acked = [];
   /* Acknowledgements are write-once bookkeeping — keep the newest and
@@ -316,6 +431,12 @@ function calReminders(st) {
 }
 
 /* ---------- SMALL HELPERS ----------------------------------- */
+/* One id generator for everything the player creates. Time plus a little
+   randomness: two records made in the same millisecond still differ, and
+   the prefix says at a glance what a stray id in a save file belongs to. */
+function uid(prefix) {
+  return prefix + "-" + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36);
+}
 function esc(s) {
   return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
     return { "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c];
@@ -371,7 +492,18 @@ const ACT = {
     mutate(function (st) { st.settings.uiScale = 100; });
   },
 
-  tab(el) { mutate(function (st) { st.ui = st.ui || {}; st.ui.tab = el.dataset.tab; }); },
+  /* Switching tabs also records where you were in that group, so the
+     group button can put you back rather than at the front of it. */
+  tab(el) {
+    const t = el.dataset.tab;
+    mutate(function (st) {
+      st.ui = st.ui || {};
+      st.ui.tab = t;
+      st.ui.lastTab = st.ui.lastTab || {};
+      st.ui.lastTab[tabGroupOf(t).id] = t;
+    });
+  },
+  tabGroup(el) { ACT.tab({ dataset: { tab: el.dataset.go } }); },
 
   /* Wiki is now a deliberate, separate action — never the default
      result of tapping a name. */
@@ -1069,6 +1201,235 @@ const ACT = {
     });
   },
 
+  /* ---- Watching everyone else's effects ----
+     A notebook, so every one of these is one field and a re-render. The
+     only judgement anywhere is that adding with nothing typed does
+     nothing rather than making a blank row. */
+  watchAdd() {
+    function val(id) { const el = document.getElementById(id); return el ? el.value : ""; }
+    const who = val("watch-who").trim(), what = val("watch-what").trim();
+    if (!who && !what) return;
+    const rawLeft = parseInt(val("watch-left"), 10);
+    const id = uid("w");
+    const kind = WATCH_KINDS.indexOf(val("watch-kind")) >= 0 ? val("watch-kind") : "effect";
+    const unit = val("watch-unit") === "turns" ? "turns" : "rounds";
+    const left = isFinite(rawLeft) && rawLeft >= 0 ? rawLeft : null;
+    mutate(function (st) {
+      st.watch.push({ id: id, who: who, what: what, kind: kind, outcome: "",
+                      left: left, unit: unit, note: "" });
+    }, "Noted: " + [who, what].filter(Boolean).join(" — "));
+    ["watch-who", "watch-what", "watch-left"].forEach(function (k) {
+      const el = document.getElementById(k);
+      if (el) el.value = "";
+    });
+    render();
+  },
+  watchEdit(el) {
+    const id = el.dataset.id;
+    if (UI.watch.edit[id]) delete UI.watch.edit[id]; else UI.watch.edit[id] = true;
+    render();
+  },
+  watchDel(el) {
+    const id = el.dataset.id;
+    const gone = S.watch.filter(function (w) { return w.id === id; })[0];
+    mutate(function (st) {
+      st.watch = st.watch.filter(function (w) { return w.id !== id; });
+    }, "Cleared: " + ((gone && (gone.who || gone.what)) || "note"));
+    delete UI.watch.edit[id];
+    render();
+  },
+  watchField(el) {
+    const id = el.dataset.id, f = el.dataset.f, v = el.value;
+    mutate(function (st) {
+      const w = st.watch.filter(function (x) { return x.id === id; })[0];
+      if (w) w[f] = v;
+    });
+  },
+  watchKind(el) {
+    const id = el.dataset.id, k = el.dataset.k;
+    mutate(function (st) {
+      const w = st.watch.filter(function (x) { return x.id === id; })[0];
+      if (w && WATCH_KINDS.indexOf(k) >= 0) w.kind = k;
+    });
+  },
+  watchUnit(el) {
+    const id = el.dataset.id, u = el.value === "turns" ? "turns" : "rounds";
+    mutate(function (st) {
+      const w = st.watch.filter(function (x) { return x.id === id; })[0];
+      if (w) w.unit = u;
+    });
+  },
+  watchLeft(el) {
+    const id = el.dataset.id;
+    const n = el.value === "" ? null : parseInt(el.value, 10);
+    mutate(function (st) {
+      const w = st.watch.filter(function (x) { return x.id === id; })[0];
+      if (w) w.left = (n == null || !isFinite(n)) ? null : Math.max(0, n);
+    });
+  },
+  /* Nudging the clock by hand — and, on an entry that had none, starting
+     one. Time passes outside combat too. */
+  watchClock(el) {
+    const id = el.dataset.id, d = parseInt(el.dataset.d, 10);
+    mutate(function (st) {
+      const w = st.watch.filter(function (x) { return x.id === id; })[0];
+      if (!w) return;
+      w.left = w.left == null ? 1 : Math.max(0, w.left + d);
+    });
+  },
+
+  /* ---- Favourites ----
+     Pinning is a pointer in a list, so all three of these are list
+     surgery. Nothing here can spend a resource; using a favourite goes
+     through the same use() everything else does. */
+  favToggle(el) {
+    const kind = el.dataset.kind, id = el.dataset.id;
+    const i = favIndex(kind, id);
+    mutate(function (st) {
+      if (i >= 0) st.favourites.splice(i, 1);
+      else st.favourites.push({ kind: kind, id: id });
+    });
+  },
+  favEdit() { UI.expanded.favEdit = !UI.expanded.favEdit; render(); },
+  favMove(el) {
+    const i = parseInt(el.dataset.i, 10), d = parseInt(el.dataset.d, 10);
+    mutate(function (st) {
+      const j = i + d;
+      if (i < 0 || j < 0 || i >= st.favourites.length || j >= st.favourites.length) return;
+      const moved = st.favourites.splice(i, 1)[0];
+      st.favourites.splice(j, 0, moved);
+    });
+  },
+
+  /* Spending one of something. Deliberately separate from use(): an item
+     has no action economy and no roll to prompt — it just goes down by
+     one, which is the whole of what "consume" means here. */
+  itemUse(el) {
+    const id = el.dataset.id;
+    const it = S.equipment.inventory.filter(function (x) { return x.id === id; })[0];
+    if (!it || it.qty <= 0) return;
+    mutate(function (st) {
+      const item = st.equipment.inventory.filter(function (x) { return x.id === id; })[0];
+      if (item && item.qty > 0) item.qty -= 1;
+    }, "Used " + it.name);
+  },
+
+  /* ---- People ----
+     Everything here writes one field and re-renders. Adding is the only
+     one that does anything clever, and what it does is open the record it
+     just made, because you added it in order to type into it. */
+  peopleAdd(el) {
+    const kind = el.dataset.kind === "group" ? "group" : "person";
+    const box = document.getElementById("people-new");
+    const name = box ? box.value.trim() : "";
+    const id = uid(kind === "group" ? "g" : "p");
+    mutate(function (st) {
+      st.people.push({ id: id, kind: kind, name: name, standing: "unknown",
+                       status: kind === "group" ? "unknown" : "alive",
+                       fields: [], groups: [], note: "" });
+      logWorld(st, "people:" + id, (kind === "group" ? "Group noted — " : "Person noted — ") +
+        (name || "unnamed"));
+    });
+    /* Straight into the editor, and with the search cleared — a new
+       record that a live filter immediately hides looks like a button
+       that did nothing. */
+    UI.people.edit[id] = true;
+    UI.people.q = "";
+    UI.people.standing = "";
+    render();
+  },
+  peopleEdit(el) {
+    const id = el.dataset.id;
+    if (UI.people.edit[id]) delete UI.people.edit[id];
+    else UI.people.edit[id] = true;
+    render();
+  },
+  peopleDel(el) {
+    const id = el.dataset.id;
+    const gone = personById(id);
+    mutate(function (st) {
+      st.people = st.people.filter(function (p) { return p.id !== id; });
+      /* clampState drops the dangling memberships; this is only the log. */
+      logWorld(st, "peopledel:" + id, "Removed from your people — " +
+        ((gone && gone.name) || id));
+    });
+    delete UI.people.edit[id];
+    render();
+  },
+  peopleName(el) {
+    const id = el.dataset.id, v = el.value;
+    mutate(function (st) {
+      const p = st.people.filter(function (x) { return x.id === id; })[0];
+      if (!p) return;
+      p.name = v;
+      logWorld(st, "people:" + id, (p.kind === "group" ? "Group noted — " : "Person noted — ") +
+        (v || "unnamed"));
+    });
+  },
+  peopleNote(el) {
+    const id = el.dataset.id, v = el.value;
+    mutate(function (st) {
+      const p = st.people.filter(function (x) { return x.id === id; })[0];
+      if (p) p.note = v;
+    });
+  },
+  peopleField(el) {
+    const id = el.dataset.id, i = parseInt(el.dataset.i, 10), part = el.dataset.part, v = el.value;
+    mutate(function (st) {
+      const p = st.people.filter(function (x) { return x.id === id; })[0];
+      if (p && p.fields[i]) p.fields[i][part] = v;
+    });
+  },
+  peopleFieldAdd(el) {
+    const id = el.dataset.id, k = el.dataset.k || "";
+    mutate(function (st) {
+      const p = st.people.filter(function (x) { return x.id === id; })[0];
+      if (p) p.fields.push({ k: k, v: "" });
+    });
+  },
+  peopleFieldDel(el) {
+    const id = el.dataset.id, i = parseInt(el.dataset.i, 10);
+    mutate(function (st) {
+      const p = st.people.filter(function (x) { return x.id === id; })[0];
+      if (p) p.fields.splice(i, 1);
+    });
+  },
+  peopleStanding(el) {
+    const id = el.dataset.id;
+    mutate(function (st) {
+      const p = st.people.filter(function (x) { return x.id === id; })[0];
+      if (!p) return;
+      p.standing = PEOPLE_STANDING[(PEOPLE_STANDING.indexOf(p.standing) + 1) % PEOPLE_STANDING.length];
+    }, "Standing");
+  },
+  peopleStatus(el) {
+    const id = el.dataset.id;
+    mutate(function (st) {
+      const p = st.people.filter(function (x) { return x.id === id; })[0];
+      if (!p) return;
+      p.status = PEOPLE_STATUS[(PEOPLE_STATUS.indexOf(p.status) + 1) % PEOPLE_STATUS.length];
+    }, "Status");
+  },
+  peopleGroup(el) {
+    const id = el.dataset.id, g = el.dataset.g;
+    mutate(function (st) {
+      const p = st.people.filter(function (x) { return x.id === id; })[0];
+      if (!p) return;
+      const i = p.groups.indexOf(g);
+      if (i >= 0) p.groups.splice(i, 1); else p.groups.push(g);
+    }, "Membership");
+  },
+  peopleSearch(el) { UI.people.q = el.value; render(); },
+  peopleSearchClear() { UI.people.q = ""; render(); },
+  /* Tapping a group chip on a person's card searches for that group —
+     which lands you on the group itself and everyone else in it. */
+  peopleSearchTo(el) { UI.people.q = el.dataset.q || ""; render(); },
+  peopleFilter(el) {
+    const v = el.dataset.v || "";
+    UI.people.standing = (UI.people.standing === v) ? "" : v;
+    render();
+  },
+
   /* ---- Level up ---- */
   levelUpModal() {
     const p = CALC.levelUpPreview(S);
@@ -1208,7 +1569,15 @@ const ACT = {
   },
   addItem() {
     mutate(function (st) {
-      st.equipment.inventory.push({ name: "New item", qty: 1, tags: [], note: "" });
+      st.equipment.inventory.push({ id: uid("i"), name: "New item", qty: 1, tags: [],
+                                    note: "", consumable: false });
+    });
+  },
+  itemConsumable(el) {
+    const i = parseInt(el.dataset.i, 10);
+    mutate(function (st) {
+      const it = st.equipment.inventory[i];
+      if (it) it.consumable = !it.consumable;
     });
   },
   editItem(el) {
@@ -1609,15 +1978,78 @@ function alertBar() {
     '<button class="x" data-act="dismissAlert">×</button></div>';
 }
 
-/* ---------- TABS ---------- */
+/* ---------- TABS ----------
+   Nine tabs in a row is nine things to read before you can pick one, and
+   on the iPad they wrapped to a second line besides — so the row is three
+   now, and the tabs themselves are a thinner second row under whichever
+   group is open. The split is by the question you're asking: what is
+   happening in this fight, what Hal is, and what is outside him.
+
+   Every group's subtab row is rendered every time and the closed ones are
+   hidden in CSS rather than left out of the markup. It costs a few dozen
+   bytes and buys two things: switching groups needs no extra render pass,
+   and a tab is always present in the document to be reached by anything
+   that knows its name but not which group it currently sits in. */
+const TAB_GROUPS = [
+  { id: "fight", label: "Combat",
+    tabs: [["combat", "Combat", "1"], ["effects", "Effects", "2"],
+           ["followers", "Followers", "3"]] },
+  { id: "self", label: "Character",
+    tabs: [["spells", "Spells", "4"], ["features", "Features", "5"],
+           ["inventory", "Inventory", "6"], ["notes", "Notes", "7"]] },
+  { id: "world", label: "World",
+    tabs: [["map", "Map", "8"], ["calendar", "Calendar", "9"], ["people", "People", "0"]] }
+];
+
+/* Flat, in the order they're drawn — which is what the digit shortcuts
+   index, so the number on a tab is always its position on screen. Ten
+   tabs and ten digits, with 0 in its usual place at the end of the row
+   standing for the tenth. */
+const TAB_ORDER = TAB_GROUPS.reduce(function (all, g) {
+  return all.concat(g.tabs.map(function (t) { return t[0]; }));
+}, []);
+const TAB_DIGITS = "1234567890";
+
+function tabGroupOf(tab) {
+  return TAB_GROUPS.filter(function (g) {
+    return g.tabs.some(function (t) { return t[0] === tab; });
+  })[0] || TAB_GROUPS[0];
+}
+
+/* Where a group button lands you: wherever you were last time you were in
+   it. Coming back to World should return you to the map you were reading,
+   not to the front of the group. */
+function tabGroupHome(g) {
+  const last = (S.ui && S.ui.lastTab && S.ui.lastTab[g.id]) || "";
+  return g.tabs.some(function (t) { return t[0] === last; }) ? last : g.tabs[0][0];
+}
+
 function tabBar(active) {
-  const tabs = [["combat","Combat","1"],["spells","Spells","2"],["features","Features","3"],
-                ["inventory","Inventory","4"],["notes","Notes","5"],["calendar","Calendar","6"],
-                ["followers","Followers","7"],["map","Map","8"]];
-  return '<div class="tabs">' + tabs.map(function (t) {
-    return '<button class="tab" aria-selected="' + (active === t[0]) +
-      '" data-act="tab" data-tab="' + t[0] + '">' + t[1] + "<k>" + t[2] + "</k></button>";
-  }).join("") + "</div>";
+  const group = tabGroupOf(active);
+  /* Groups and tabs share one line — the point of grouping was to spend
+     LESS of a 740px screen on chrome, and a second row would have given
+     back everything the first one saved. It reads left to right as one
+     narrowing: which part of the sheet, then which page of it. */
+  let out = '<div class="tabs">' + TAB_GROUPS.map(function (g) {
+    /* The title lists what's inside, so a group you are not in still says
+       what it holds rather than only what it is called. */
+    const inside = g.tabs.map(function (t) { return t[1]; }).join(" · ");
+    return '<button class="tab" aria-selected="' + (g.id === group.id) +
+      '" data-act="tabGroup" data-group="' + g.id + '" data-go="' + tabGroupHome(g) +
+      '" title="' + esc(inside) + '">' + esc(g.label) + "</button>";
+  }).join("");
+
+  out += TAB_GROUPS.map(function (g) {
+    /* A group of one has nothing to choose between — its button is
+       already the tab, so it gets no second half. */
+    if (g.tabs.length < 2) return "";
+    return '<div class="subtabs' + (g.id === group.id ? "" : " hide") + '">' +
+      g.tabs.map(function (t) {
+        return '<button class="subtab" aria-selected="' + (active === t[0]) +
+          '" data-act="tab" data-tab="' + t[0] + '">' + t[1] + "<k>" + t[2] + "</k></button>";
+      }).join("") + "</div>";
+  }).join("");
+  return out + "</div>";
 }
 
 /* ---------- LEFT RAIL ---------- */
@@ -1741,6 +2173,8 @@ function tabContent(tab) {
   if (tab === "calendar") return calendarTab();
   if (tab === "followers") return followersTab();
   if (tab === "map") return mapTab();
+  if (tab === "people") return peopleTab();
+  if (tab === "effects") return effectsTab();
   return combatTab();
 }
 
@@ -1946,6 +2380,7 @@ function spellEntry(k, editable) {
     '<div class="cardtags">' + tagHTML(tags, true) + "</div>" +
     '<div class="cardbtns">' + castBtn +
       '<button class="bt cutsm" data-act="expand" data-id="s-' + k + '">' + (open ? "Less" : "More") + "</button>" +
+      favBtn("spell", k) +
       (editable ? '<button class="bt cutsm dg" data-act="unprepare" data-key="' + k + '">Remove</button>' : "") +
       wikiBtn(sp.slug) +
     "</div>";
@@ -2015,6 +2450,7 @@ function featuresTab() {
       '<div class="cardtags">' + tagHTML(tags, true) + "</div>" +
       '<div class="cardbtns">' +
         '<button class="bt cutsm" data-act="expand" data-id="f-' + k + '">' + (open ? "Less" : "More") + "</button>" +
+        favBtn("feat", k) +
         wikiBtn(f.slug) +
       "</div>" +
       (open ? '<div class="carddetail">' + esc(f.text) + "</div>" : "") + "</div>";
@@ -2085,6 +2521,7 @@ function featureEntry(k, f) {
     '<div class="cardtags">' + tagHTML(tags, true) + "</div>" +
     '<div class="cardbtns">' +
       '<button class="bt cutsm" data-act="expand" data-id="ft-' + k + '">' + (open ? "Less" : "More") + "</button>" +
+      favBtn("feature", k) +
       wikiBtn(f.slug) +
     "</div>" +
     (open ? '<div class="carddetail">' + esc(f.text) + "</div>" : "") + "</div>";
@@ -2105,9 +2542,14 @@ function inventoryTab() {
   S.equipment.inventory.forEach(function (it, i) {
     if (!matchesFilter(it.tags)) return;
     if (E) {
+      /* Consumable is what tells a favourited potion from a favourited
+         sword: one offers Use, the other doesn't, because nothing good
+         comes of a scimitar that can be pressed down to nothing. */
       out += '<div class="card carded"><div class="mrow">' +
         '<input style="flex:1" value="' + esc(it.name) + '" data-act="editItem" data-i="' + i + '" data-field="name">' +
         '<input type="number" style="width:60px" value="' + it.qty + '" data-act="editItem" data-i="' + i + '" data-field="qty">' +
+        '<button class="tg cutsm' + (it.consumable ? " on" : "") + '" data-act="itemConsumable" data-i="' + i +
+          '" title="A consumable can be spent from Favourites">Consumable</button>' +
         '<button class="bt cutsm dg" data-act="delItem" data-i="' + i + '">Delete</button></div>' +
         '<input style="width:100%;margin-top:4px" placeholder="Note" value="' + esc(it.note || "") +
         '" data-act="editItem" data-i="' + i + '" data-field="note"></div>';
@@ -2116,8 +2558,13 @@ function inventoryTab() {
         '<span class="cardname">' + esc(it.name) + "</span>" +
         '<span class="cardmeta">' + esc(it.note || "") + "</span>" +
         '<div class="cardtags">' + tagHTML(it.tags, true) + "</div>" +
-        '<div class="cardbtns"><span class="qty">×' + it.qty + "</span></div>" +
-        "</div>";
+        '<div class="cardbtns">' +
+          (it.consumable
+            ? '<button class="bt cutsm ' + (it.qty > 0 ? "pri" : "dim") + '" data-act="itemUse" data-id="' +
+              esc(it.id) + '" title="' + (it.qty > 0 ? "Spend one" : "None left") + '">Use</button>'
+            : "") +
+          '<span class="qty">×' + it.qty + "</span>" + favBtn("item", it.id) +
+        "</div></div>";
     }
   });
   if (E) out += '<button class="bt cutsm" data-act="addItem">+ Add item</button>';
@@ -2321,6 +2768,460 @@ function followersTab() {
   });
 
   out += combatRulesPanel();
+  return out;
+}
+
+/* ---------- ACTIVE EFFECTS ----------
+   The sheet has always known when YOU are concentrating — there is a
+   screen-edge glow for it. What decides a fight more often is knowing the
+   enemy mage is, and on what, and what breaking it would undo; and the
+   sheet had nowhere to put that, because it is not derived from anything
+   it owns. The DM says it out loud and it is gone.
+
+   So this is a notebook, not a model. Four plain sentences — who, what,
+   what kind of thing it is, and what it means — plus an optional clock.
+   No screen glow: someone else's concentration is a thing to consult, not
+   an alarm, and the rim is already spoken for by your own.
+
+   The clock counts in rounds or in turns because both come up at the
+   table: a spell lasts rounds, a lair action fires in so many turns. It
+   ticks down as the fight advances and STOPS at zero rather than
+   deleting itself. A thing that is due now is the most important line on
+   the screen; disappearing is the one thing it must not do. */
+const WATCH_KINDS = ["conc", "effect", "countdown"];
+const WATCH_KIND_LABEL = { conc: "Concentrating on", effect: "Affected by", countdown: "Counting down to" };
+const WATCH_KIND_SHORT = { conc: "Concentration", effect: "Effect", countdown: "Countdown" };
+
+/* Advance every clock. Turns tick once per turn; rounds tick once per lap
+   of the order — the same two numbers the effects list already decays by,
+   so a watched countdown and a spell of yours can never disagree about
+   how much of the fight has gone by. */
+function tickWatch(st, turns, rounds) {
+  (st.watch || []).forEach(function (w) {
+    if (w.left == null) return;
+    const by = w.unit === "turns" ? turns : rounds;
+    if (by > 0) w.left = Math.max(0, w.left - by);
+  });
+}
+/* Which clocks this advance would run out, worked out before mutating so
+   the alert can name them. */
+function watchDueAfter(st, turns, rounds) {
+  return (st.watch || []).filter(function (w) {
+    if (w.left == null || w.left <= 0) return false;
+    return w.left - (w.unit === "turns" ? turns : rounds) <= 0;
+  });
+}
+
+function watchClock(w) {
+  if (w.left == null) return "";
+  if (w.left <= 0) return '<span class="wnow">NOW</span>';
+  return '<span class="wleft">' + w.left + " " + (w.left === 1 ? w.unit.slice(0, -1) : w.unit) + "</span>";
+}
+
+/* Read view. One line you can take in mid-turn: who, then the thing,
+   then what it means, then how long. */
+function watchCard(w, compact) {
+  if (!compact && UI.watch.edit[w.id]) return watchEditor(w);
+  return '<div class="watch k-' + w.kind + (w.left === 0 ? " due" : "") + '">' +
+    '<div class="wh"><span class="wwho">' + esc(w.who || "Someone") + "</span>" +
+      '<span class="wkind">' + esc(WATCH_KIND_LABEL[w.kind]) + "</span>" +
+      '<span class="wwhat">' + esc(w.what || "—") + "</span>" +
+      watchClock(w) + "</div>" +
+    (w.outcome ? '<div class="wout">' + esc(w.outcome) + "</div>" : "") +
+    (w.note && !compact ? '<div class="etext">' + esc(w.note) + "</div>" : "") +
+    (compact ? "" :
+      '<div class="wbtns">' +
+        (w.left == null
+          ? '<button class="bt cutsm" data-act="watchClock" data-id="' + w.id +
+            '" data-d="1" title="Start a countdown on this">+ Clock</button>'
+          : '<button class="bt cutsm" data-act="watchClock" data-id="' + w.id + '" data-d="-1">−1</button>' +
+            '<button class="bt cutsm" data-act="watchClock" data-id="' + w.id + '" data-d="1">+1</button>') +
+        '<button class="bt cutsm" data-act="watchEdit" data-id="' + w.id + '">Edit</button>' +
+        '<button class="bt cutsm dg" data-act="watchDel" data-id="' + w.id + '">Clear</button>' +
+      "</div>") +
+    "</div>";
+}
+
+function watchEditor(w) {
+  let out = '<div class="watch carded k-' + w.kind + '">' +
+    '<div class="prow">' +
+      '<input class="wfw" value="' + esc(w.who) + '" placeholder="Who — the mage, the lair, Qee…" ' +
+        'data-act="watchField" data-id="' + w.id + '" data-f="who">' +
+      '<button class="bt cutsm pri" data-act="watchEdit" data-id="' + w.id + '">Done</button>' +
+      '<button class="bt cutsm dg" data-act="watchDel" data-id="' + w.id + '">Clear</button></div>';
+
+  out += '<div class="pstrip">' + WATCH_KINDS.map(function (k) {
+    return '<button class="hintchip' + (w.kind === k ? " on" : "") + '" data-act="watchKind" data-id="' +
+      w.id + '" data-k="' + k + '">' + esc(WATCH_KIND_SHORT[k]) + "</button>";
+  }).join("") + "</div>";
+
+  out += '<div class="prow" style="margin-top:7px">' +
+    '<input class="wfv" value="' + esc(w.what) + '" placeholder="' +
+      esc(WATCH_KIND_LABEL[w.kind].toLowerCase()) + " what?\" " +
+      'data-act="watchField" data-id="' + w.id + '" data-f="what"></div>';
+  out += '<div class="prow" style="margin-top:5px">' +
+    '<input class="wfv" value="' + esc(w.outcome) + '" placeholder="So what — “Qee is Held”, “the doors open”…" ' +
+      'data-act="watchField" data-id="' + w.id + '" data-f="outcome"></div>';
+
+  out += '<div class="prow" style="margin-top:7px"><span class="lbl">Runs out in</span>' +
+    '<input type="number" min="0" style="width:74px" value="' + (w.left == null ? "" : w.left) +
+      '" placeholder="—" data-act="watchLeft" data-id="' + w.id + '">' +
+    '<select data-act="watchUnit" data-id="' + w.id + '">' +
+      '<option value="rounds"' + (w.unit === "rounds" ? " selected" : "") + ">rounds</option>" +
+      '<option value="turns"' + (w.unit === "turns" ? " selected" : "") + ">turns</option>" +
+    "</select>" +
+    '<span class="foot" style="margin:0">Leave blank for no clock</span></div>';
+
+  out += '<textarea class="pnote" placeholder="Anything longer…" data-act="watchField" data-id="' +
+    w.id + '" data-f="note">' + esc(w.note) + "</textarea>";
+  return out + "</div>";
+}
+
+/* Your own effects, rendered the same way everywhere. combat.js owns the
+   compact copy that rides on the Combat tab; this is the same list. */
+function ownEffectRows() {
+  return S.effects.map(function (e, i) {
+    const perm = e.rounds == null;
+    return '<div class="eff' + (e.conc ? " conc" : "") + '">' +
+      '<div class="eh"><span class="en">' + esc(e.name) + "</span>" +
+      (e.conc ? '<span class="tag t-y1">Concentration</span>' : "") +
+      '<span class="emeta">' + (perm ? "until removed" :
+        (e.rounds > 100 ? Math.round(e.rounds / 10) + " min" : e.rounds + " rounds")) + "</span>" +
+      '<button class="bt cutsm dg" data-act="effectEnd" data-i="' + i + '">End</button></div>' +
+      (e.note ? '<div class="etext">' + esc(e.note) + "</div>" : "") + "</div>";
+  }).join("");
+}
+
+function effectsTab() {
+  const mods = typeof CALC.activeMods === "function" ? CALC.activeMods(S)
+    : { ac: 0, attackFlat: 0, attackDice: [], saveDice: [], damageDice: [] };
+
+  let out = '<div class="pnl cut"><h3>On you <span class="cnt">' +
+    (S.effects.length || "nothing running") + "</span></h3>";
+  if (!S.effects.length) {
+    out += '<div class="foot" style="margin:0">Nothing running. Casting something with a duration ' +
+      "puts it here and counts it down for you.</div>";
+  } else {
+    out += ownEffectRows();
+    const applied = [];
+    if (mods.ac) applied.push((mods.ac > 0 ? "+" : "") + mods.ac + " AC");
+    if (mods.attackFlat) applied.push("+" + mods.attackFlat + " attack");
+    mods.attackDice.forEach(function (d) { applied.push(d.die + " to attacks (" + d.from + ")"); });
+    mods.saveDice.forEach(function (d) { applied.push(d.die + " to saves (" + d.from + ")"); });
+    mods.damageDice.forEach(function (d) { applied.push(d.die + " damage (" + d.from + ")"); });
+    if (applied.length && S.settings.autoApplyEffects) {
+      out += '<div class="seqnote">Applied to your numbers: <b>' + esc(applied.join(" · ")) + "</b></div>";
+    }
+  }
+  out += "</div>";
+
+  const due = S.watch.filter(function (w) { return w.left === 0; });
+  out += '<div class="pnl cut"><h3>Everyone else <span class="cnt">' +
+    (S.watch.length ? S.watch.length + (due.length ? " · " + due.length + " due now" : "") : "nothing noted") +
+    "</span></h3>";
+
+  /* Add fast, detail after — the same bargain the People tab makes. What
+     you have at the moment you need to write it down is a name and a
+     thing, and often a number someone just said out loud. */
+  out += '<div class="prow">' +
+    '<input type="text" id="watch-who" placeholder="Who" style="flex:1 1 130px;min-width:110px">' +
+    '<input type="text" id="watch-what" placeholder="On what" style="flex:2 1 180px;min-width:130px">' +
+    '<select id="watch-kind">' +
+      WATCH_KINDS.map(function (k) {
+        return '<option value="' + k + '">' + esc(WATCH_KIND_SHORT[k]) + "</option>";
+      }).join("") + "</select>" +
+    '<input type="number" id="watch-left" min="0" placeholder="—" style="width:70px" title="How long, if you know">' +
+    '<select id="watch-unit"><option value="rounds">rounds</option><option value="turns">turns</option></select>' +
+    '<button class="bt cutsm pri" data-act="watchAdd">+ Note it</button></div>';
+
+  if (!S.watch.length) {
+    out += '<div class="foot">Nothing noted. “Mage · concentrating on · Hold Person” with ' +
+      "“Qee is Held” underneath is the shape — but a lair that erupts in ten rounds fits it too.</div>";
+  }
+  S.watch.forEach(function (w) { out += watchCard(w, false); });
+  out += "</div>";
+
+  if (!S.combat.active && S.watch.some(function (w) { return w.left != null; })) {
+    out += '<div class="pnl cut"><h3>Clocks are stopped</h3><div class="foot" style="margin:0">' +
+      "Countdowns tick when you advance a turn, and you are out of combat — so nothing here " +
+      "is moving. Adjust them by hand with −1 and +1 if time is passing another way.</div></div>";
+  }
+  return out;
+}
+
+/* ---------- PEOPLE ----------
+   A campaign introduces someone in one line — "a Wulven smith in
+   Gloomwood, wary of paladins" — and then never repeats it. What you
+   need is somewhere to put that line before it's gone, and the thing
+   that stops you is a form: a record with a Race field is a record you
+   can't finish, because you don't know the race and the blank sits there
+   looking like an error.
+
+   So nothing here is required except a name, and even that can be a
+   description. What you know is an ordered list of label/value pairs
+   rather than fixed columns — Race and Role are offered as one-tap
+   suggestions, never as slots — and a pair you never add simply doesn't
+   exist. A record with a name and nothing else is a complete record.
+
+   Individuals and groups are the same shape and the same code, split
+   only by `kind`, because a guild has a leader and a seat and a grudge
+   the same way a person has a face and a trade and a grudge. What a
+   person has extra is membership: which clans, guilds or orders they
+   belong to, which is the one relation worth modelling, because it is
+   the one you actually ask about at the table ("who else is Ashguard?").
+
+   Two colour axes carry the answers you want at a glance, both cycling
+   on tap rather than hiding in a dropdown: standing is how they regard
+   YOU, status is whether they're still around at all. */
+const PEOPLE_STANDING = ["unknown", "ally", "friendly", "neutral", "wary", "hostile"];
+const PEOPLE_STANDING_LABEL = { unknown: "Standing unknown", ally: "Ally", friendly: "Friendly",
+  neutral: "Neutral", wary: "Wary", hostile: "Hostile" };
+const PEOPLE_STATUS = ["unknown", "alive", "dead", "missing"];
+const PEOPLE_STATUS_LABEL = { unknown: "Fate unknown", alive: "Alive", dead: "Dead",
+  missing: "Missing" };
+
+/* Offered, never required. One tap adds the labelled pair with an empty
+   value, which is the whole point: the label is the part you'd have to
+   type, and the value is the part you actually know. */
+const PEOPLE_FIELD_HINTS = {
+  person: ["Race", "Role", "Where", "Age", "Pronouns", "Looks", "Wants", "Owes", "First met"],
+  group:  ["Kind", "Seat", "Leader", "Size", "Trade", "Rivals", "Sign", "First met"]
+};
+
+function personById(id) {
+  return S.people.filter(function (p) { return p.id === id; })[0] || null;
+}
+function peopleOfKind(kind) {
+  return S.people.filter(function (p) { return p.kind === kind; });
+}
+function membersOf(groupId) {
+  return S.people.filter(function (p) {
+    return p.kind === "person" && p.groups.indexOf(groupId) >= 0;
+  });
+}
+/* Fields with something in them. A blank value means you added the label
+   and haven't filled it yet, which is worth showing while you're editing
+   and worth hiding everywhere else. */
+function filledFields(p) {
+  return p.fields.filter(function (f) { return f.v.trim() !== ""; });
+}
+
+/* Search runs over everything the record holds — name, every label, every
+   value, the note, and the names of the groups a person is in — because
+   the thing you remember about someone is rarely their name. "Smith",
+   "Gloomwood" and "owes me" all have to find the same Wulven. */
+function personMatches(p, q) {
+  if (!q) return true;
+  const hay = [p.name, p.note]
+    .concat(p.fields.map(function (f) { return f.k + " " + f.v; }))
+    .concat(p.groups.map(function (g) {
+      const grp = personById(g);
+      return grp ? grp.name : "";
+    }))
+    .join(" ").toLowerCase();
+  return hay.indexOf(q.toLowerCase()) >= 0;
+}
+function peopleVisible(kind) {
+  const q = UI.people.q.trim();
+  const st = UI.people.standing;
+  return peopleOfKind(kind).filter(function (p) {
+    if (st && p.standing !== st) return false;
+    return personMatches(p, q);
+  });
+}
+
+function standingChip(p, clickable) {
+  return '<span class="stand s-' + p.standing + '"' +
+    (clickable ? ' data-act="peopleStanding" data-id="' + p.id +
+      '" title="Tap to cycle how they regard you"' : "") +
+    ">" + esc(PEOPLE_STANDING_LABEL[p.standing]) + "</span>";
+}
+function statusChip(p, clickable) {
+  /* An unknown fate is the default and says nothing, so it only appears
+     where you can change it. */
+  if (p.status === "unknown" && !clickable) return "";
+  return '<span class="stand w-' + p.status + '"' +
+    (clickable ? ' data-act="peopleStatus" data-id="' + p.id +
+      '" title="Tap to cycle whether they are still around"' : "") +
+    ">" + esc(PEOPLE_STATUS_LABEL[p.status]) + "</span>";
+}
+
+/* The meta line: the first three things you know, labelled. Labelled
+   because "Wulven · Smith · Gloomwood" is only legible while you still
+   remember which of your own labels you used. */
+const PEOPLE_META_FIELDS = 3;
+function peopleMetaLine(p) {
+  const shown = filledFields(p).slice(0, PEOPLE_META_FIELDS);
+  if (!shown.length) return p.kind === "group" ? "A group — nothing noted yet"
+                                               : "Nothing noted yet";
+  return shown.map(function (f) {
+    return (f.k ? '<i class="fk">' + esc(f.k) + "</i> " : "") + esc(f.v);
+  }).join(" · ");
+}
+
+function peopleCard(p) {
+  if (UI.people.edit[p.id]) return peopleEditor(p);
+  const open = !!UI.expanded["pp-" + p.id];
+  const groups = p.kind === "person" ? p.groups.map(personById).filter(Boolean) : [];
+  const members = p.kind === "group" ? membersOf(p.id) : [];
+  const extra = Math.max(0, filledFields(p).length - PEOPLE_META_FIELDS);
+
+  let out = '<div class="card person s-' + p.standing + (p.status === "dead" ? " gone" : "") + '">' +
+    '<button class="namebtn cardname" data-act="expand" data-id="pp-' + p.id + '">' +
+      esc(p.name || "(unnamed)") + "</button>" +
+    '<span class="cardmeta">' + peopleMetaLine(p) + "</span>" +
+    '<div class="cardtags">' + standingChip(p, false) + statusChip(p, false) +
+      groups.map(function (g) {
+        return '<span class="stand grp-of" data-act="peopleSearchTo" data-q="' + esc(g.name) + '">' +
+          esc(g.name) + "</span>";
+      }).join("") +
+      (members.length ? '<span class="stand grp-of">' + members.length + " member" +
+        (members.length === 1 ? "" : "s") + "</span>" : "") + "</div>" +
+    '<div class="cardbtns">' +
+      '<button class="bt cutsm" data-act="expand" data-id="pp-' + p.id + '">' +
+        (open ? "Less" : (extra ? "More +" + extra : "More")) + "</button>" +
+      '<button class="bt cutsm" data-act="peopleEdit" data-id="' + p.id + '">Edit</button>' +
+    "</div>";
+
+  if (open) {
+    out += '<div class="carddetail">';
+    const fields = filledFields(p);
+    if (fields.length) {
+      fields.forEach(function (f) {
+        out += '<div class="kv"><span>' + esc(f.k || "—") + "</span><span>" + esc(f.v) + "</span></div>";
+      });
+    }
+    if (members.length) {
+      out += '<div class="kv"><span>Members</span><span>' +
+        members.map(function (m) { return esc(m.name); }).join(", ") + "</span></div>";
+    }
+    if (p.note.trim()) {
+      out += '<div class="etext" style="margin-top:7px">' +
+        esc(p.note).replace(/\n/g, "<br>") + "</div>";
+    }
+    if (!fields.length && !members.length && !p.note.trim()) {
+      out += '<div class="foot" style="margin:0">Only a name so far — tap Edit to add what you know</div>';
+    }
+    out += "</div>";
+  }
+  return out + "</div>";
+}
+
+/* The editor is the card with its text turned into fields, in place, so
+   you never lose sight of what you are editing. */
+function peopleEditor(p) {
+  const hints = PEOPLE_FIELD_HINTS[p.kind] || PEOPLE_FIELD_HINTS.person;
+  const used = p.fields.map(function (f) { return f.k.toLowerCase(); });
+
+  let out = '<div class="card carded person s-' + p.standing + '">' +
+    '<div class="prow"><input class="pname" value="' + esc(p.name) +
+      '" placeholder="' + (p.kind === "group" ? "Name of the clan, guild or order" : "Name, or what you call them") +
+      '" data-act="peopleName" data-id="' + p.id + '">' +
+    '<button class="bt cutsm pri" data-act="peopleEdit" data-id="' + p.id + '">Done</button>' +
+    '<button class="bt cutsm dg" data-act="peopleDel" data-id="' + p.id + '">Delete</button></div>';
+
+  out += '<div class="pstrip">' + standingChip(p, true) + statusChip(p, true) + "</div>";
+
+  /* What you know, one row each. The label is editable too — the
+     suggestions are a shortcut, not a vocabulary. */
+  out += '<div class="pfields">';
+  p.fields.forEach(function (f, i) {
+    out += '<div class="pfield">' +
+      '<input class="pfk" value="' + esc(f.k) + '" placeholder="Label" data-act="peopleField" data-id="' +
+        p.id + '" data-i="' + i + '" data-part="k">' +
+      '<input class="pfv" value="' + esc(f.v) + '" placeholder="What you know" data-act="peopleField" data-id="' +
+        p.id + '" data-i="' + i + '" data-part="v">' +
+      '<button class="bt cutsm dg" data-act="peopleFieldDel" data-id="' + p.id +
+        '" data-i="' + i + '" title="Remove this detail">×</button></div>';
+  });
+  out += "</div>";
+
+  out += '<div class="phints"><span class="lbl">Add</span>' +
+    hints.filter(function (h) { return used.indexOf(h.toLowerCase()) < 0; }).map(function (h) {
+      return '<button class="hintchip" data-act="peopleFieldAdd" data-id="' + p.id +
+        '" data-k="' + esc(h) + '">' + esc(h) + "</button>";
+    }).join("") +
+    '<button class="hintchip own" data-act="peopleFieldAdd" data-id="' + p.id +
+      '" data-k="">Something else</button></div>';
+
+  if (p.kind === "person") {
+    const groups = peopleOfKind("group");
+    out += '<div class="phints"><span class="lbl">Belongs to</span>' +
+      (groups.length
+        ? groups.map(function (g) {
+            const on = p.groups.indexOf(g.id) >= 0;
+            return '<button class="hintchip' + (on ? " on" : "") + '" data-act="peopleGroup" data-id="' +
+              p.id + '" data-g="' + g.id + '">' + esc(g.name || "(unnamed)") + "</button>";
+          }).join("")
+        : '<span class="foot" style="margin:0">No clans or guilds yet — add one below</span>') +
+      "</div>";
+  }
+
+  out += '<textarea class="pnote" placeholder="Anything longer — how you met, what they said, what they want…" ' +
+    'data-act="peopleNote" data-id="' + p.id + '">' + esc(p.note) + "</textarea>";
+  return out + "</div>";
+}
+
+function peopleTab() {
+  const q = UI.people.q;
+  const persons = peopleVisible("person");
+  const groups = peopleVisible("group");
+  const total = S.people.length;
+
+  let out = '<div class="pnl cut"><h3>Who you know <span class="cnt">' +
+    peopleOfKind("person").length + " people · " + peopleOfKind("group").length +
+    " clans &amp; guilds</span></h3>";
+
+  /* Add first, and with no ceremony: a name and a button. Everything else
+     about a record can be filled in later, or never. */
+  out += '<div class="prow">' +
+    '<input type="text" id="people-new" placeholder="Name — or “the one-eyed innkeeper”…" style="flex:1;min-width:180px">' +
+    '<button class="bt cutsm pri" data-act="peopleAdd" data-kind="person">+ Person</button>' +
+    '<button class="bt cutsm pri" data-act="peopleAdd" data-kind="group">+ Clan or guild</button></div>';
+
+  if (total) {
+    out += '<div class="prow" style="margin-top:9px">' +
+      '<input type="text" placeholder="Search names, details, notes…" value="' + esc(q) +
+        '" data-act="peopleSearch" style="flex:1;min-width:170px">' +
+      (q ? '<button class="bt cutsm" data-act="peopleSearchClear">Clear</button>' : "") + "</div>";
+    out += '<div class="pstrip" style="margin-top:7px"><span class="lbl">Standing</span>' +
+      PEOPLE_STANDING.map(function (s) {
+        const on = UI.people.standing === s;
+        const n = S.people.filter(function (p) { return p.standing === s; }).length;
+        if (!n && !on) return "";
+        return '<button class="stand s-' + s + (on ? " sel" : " off") +
+          '" data-act="peopleFilter" data-v="' + s + '">' +
+          esc(PEOPLE_STANDING_LABEL[s]) + " " + n + "</button>";
+      }).join("") +
+      (UI.people.standing ? '<button class="bt cutsm" data-act="peopleFilter" data-v="">Clear</button>' : "") +
+      "</div>";
+  } else {
+    out += '<div class="foot">Nobody yet. Add the innkeeper before you forget his name — ' +
+      "a record needs nothing but that, and everything else can wait.</div>";
+  }
+  out += "</div>";
+
+  out += '<div class="pnl cut"><h3>People <span class="cnt">' + persons.length +
+    (persons.length === peopleOfKind("person").length ? "" : " of " + peopleOfKind("person").length) +
+    "</span></h3>";
+  if (!persons.length) {
+    out += '<div class="foot" style="margin:0">' +
+      (peopleOfKind("person").length ? "Nobody matches that." : "No individuals yet.") + "</div>";
+  }
+  persons.forEach(function (p) { out += peopleCard(p); });
+  out += "</div>";
+
+  out += '<div class="pnl cut"><h3>Clans &amp; guilds <span class="cnt">' + groups.length +
+    (groups.length === peopleOfKind("group").length ? "" : " of " + peopleOfKind("group").length) +
+    "</span></h3>";
+  if (!groups.length) {
+    out += '<div class="foot" style="margin:0">' +
+      (peopleOfKind("group").length ? "Nothing matches that."
+        : "No clans, guilds or orders yet. Add one and people can be put in it.") + "</div>";
+  }
+  groups.forEach(function (p) { out += peopleCard(p); });
+  out += "</div>";
+
   return out;
 }
 
@@ -3198,14 +4099,180 @@ function tagFilterBar() {
   return out;
 }
 
+/* ---------- FAVOURITES ----------
+   The sheet knows everything Hal can do, which is the problem: by level
+   four that is five prepared spells, two cantrips, four oath spells, a
+   dozen universal actions and a pack. "What you can do now" already
+   answers "what can I pay for", and the Spells tab answers "what have I
+   got" — but neither answers "what do I actually reach for", because
+   that question has an answer only the player knows.
+
+   So this is the list you write yourself. A star on any card pins it
+   here, the rail carries it on every tab, and pressing it does exactly
+   what pressing it on its own tab would do — the same use() the doable
+   panel calls, so a favourite can never spend a resource differently
+   from the thing it points at.
+
+   Entries are pointers, never copies. That is what stops the list from
+   going stale when you unprepare a spell, spend the last charge, or
+   level up into a bigger slot. */
+
+function favIndex(kind, id) {
+  return S.favourites.findIndex(function (f) { return f.kind === kind && f.id === id; });
+}
+function isFav(kind, id) { return favIndex(kind, id) >= 0; }
+
+/* The star that pins things. Small and quiet — it sits in the same
+   corner as More and the wiki link, and it is never the loudest thing on
+   a card, because pinning is something you do once and using is
+   something you do every round. */
+function favBtn(kind, id) {
+  const on = isFav(kind, id);
+  return '<button class="favstar' + (on ? " on" : "") + '" data-act="favToggle" data-kind="' +
+    esc(kind) + '" data-id="' + esc(id) + '" title="' +
+    (on ? "Pinned to Favourites — tap to unpin" : "Pin to Favourites") +
+    '" aria-label="' + (on ? "Remove from favourites" : "Add to favourites") + '">' +
+    (on ? "★" : "☆") + "</button>";
+}
+
+/* Turn a pointer into everything both the rail row and the use window
+   need: what to call it, what it costs, what it says, and what pressing
+   it would actually do right now. One resolver for both, so the window
+   can never offer something the row said was unavailable.
+
+   `c` is the live castable entry where there is one — that is the record
+   doUse() spends from, and handing it over whole is what keeps the
+   window from re-deriving a cost of its own.
+
+   Returns null only for a pointer clampState hasn't caught up with yet. */
+function favResolve(f, castables) {
+  if (f.kind === "spell" || f.kind === "action") {
+    const c = castables.filter(function (x) { return x.kind === f.kind && x.id === f.id; })[0];
+    if (c) {
+      const afterHit = c.afterHit && S.combat.active && !S.combat.turn.hitLanded;
+      return { name: c.name, kind: f.kind, c: c, text: c.text || "",
+        meta: (typeof costLabel === "function" ? costLabel(c.cost) : "") + (c.free ? " · free" : ""),
+        label: f.kind === "spell" ? (c.free ? "Cast free" : "Cast") : "Use",
+        blocked: !c.affordable || afterHit,
+        why: afterHit ? "Requires a hit first" : (c.reasons || []).join("; ") };
+    }
+    /* A spell you have since unprepared. The pin stays — you will prepare
+       it again — but it says why it cannot be cast instead of vanishing
+       from the list and leaving you to wonder where it went. */
+    if (f.kind === "spell" && SPELLS[f.id]) {
+      return { name: SPELLS[f.id].name, kind: "spell", meta: "not prepared",
+               text: SPELLS[f.id].text, label: "Read", why: "Not prepared right now" };
+    }
+    return null;
+  }
+
+  if (f.kind === "item") {
+    const it = S.equipment.inventory.filter(function (x) { return x.id === f.id; })[0];
+    if (!it) return null;
+    return { name: it.name, kind: "item", item: it,
+      meta: (it.note || "") || (it.consumable ? "consumable" : ""),
+      qty: it.qty, text: it.note || "",
+      label: it.consumable ? "Use" : "Count",
+      blocked: it.consumable && it.qty <= 0, why: "None left" };
+  }
+
+  if (f.kind === "feature") {
+    const fe = FEATURES[f.id];
+    if (!fe) return null;
+    /* Some features ARE an action — Lay on Hands, Divine Sense. Those
+       resolve through the same catalogue everything else uses, so the
+       favourite spends the resource the feature actually costs. */
+    const mapped = FEATURE_ACTION_MAP[f.id];
+    if (mapped) {
+      const c = castables.filter(function (x) {
+        return x.kind === mapped.kind && x.id === mapped.id;
+      })[0];
+      if (c) {
+        return { name: fe.name, kind: "feature", c: c, text: fe.text || c.text || "",
+          meta: (typeof costLabel === "function" ? costLabel(c.cost) : ""),
+          label: mapped.kind === "spell" ? "Cast" : "Use",
+          blocked: !c.affordable, why: (c.reasons || []).join("; ") };
+      }
+    }
+    return { name: fe.name, kind: "feature", meta: fe.src || "", text: fe.text, label: "Read" };
+  }
+
+  if (f.kind === "feat") {
+    const ft = FEATS[f.id];
+    if (!ft) return null;
+    return { name: ft.name, kind: "feat", meta: (ft.type || "") + " feat",
+             text: ft.text, label: "Read" };
+  }
+  return null;
+}
+
+function favouritesRail() {
+  const editing = !!UI.expanded.favEdit;
+  const castables = typeof CALC.castables === "function" ? CALC.castables(S) : [];
+
+  let out = '<div class="pnl cut"><h3>Favourites <span class="cnt">' + S.favourites.length +
+    "</span>" +
+    /* Its own action rather than the generic expand: applyPanelFolds
+       hands a panel over to whatever expand control its heading already
+       carries, and this panel still wants its own fold chip beside
+       this one. */
+    (S.favourites.length
+      ? '<button class="favedit" data-act="favEdit">' +
+        (editing ? "Done" : "Edit") + "</button>"
+      : "") + "</h3>";
+
+  if (!S.favourites.length) {
+    return out + '<div class="foot" style="margin:0">Tap ☆ on any spell, ability or item ' +
+      "to pin it here — then use it from this column on any tab.</div></div>";
+  }
+
+  /* Both the name and the button open the use window rather than firing
+     straight away. The rail is 250px of a column you read at arm's
+     length, and the things worth pinning are exactly the ones with a
+     question attached — cast Find Steed free or pay the slot, drink a
+     potion or write down the three you just bought. The window is where
+     those questions have room to be asked, and it carries the rules text
+     besides, which the row never had space for. */
+  S.favourites.forEach(function (f, i) {
+    const r = favResolve(f, castables);
+    if (!r) return;
+    const dim = r.blocked && S.settings.economyLockout;
+    const open = ' data-act="favUse" data-kind="' + esc(f.kind) + '" data-id="' + esc(f.id) + '"';
+
+    out += '<div class="fav f-' + r.kind + (dim ? " off" : "") + '">' +
+      '<button class="favn' + (dim ? " dim" : "") + '"' + open + ' title="' +
+        esc(dim ? (r.why || "Not available right now") : r.name) + '">' + esc(r.name) + "</button>" +
+      '<span class="favm">' + esc(r.meta || "") +
+        (typeof r.qty === "number" ? (r.meta ? " · " : "") + "×" + r.qty : "") + "</span>" +
+      '<div class="favb">' +
+        '<button class="bt cutsm ' + (dim ? "dim" : (r.c || r.item ? "pri" : "")) + '"' + open +
+        ' title="' + esc(dim ? r.why : "Open " + r.name) + '">' + esc(r.label) + "</button>";
+    if (editing) {
+      out += '<div class="favmove">' +
+        '<button class="bt cutsm" data-act="favMove" data-i="' + i + '" data-d="-1"' +
+          (i === 0 ? " disabled" : "") + ' title="Move up">↑</button>' +
+        '<button class="bt cutsm" data-act="favMove" data-i="' + i + '" data-d="1"' +
+          (i === S.favourites.length - 1 ? " disabled" : "") + ' title="Move down">↓</button>' +
+        '<button class="bt cutsm dg" data-act="favToggle" data-kind="' + esc(f.kind) +
+          '" data-id="' + esc(f.id) + '" title="Unpin">×</button></div>';
+    }
+    out += "</div></div>";
+  });
+
+  return out + "</div>";
+}
+
 /* ---------- RESOURCE RAIL ---------- */
 function resourceRail() {
   const loh = CALC.layOnHandsMax(S).value;
   const cdMax = CALC.channelDivinityMax(S).value;
   const slots = CALC.slotsMax(S);
-  /* Followers ride at the top of the rail: a summon is a creature you're
-     responsible for on every tab, not a resource you spend. */
-  let out = followerRail();
+  /* Favourites lead the column. During a turn the rail's job is "what do
+     I press", and this is the only panel in it that the player wrote
+     themselves — everything below is what the sheet has to say. Followers
+     come next: a summon is a creature you're responsible for on every
+     tab, not a resource you spend. */
+  let out = favouritesRail() + followerRail();
   /* The whole header is the collapse control — a big, obvious tap target. */
   out += '<div class="pnl cut"><h3 class="collapse" data-act="toggleRail">' +
     '<span>Resources</span><span class="chev">Hide</span></h3>';
@@ -4001,9 +5068,10 @@ document.addEventListener("keydown", function (e) {
   }
   const k = e.key.toLowerCase();
   if (k === "escape") { UI.modal = null; UI.prov = null; UI.alert = null; render(); return; }
-  if (["1","2","3","4","5","6","7","8"].indexOf(k) >= 0) {
-    const tabs = ["combat","spells","features","inventory","notes","calendar","followers","map"];
-    mutate(function (st) { st.ui = st.ui || {}; st.ui.tab = tabs[parseInt(k, 10) - 1]; });
+  /* The digits index the tabs in the order they're drawn, groups and all,
+     so the hint printed on a tab is always where that tab actually is. */
+  if (TAB_DIGITS.indexOf(k) >= 0 && TAB_ORDER[TAB_DIGITS.indexOf(k)]) {
+    ACT.tab({ dataset: { tab: TAB_ORDER[TAB_DIGITS.indexOf(k)] } });
     return;
   }
   if (k === "d") { ACT.damageModal(); e.preventDefault(); }
@@ -4013,6 +5081,14 @@ document.addEventListener("keydown", function (e) {
   else if (k === "c") { mutate(function (st) { st.toggles.concentrating = !st.toggles.concentrating; }); }
 });
 
-/* Boot */
+/* Boot.
+
+   The save is not redundant. migrate() and clampState() between them fill
+   in whatever a newer schema added — and one of those things is now the
+   id an item is known by, which a favourite points at. Left unsaved until
+   the next change, those ids would be regenerated on the following launch
+   and every pinned item would point at nothing. Writing once at boot makes
+   a migration a thing that happened, not a thing that keeps happening. */
 clampState(S);
+save();
 render();

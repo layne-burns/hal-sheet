@@ -325,10 +325,10 @@ Object.assign(CALC, {
       const m = (S.party.roster || []).filter(function (x) { return x.id === ref.partyId; })[0];
       return m ? m.name : "(removed)";
     }
-    if (ref.type === "creature") {
-      const c = (S.creatures || []).filter(function (x) { return x.id === ref.creatureId; })[0];
-      return c ? c.name : "(removed)";
-    }
+    /* A foe carries its own name on the entry. There is no roster behind
+       it on purpose: the table rolls one initiative for the goblins, so
+       the sheet holds one line for the goblins. */
+    if (ref.type === "foe") return ref.name || "Enemy";
     return "?";
   },
 
