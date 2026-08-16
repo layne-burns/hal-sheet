@@ -108,11 +108,22 @@ EXT.glow = function () {
   return out;
 };
 
-/* ---------- COMBAT BAR -------------------------------------- */
+/* ---------- COMBAT BAR --------------------------------------
+   Two labels for one control: the long one, and the one it falls back to
+   when the strip runs out of room. Both are always in the markup and CSS
+   picks between them — which keeps the fit pass to adding one class,
+   rather than rewriting text in the DOM and having to remember what it
+   used to say. */
+function dual(long, short) {
+  return '<span class="lgw">' + esc(long) + "</span>" +
+    (short === long ? "" : '<span class="smw">' + esc(short) + "</span>");
+}
+
 EXT.combatBar = function () {
   const c = S.combat;
   const orderBtn = '<button class="bt cutsm" data-act="orderModal">' +
-    (c.order.length ? "Turn order (" + c.order.length + ")" : "Set turn order") + "</button>";
+    (c.order.length ? dual("Turn order (" + c.order.length + ")", "Order " + c.order.length)
+                    : dual("Set turn order", "Order")) + "</button>";
   if (!c.active) {
     /* "Out of combat" is the absence of news. It used to sit above every
        tab in the app announcing that nothing was happening — a whole
@@ -131,24 +142,26 @@ EXT.combatBar = function () {
   }
   const t = c.turn;
   const slotNote = t.slotUsed ? "used" : "open";
-  function pip(used, label, key) {
-    return '<button class="ecopip' + (used ? " used" : "") + '" data-act="econToggle" data-key="' + key + '">' +
-      '<span class="ecoi">' + (used ? "spent" : "open") + "</span>" + label + "</button>";
+  function pip(used, label, key, short) {
+    return '<button class="ecopip' + (used ? " used" : "") + '" data-act="econToggle" data-key="' +
+      key + '" title="' + label + " — " + (used ? "spent" : "open") + '">' +
+      '<span class="ecoi">' + (used ? "spent" : "open") + "</span>" +
+      dual(label, short || label) + "</button>";
   }
   return '<div class="strip combat cut">' +
-    '<span class="rnd">Round ' + c.round + "</span>" +
+    '<span class="rnd">' + dual("Round " + c.round, "R" + c.round) + "</span>" +
     orderBtn +
-    pip(t.action, "Action", "action") +
-    pip(t.bonus, "Bonus", "bonus") +
-    pip(t.reaction, "Reaction", "reaction") +
-    '<span class="ecopip' + (t.slotUsed ? " used" : "") + '"><span class="ecoi">' + slotNote +
-      "</span>Spell slot</span>" +
-    '<span class="mv"><span class="lbl">Move</span> ' + (S.identity.speed - t.movementUsed) +
-      "/" + S.identity.speed + " ft" +
+    pip(t.action, "Action", "action", "Act") +
+    pip(t.bonus, "Bonus", "bonus", "Bns") +
+    pip(t.reaction, "Reaction", "reaction", "Rea") +
+    '<span class="ecopip' + (t.slotUsed ? " used" : "") + '" title="Spell slot — ' + slotNote +
+      '"><span class="ecoi">' + slotNote + "</span>" + dual("Spell slot", "Slot") + "</span>" +
+    '<span class="mv"><span class="lbl mvlbl">Move</span> ' + (S.identity.speed - t.movementUsed) +
+      "/" + S.identity.speed + '<span class="mvft"> ft</span>' +
       '<button class="bt cutsm" data-act="move" data-d="5">−5</button>' +
       '<button class="bt cutsm" data-act="move" data-d="-5">+5</button></span>' +
-    (t.hitLanded ? '<span class="hitflag">Hit landed — smites available</span>'
-                 : '<button class="bt cutsm" data-act="logHit">Log a hit</button>') +
+    (t.hitLanded ? '<span class="hitflag">' + dual("Hit landed — smites available", "Hit landed") + "</span>"
+                 : '<button class="bt cutsm" data-act="logHit">' + dual("Log a hit", "Hit") + "</button>") +
     /* The table runs its own initiative, so the turns between yours often
        pass without anyone touching the sheet. This catches it up in one
        press instead of four, and says how far it will jump so you can see
@@ -164,11 +177,11 @@ EXT.combatBar = function () {
         (skips ? "Skip the " + skips + " turn" + (skips === 1 ? "" : "s") + " between now and yours"
                : "Advance to your next turn") +
         (plan.wraps ? ", crossing into the next round" : "") +
-        '">To my turn' + (skips ? " <k>" + skips + "</k>" : "") + "</button>";
+        '">' + dual("To my turn", "Mine") + (skips ? " <k>" + skips + "</k>" : "") + "</button>";
     })() +
     '<button class="bt cutsm pri" style="margin-left:auto" data-act="endTurn">' +
-      (c.order.length ? "Next turn" : "End turn") + "</button>" +
-    '<button class="bt cutsm" data-act="combatEnd">Exit combat</button>' +
+      dual(c.order.length ? "Next turn" : "End turn", "Next") + "</button>" +
+    '<button class="bt cutsm" data-act="combatEnd">' + dual("Exit combat", "Exit") + "</button>" +
     /* A line of its own, under the round counter. Sharing the row with
        the buttons meant it had to shrink to whatever was left over, and
        what was left over on an iPad was not enough to keep it to one
@@ -205,30 +218,59 @@ EXT.combatBar = function () {
    afford to hold its size while everything around it gives way. */
 const ORD_FITS = ["", "fit-1", "fit-2", "fit-3", "fit-4"];
 
-/* Is the strip on one line? Asked of the browser rather than predicted by
-   adding widths up.
+/* The controls above it get the same treatment, for the same reason and
+   in the same four steps: tighten the spacing, shrink the type, drop the
+   word under each pip (the colour already says open or spent), and last
+   of all fall back to the short labels. Everything it sheds is either
+   redundant or in a tooltip. */
+const BAR_FITS = ["", "bfit-1", "bfit-2", "bfit-3", "bfit-4"];
 
-   Not a plain equality on offsetTop: the row is centre-aligned and the
-   live chip is taller than the rest, so chips on the SAME line already
-   sit a couple of pixels apart. A wrap moves one down by a whole row
-   height, so anything under half of the tallest chip is the same line. */
-function ordOneRow(strip) {
+/* Is a wrapping flex row on one line? Asked of the browser rather than
+   predicted by adding widths up.
+
+   Not a plain equality on offsetTop: these rows are centre-aligned and
+   their children are different heights, so items on the SAME line
+   already sit a few pixels apart. A wrap moves one down by a whole row,
+   so anything under half the tallest child is still one line. */
+function oneRow(el, skip) {
   let lo = Infinity, hi = -Infinity, tall = 0;
-  for (let i = 0; i < strip.children.length; i++) {
-    const el = strip.children[i];
-    lo = Math.min(lo, el.offsetTop);
-    hi = Math.max(hi, el.offsetTop);
-    tall = Math.max(tall, el.offsetHeight);
+  for (let i = 0; i < el.children.length; i++) {
+    const kid = el.children[i];
+    if (skip && skip(kid)) continue;
+    lo = Math.min(lo, kid.offsetTop);
+    hi = Math.max(hi, kid.offsetTop);
+    tall = Math.max(tall, kid.offsetHeight);
   }
   return !tall || (hi - lo) < tall * 0.6;
+}
+
+/* The steps stack: step three is also step one and step two. Applying
+   them one at a time instead would mean step four silently gave back the
+   spacing step one took, and the row would get WIDER as it tried to
+   shrink. */
+function fitClasses(steps, upTo) {
+  return steps.slice(1, upTo + 1).join(" ");
+}
+
+/* The strip's own controls, ignoring the order strip — that has a line to
+   itself by design, so counting it would mean the bar could never be
+   judged to fit and would sit at the smallest step forever. */
+function fitCombatBar() {
+  const bar = document.querySelector(".strip.combat");
+  if (!bar) return;
+  const skip = function (kid) { return kid.classList.contains("ordstrip"); };
+  for (let i = 0; i < BAR_FITS.length; i++) {
+    bar.className = ("strip combat cut " + fitClasses(BAR_FITS, i)).trim();
+    if (oneRow(bar, skip)) return;
+  }
 }
 
 function fitOrderStrip() {
   const strip = document.querySelector(".ordstrip");
   if (!strip || strip.children.length < 2) return;
   for (let i = 0; i < ORD_FITS.length; i++) {
-    strip.className = "ordstrip" + (ORD_FITS[i] ? " " + ORD_FITS[i] : "");
-    if (ordOneRow(strip)) return;
+    strip.className = ("ordstrip " + fitClasses(ORD_FITS, i)).trim();
+    if (oneRow(strip)) return;
   }
   /* Fell through every step: more combatants than a row can hold at any
      size. It wraps, which is the right answer — the alternative is faces
@@ -1049,8 +1091,11 @@ EXT.sessionModal = function () {
     if (stats.length) body += '<div class="foot">' + esc(stats.join(" · ")) + "</div>";
     body += '<div class="foot" style="margin-top:2px">In-world it is <b>' +
       esc(CAL.stamp(S.calendar)) + "</b></div>";
-    body += '<div class="mrow"><input type="text" id="session-note-in" placeholder="Add a note…" style="flex:1">' +
-      '<button class="bt cutsm pri" data-act="addSessionNote">Add</button></div>';
+    /* Through the same composer the nudge opens, rather than a second
+       one-line box here. Two ways to write a note is how you end up with
+       two kinds of note. */
+    body += '<div class="mrow"><button class="bt cutsm pri" data-act="noteModal">' +
+      "Write something down…</button></div>";
 
     const story = s.log.filter(isNarrative);
     const tech = s.log.filter(function (e) { return !isNarrative(e); });
@@ -1117,9 +1162,131 @@ EXT.sessionNudge = function () {
   const prompt = feast
     ? "It's " + esc(feast.name) + " — worth a note?"
     : "Been a while since your last note";
-  return '<div class="strip cut"><span class="lbl">' + prompt + "</span>" +
-    '<input type="text" placeholder="Quick note…" style="flex:1;min-width:120px">' +
-    '<button class="bt cutsm pri" data-act="addSessionNote">Add</button></div>';
+  /* A prompt, not a form. The text box that used to live here was two
+     inches wide at the top of the screen, and what you actually want to
+     write down at the table is four things about a person, not a
+     sentence — so the whole strip is one tap into somewhere with room.
+
+     Deliberately not opened for you: a window that appears over your turn
+     because a timer went off is a window you learn to dismiss. */
+  return '<div class="strip cut nudge" data-act="noteModal">' +
+    '<span class="lbl">' + prompt + "</span>" +
+    '<button class="bt cutsm pri" data-act="noteModal">Write it down</button></div>';
+};
+
+/* ---------- WRITING SOMETHING DOWN --------------------------
+   One composer, reached from the nudge above and from the session log.
+
+   The old one was a single line of free text, which is fine for a
+   sentence and wrong for what a session actually produces: you meet
+   somebody, and what you know is a name, a place, and the thing they
+   wanted. Three boxes and a heading beats one box every time, because
+   the boxes are the questions — you fill them in without having to
+   decide what a note should say.
+
+   Every kind composes down to one plain line in the log. The structure
+   is scaffolding for writing it, not a schema to read it back with. */
+const NOTE_KINDS = [
+  { id: "met", label: "Met someone", hint: "Goes to People too, if you want.",
+    fields: [["who", "Who"], ["where", "Where"], ["want", "What they wanted"]],
+    compose: function (f) {
+      return "Met " + f.who + (f.where ? " in " + f.where : "") +
+        (f.want ? " — " + f.want : "");
+    } },
+  { id: "learn", label: "Learned something",
+    fields: [["what", "What you learned"], ["from", "From whom"]],
+    compose: function (f) {
+      return "Learned: " + f.what + (f.from ? " (from " + f.from + ")" : "");
+    } },
+  { id: "deal", label: "Deal or debt",
+    fields: [["who", "With whom"], ["terms", "The terms"]],
+    compose: function (f) {
+      return "Deal with " + f.who + (f.terms ? ": " + f.terms : "");
+    } },
+  { id: "fight", label: "A fight",
+    fields: [["who", "Against"], ["end", "How it ended"]],
+    compose: function (f) {
+      return "Fought " + f.who + (f.end ? " — " + f.end : "");
+    } },
+  { id: "found", label: "Found something",
+    fields: [["what", "What"], ["where", "Where"]],
+    compose: function (f) {
+      return "Found " + f.what + (f.where ? " in " + f.where : "");
+    } },
+  { id: "place", label: "Somewhere new",
+    fields: [["name", "What it's called"], ["what", "What's there"]],
+    compose: function (f) {
+      return "Reached " + f.name + (f.what ? " — " + f.what : "");
+    } },
+  { id: "plain", label: "Just a note",
+    fields: [["text", "What happened", true]],
+    compose: function (f) { return f.text; } }
+];
+
+function noteKindOf(id) {
+  return NOTE_KINDS.filter(function (k) { return k.id === id; })[0] || NOTE_KINDS[0];
+}
+/* The line this would write, or "" if the first box is empty — which is
+   what both the preview and the Save button key off, so they can't
+   disagree about whether there is anything to save. */
+function noteCompose(kind, f) {
+  const vals = {};
+  kind.fields.forEach(function (fd) { vals[fd[0]] = (f[fd[0]] || "").trim(); });
+  if (!vals[kind.fields[0][0]]) return "";
+  return kind.compose(vals).trim();
+}
+
+EXT.noteModal = function () {
+  const m = UI.modal;
+  const kind = noteKindOf(m.kind);
+  const line = noteCompose(kind, m.f);
+
+  let body = "<h2>Write it down</h2>" +
+    '<div class="msub">In-world it is <b>' + esc(CAL.stamp(S.calendar)) + "</b></div>";
+
+  const feast = CAL.holidayFor(S.calendar.system, S.calendar.day);
+  if (feast) {
+    body += '<div class="gain k-note"><span class="gk">Today</span><span>' +
+      esc(feast.name) + "</span></div>";
+  }
+
+  /* The kinds first: picking one is what fills the form in, so it is the
+     first decision and the only one that changes the shape of the page. */
+  body += '<div class="phints" style="margin-bottom:4px"><span class="lbl">About</span>' +
+    NOTE_KINDS.map(function (k) {
+      return '<button class="hintchip' + (k.id === kind.id ? " on" : "") +
+        '" data-act="noteKind" data-k="' + k.id + '">' + esc(k.label) + "</button>";
+    }).join("") + "</div>";
+  if (kind.hint) body += '<div class="foot" style="margin:0 0 8px">' + esc(kind.hint) + "</div>";
+
+  kind.fields.forEach(function (fd, i) {
+    const v = m.f[fd[0]] || "";
+    body += '<div class="prow" style="margin-top:6px">' +
+      (fd[2]
+        ? '<textarea class="pnote" style="margin:0" placeholder="' + esc(fd[1]) +
+          '" data-act="noteField" data-f="' + fd[0] + '">' + esc(v) + "</textarea>"
+        : '<input type="text" style="flex:1;min-width:150px"' + (i === 0 ? " autofocus" : "") +
+          ' placeholder="' + esc(fd[1]) + '" value="' + esc(v) +
+          '" data-act="noteField" data-f="' + fd[0] + '">') +
+      "</div>";
+  });
+
+  /* Everything composes to one line in the log, so show the line. It is
+     the only way to know what the boxes are about to become. */
+  body += '<div class="ph2" style="margin-top:12px">It will read</div>' +
+    '<div class="gain k-note"><span class="gk">' + esc(CAL.timeLabel(S.calendar.timeOfDay)) +
+    "</span><span>" + (line ? esc(line) : "<em>fill in the first box</em>") + "</span></div>";
+
+  if (kind.id === "met") {
+    body += '<div class="phints"><span class="lbl">Also</span>' +
+      '<button class="hintchip' + (m.toPeople ? " on" : "") + '" data-act="noteToPeople">' +
+      "Add them to People</button></div>";
+  }
+
+  body += '<div class="mfoot">' +
+    '<button class="bt cutsm ' + (line ? "pri" : "dim") + '" data-act="noteSave">Save it</button>' +
+    '<button class="bt cutsm" data-act="closeModal">Cancel</button></div>';
+  return body;
 };
 
 /* ---------- PRE-SESSION CHECKLIST -------------------------------
@@ -1745,14 +1912,53 @@ Object.assign(ACT, {
     }
     done(legacyCopy());
   },
-  addSessionNote(el) {
-    const input = el.parentElement.querySelector('input[type="text"]');
-    const text = input && input.value.trim();
-    if (!text) return;
+  /* ---- Writing something down ----
+     One composer. Opened from the nudge, or from the session log — in
+     which case it remembers to go back there, so writing a note doesn't
+     close the thing you were reading. */
+  noteModal() {
+    const back = UI.modal && UI.modal.type === "session" ? { type: "session" } : null;
+    UI.modal = { type: "note", kind: "met", f: {}, toPeople: false, back: back };
+    render();
+  },
+  noteKind(el) {
+    /* The boxes change, so what was typed into the old ones is dropped
+       rather than silently carried into fields that no longer mean the
+       same thing. */
+    UI.modal.kind = el.dataset.k;
+    UI.modal.f = {};
+    render();
+  },
+  noteField(el) { UI.modal.f[el.dataset.f] = el.value; render(); },
+  noteToPeople() { UI.modal.toPeople = !UI.modal.toPeople; render(); },
+  noteSave() {
+    const m = UI.modal;
+    const kind = noteKindOf(m.kind);
+    const line = noteCompose(kind, m.f);
+    if (!line) return;
+    const toPeople = m.kind === "met" && m.toPeople && (m.f.who || "").trim();
+    const pid = uid("p");
     mutate(function (st) {
-      st.session.log.push({ t: Date.now(), label: text, kind: "note", cal: calStamp(st) });
+      /* Unlabelled on purpose. A labelled mutate writes its own line into
+         the session log, and the note IS the line — labelling it would
+         file the same sentence twice, once tagged as a note and once as
+         bookkeeping. */
+      st.session.log.push({ t: Date.now(), label: line, kind: "note", cal: calStamp(st) });
       if (st.session.log.length > 500) st.session.log.shift();
+      /* The one place a note is worth more than a line of text: you have
+         just typed a name, a place and what they wanted, which is a
+         People record already. */
+      if (toPeople) {
+        const fields = [];
+        if ((m.f.where || "").trim()) fields.push({ k: "Where", v: m.f.where.trim() });
+        if ((m.f.want || "").trim()) fields.push({ k: "Wants", v: m.f.want.trim() });
+        st.people.push({ id: pid, kind: "person", name: m.f.who.trim(),
+                         standing: "unknown", status: "alive", token: null,
+                         fields: fields, groups: [], note: "" });
+      }
     });
+    UI.modal = m.back;
+    if (toPeople) UI.alert = { info: "Noted, and " + m.f.who.trim() + " is on the People tab." };
     render();
   },
 
@@ -1899,7 +2105,7 @@ render = function () {
      so a later throw in the glow/bar/panel steps below can never leave a
      half-open modal shell on screen with no content and no way to close it. */
   const root = document.getElementById("modal-root");
-  if (UI.modal && ["roll", "override", "settings", "loh", "history", "attack", "initiative", "favUse", "token", "session", "preSession"].indexOf(UI.modal.type) >= 0) {
+  if (UI.modal && ["roll", "override", "settings", "loh", "history", "attack", "initiative", "favUse", "token", "note", "session", "preSession"].indexOf(UI.modal.type) >= 0) {
     let body = "";
     if (UI.modal.type === "roll") body = EXT.rollModal();
     else if (UI.modal.type === "override") body = EXT.overrideModal();
@@ -1909,6 +2115,7 @@ render = function () {
     else if (UI.modal.type === "initiative") body = EXT.initiativeModal();
     else if (UI.modal.type === "favUse") body = EXT.favUseModal();
     else if (UI.modal.type === "token") body = EXT.tokenModal();
+    else if (UI.modal.type === "note") body = EXT.noteModal();
     else if (UI.modal.type === "session") body = EXT.sessionModal();
     else if (UI.modal.type === "preSession") body = EXT.preSessionModal();
     else if (UI.modal.type === "history") {
@@ -1974,8 +2181,10 @@ render = function () {
   /* Panels injected above didn't exist when the base render folded
      things, so fold again now that the DOM is final. */
   applyPanelFolds();
-  /* Same reason, one step later: the order strip can only be measured
-     once it is in the document. */
+  /* Same reason, one step later: neither row can be measured until it is
+     in the document. The bar goes first — the order strip sits inside it,
+     so shrinking the controls changes how much room is left. */
+  fitCombatBar();
   fitOrderStrip();
 };
 

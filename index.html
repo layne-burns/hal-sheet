@@ -105,6 +105,12 @@ input[type=number]{width:88px}
 .strip{background:var(--panel);border:1px solid var(--line);padding:6px 13px;margin-bottom:7px;
   display:flex;align-items:center;gap:9px;flex-wrap:wrap}
 .strip.death{background:var(--mag);border-color:var(--mag);color:#fff}
+/* The note nudge. Louder than the strip it replaced, because the point of
+   it is to be noticed — a violet edge and a whole strip that is one tap,
+   rather than a two-inch text box you had to aim at. */
+.strip.nudge{border-left:3px solid var(--violet);cursor:pointer}
+.strip.nudge:hover{border-color:var(--violet)}
+.strip.nudge .lbl{color:var(--violet)}
 .strip.death .lbl{color:rgba(255,255,255,.8)}
 .cond{font-family:var(--m);font-size:14.5px;letter-spacing:.08em;text-transform:uppercase;
   padding:3px 9px;border:1px solid var(--violet);color:var(--violet)}
@@ -581,6 +587,36 @@ body.onecol .mpin .mlab{font-size:10px;max-width:84px}
 .mv{font-family:var(--m);font-size:15.5px;color:var(--dim);display:flex;align-items:center;gap:5px}
 .hitflag{font-family:var(--m);font-size:14.5px;letter-spacing:.08em;text-transform:uppercase;
   color:#141200;background:var(--yel);padding:4px 9px}
+/* ---------- MAKING THE COMBAT BAR FIT ONE LINE ----------
+   The controls wrapped to two rows on an iPad and the second held one
+   button, which spends a whole band of a 740px screen on almost nothing.
+   fitCombatBar() steps through these until the row holds, in order of
+   what can be given up most cheaply.
+
+   Every control carries both its labels; .smw is the short one and is
+   hidden until the last step. Nothing is lost that isn't either redundant
+   or still in the element's tooltip. */
+.smw{display:none}
+.strip.combat.bfit-4 .lgw{display:none}
+.strip.combat.bfit-4 .smw{display:inline}
+/* 1: spacing. The cheapest thing in the row is the air around it. */
+.strip.combat.bfit-1{gap:6px;padding:5px 10px}
+.strip.combat.bfit-1 .ecopip{padding:4px 8px}
+.strip.combat.bfit-1 .bt{padding:5px 8px}
+/* 2: type. */
+.strip.combat.bfit-2{gap:5px;padding:4px 9px}
+.strip.combat.bfit-2 .ecopip{padding:3px 7px;font-size:14px}
+.strip.combat.bfit-2 .bt{padding:4px 7px;font-size:13.5px}
+.strip.combat.bfit-2 .rnd{font-size:15px}
+.strip.combat.bfit-2 .mv{font-size:14px}
+/* 3: the word under each pip. The border colour and the strike-through
+   have said open or spent all along; the word was saying it twice. */
+.strip.combat.bfit-3 .ecoi{display:none}
+.strip.combat.bfit-3 .ecopip{line-height:1.2}
+.strip.combat.bfit-3 .mvlbl,.strip.combat.bfit-3 .mvft{display:none}
+/* 4: short labels. Round keeps a letter — a lone "1" at the left edge of
+   the strip is a number with nothing to say what it counts. */
+.strip.combat.bfit-4{gap:4px;padding:4px 8px}
 
 /* ---------- EFFECTS / CREATURES / PARTY / ORDER / DOABLE ---------- */
 .eff{padding:8px 0;border-bottom:1px solid #1A242D;border-left:2px solid var(--line2);padding-left:9px;
