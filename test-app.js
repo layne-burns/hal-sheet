@@ -1645,6 +1645,82 @@ ok("deleting an item drops its pin",
      .every(function (f) { return f.kind !== "item"; }));
 setEdit(false);
 
+console.log("\n=== TOOL PROFICIENCIES (2024) ===");
+/* test-app.js reads the sheet from storage rather than keeping a live
+   handle to it, the way test-combat.js does. */
+function state() { return JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")); }
+function setVal(el, v) { el.value = v; el.dispatchEvent(new w.Event("change", { bubbles: true })); }
+/* Earlier sections level Hal up, so the proficiency bonus is whatever
+   it is by now rather than the +2 he starts with. */
+function prof() { return w.eval("CALC.profBonus(S.level)"); }
+/* 2024 gave every tool a named ability and a Utilize entry. Both are the
+   reason this is a rollable row rather than the comma-separated list of
+   names it used to be. */
+ok("the 2024 tool table ships with the rules", !!w.eval("typeof TOOLS_2024"));
+ok("every tool names an ability", w.eval(
+   "Object.keys(TOOLS_2024).every(function(k){return !!ABILITY_NAMES[TOOLS_2024[k].ability];})"));
+ok("and says what it does", w.eval(
+   "Object.keys(TOOLS_2024).every(function(k){return (TOOLS_2024[k].use||'').length > 10;})"));
+/* Spot-checks against the printed table — the abilities are the thing a
+   typo would silently get wrong. */
+eq("Cook's Utensils is Wisdom", w.eval("TOOLS_2024.cook.ability"), "wis");
+eq("Thieves' Tools are Dexterity", w.eval("TOOLS_2024.thieves.ability"), "dex");
+eq("Smith's Tools are Strength", w.eval("TOOLS_2024.smith.ability"), "str");
+eq("Herbalism Kit is Intelligence", w.eval("TOOLS_2024.herbalism.ability"), "int");
+eq("Disguise Kit is Charisma", w.eval("TOOLS_2024.disguise.ability"), "cha");
+
+click(byAct("tab", { tab: "combat" }));
+eq("Hal is proficient with Cook's Utensils", state().tools.length, 1);
+eq("and it rolls on Wisdom", state().tools[0].ability, "wis");
+/* WIS 10 is +0, proficiency at level 4 is +2. */
+eq("so the bonus is proficiency alone", w.eval("CALC.tool(S, S.tools[0]).value"),
+   w.eval("CALC.mod(S.abilities.wis)") + prof());
+ok("it is a row in the rail, not a line of prose",
+   !!$('[data-act="prov"][data-prov="tool:0"]'));
+click($('[data-act="prov"][data-prov="tool:0"]'));
+ok("tapping it shows where the number came from", /Proficiency/.test(text()));
+ok("and what the tool actually does", /detect spoiled or poisoned food/.test(text()));
+click($('[data-act="prov"][data-prov="tool:0"]'));
+
+console.log("\n=== ADDING A PROFICIENCY TAKES ITS ABILITY WITH IT ===");
+setEdit(true);
+ok("the catalogue is offered rather than a blank field", !!$("#tool-new"));
+setVal($("#tool-new"), "thieves");
+click(byAct("toolAdd"));
+const added = state().tools[1];
+eq("added by name", added.name, "Thieves' Tools");
+eq("with the ability the rules give it, not a default", added.ability, "dex");
+/* DEX 16 is +3, plus proficiency +2. */
+eq("which is what makes the number right", w.eval("CALC.tool(S, S.tools[1]).value"),
+   w.eval("CALC.mod(S.abilities.dex)") + prof());
+click(byAct("toolExpertise", { i: "1" }));
+eq("expertise doubles the proficiency, not the ability",
+   w.eval("CALC.tool(S, S.tools[1]).value"),
+   w.eval("CALC.mod(S.abilities.dex)") + prof() * 2);
+/* The DM can call a tool check on a different ability — a night of
+   cooking is Constitution — so the sheet has to follow the table. */
+setVal(byAct("toolAbility", { i: "0" }), "con");
+eq("the ability can be overridden", state().tools[0].ability, "con");
+eq("and the arithmetic follows it", w.eval("CALC.tool(S, S.tools[0]).value"),
+   w.eval("CALC.mod(S.abilities.con)") + prof());
+setVal(byAct("toolAbility", { i: "0" }), "wis");
+click(byAct("toolDel", { i: "1" }));
+eq("and one can be removed", state().tools.length, 1);
+setEdit(false);
+
+console.log("\n=== PEOPLE WEAR THE SAME FACES ===");
+click(byAct("tab", { tab: "people" }));
+$("#people-new").value = "The one-eyed innkeeper";
+click(byAct("peopleAdd", { kind: "person" }));
+const pid = state().people[0].id;
+click(byAct("peopleEdit", { id: pid }));
+ok("a record offers a face", !!byAct("tokenModal", { kind: "person", id: pid }));
+click(byAct("tokenModal", { kind: "person", id: pid }));
+ok("out of the same sheet the combat strip uses", $$(".tokpick").length === 149);
+click(byAct("tokenSet", { i: "18" }));
+eq("picking writes it to the record", state().people[0].token, 18);
+ok("and the card wears it", !!$(".card.person .pface .face.tok"));
+
 console.log("\n=== PWA WIRING ===");
 ok("manifest linked", !!$('link[rel="manifest"]'));
 ok("apple touch icon linked", !!$('link[rel="apple-touch-icon"]'));

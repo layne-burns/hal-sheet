@@ -13,10 +13,10 @@ function newId(prefix) { _idSeq += 1; return prefix + Date.now() + "_" + _idSeq;
    collide: "hal", "p:<partyId>", "f:<generated>". A foe's name lives on
    its ref rather than in a roster somewhere — there is no roster, which
    is the point. */
-function refFor(id, kind, name) {
+function refFor(id, kind, name, token) {
   if (kind === "hal") return { type: "hal" };
   if (kind === "party") return { type: "party", partyId: id.slice(2) };
-  if (kind === "foe") return { type: "foe", name: name || "Enemy" };
+  if (kind === "foe") return { type: "foe", name: name || "Enemy", token: validToken(token) };
   return { type: kind };
 }
 
@@ -135,12 +135,8 @@ EXT.combatBar = function () {
     return '<button class="ecopip' + (used ? " used" : "") + '" data-act="econToggle" data-key="' + key + '">' +
       '<span class="ecoi">' + (used ? "spent" : "open") + "</span>" + label + "</button>";
   }
-  const cur = CALC.currentCombatant(S);
-  const turnLabel = c.order.length ?
-    (cur ? esc(CALC.combatantName(S, cur.ref)) + "'s turn" : "Turn order set") : "";
   return '<div class="strip combat cut">' +
     '<span class="rnd">Round ' + c.round + "</span>" +
-    (turnLabel ? '<span class="lbl">' + turnLabel + "</span>" : "") +
     orderBtn +
     pip(t.action, "Action", "action") +
     pip(t.bonus, "Bonus", "bonus") +
@@ -173,8 +169,132 @@ EXT.combatBar = function () {
     '<button class="bt cutsm pri" style="margin-left:auto" data-act="endTurn">' +
       (c.order.length ? "Next turn" : "End turn") + "</button>" +
     '<button class="bt cutsm" data-act="combatEnd">Exit combat</button>' +
+    /* A line of its own, under the round counter. Sharing the row with
+       the buttons meant it had to shrink to whatever was left over, and
+       what was left over on an iPad was not enough to keep it to one
+       row. Given the full width it is one row everywhere. */
+    orderStrip() +
     "</div>";
 };
+
+/* The order, spelled out along the bottom of the combat strip.
+
+   The strip already wrapped to two rows and the second one was mostly
+   air, with the one thing you most want to see — whose go it is, and who
+   is after them — compressed into the four words "Hal Briarshade's turn".
+   That is the same information as "Turn order (7)" and neither answers
+   "how long until me".
+
+   Everyone is here and everyone but the current combatant is dimmed, so
+   the live one is found by contrast rather than by reading. It is a
+   readout, not a control: nothing in it is tappable, because a mis-tap in
+   the middle of a fight that silently moved whose turn it was would be
+   worse than the problem it solved. Correcting the order is what the
+   Turn order button above is for. */
+/* ---------- MAKING THE ORDER FIT ----------------------------
+   A four-strong fight fits the row at full size and a fourteen-strong one
+   does not, and there is no width the stylesheet can pick that is right
+   for both. So the row is measured once it exists and the chips are
+   stepped down until they fit on one line — the same measure-then-decide
+   the layout columns already use, for the same reason: a media query can
+   only see the device, and what matters here is how many people are in
+   this particular fight.
+
+   Whoever is up never shrinks. It is the one chip you have to be able to
+   read from across the table, and it is exactly one chip, so it can
+   afford to hold its size while everything around it gives way. */
+const ORD_FITS = ["", "fit-1", "fit-2", "fit-3", "fit-4"];
+
+/* Is the strip on one line? Asked of the browser rather than predicted by
+   adding widths up.
+
+   Not a plain equality on offsetTop: the row is centre-aligned and the
+   live chip is taller than the rest, so chips on the SAME line already
+   sit a couple of pixels apart. A wrap moves one down by a whole row
+   height, so anything under half of the tallest chip is the same line. */
+function ordOneRow(strip) {
+  let lo = Infinity, hi = -Infinity, tall = 0;
+  for (let i = 0; i < strip.children.length; i++) {
+    const el = strip.children[i];
+    lo = Math.min(lo, el.offsetTop);
+    hi = Math.max(hi, el.offsetTop);
+    tall = Math.max(tall, el.offsetHeight);
+  }
+  return !tall || (hi - lo) < tall * 0.6;
+}
+
+function fitOrderStrip() {
+  const strip = document.querySelector(".ordstrip");
+  if (!strip || strip.children.length < 2) return;
+  for (let i = 0; i < ORD_FITS.length; i++) {
+    strip.className = "ordstrip" + (ORD_FITS[i] ? " " + ORD_FITS[i] : "");
+    if (ordOneRow(strip)) return;
+  }
+  /* Fell through every step: more combatants than a row can hold at any
+     size. It wraps, which is the right answer — the alternative is faces
+     too small to tell apart. */
+}
+
+/* Everything one entry needs to draw itself, in one place so the big chip
+   and the small ones can't disagree about who somebody is. */
+function ordInfo(o) {
+  const name = CALC.combatantName(S, o.ref);
+  let status = "";
+  if (o.ref.type === "party") {
+    const m = (S.party.roster || []).filter(function (x) { return x.id === o.ref.partyId; })[0];
+    if (m && m.status && m.status !== "healthy") status = m.status;
+  }
+  return {
+    name: name,
+    /* First names only. Nobody at the table says "Hal Briarshade's turn",
+       the face beside it is doing most of the identifying anyway, and a
+       surname is the difference between the strip fitting on its row and
+       spilling onto one of its own. A lumped enemy keeps its whole label
+       — "Goblin archers" is not a first name and cutting it to "Goblin"
+       loses the point. */
+    short: o.ref.type === "foe" ? name : name.split(/\s+/)[0],
+    hal: o.ref.type === "hal",
+    token: CALC.combatantToken(S, o.ref),
+    status: status,
+    init: o.initiative
+  };
+}
+
+function orderStrip() {
+  const order = S.combat.order;
+  if (!order.length) {
+    return '<div class="ordstrip"><span class="foot" style="margin:0">' +
+      "No turn order — Next turn just resets your own budget. " +
+      "Set one from Turn order above.</span></div>";
+  }
+  let curIdx = order.findIndex(function (o) { return o.id === S.combat.currentId; });
+  if (curIdx < 0) curIdx = 0;
+
+  /* One row, in initiative order, on a line of its own under the round
+     counter. Not a rotation starting from whoever is up: the order is a
+     fixed thing the table read out once, and a list that reshuffles every
+     time somebody's turn ends is a list you have to re-read every time.
+     It stays put and the highlight moves along it.
+
+     Whose go it is gets a bigger face and the name in yellow. Everyone
+     else keeps their name too — the same shape on the iPad as on a
+     desktop, because the iPad is the screen this is actually read on and
+     it has the room. */
+  return '<div class="ordstrip">' + order.map(function (o, i) {
+    const q = ordInfo(o);
+    const on = i === curIdx;
+    const next = i === (curIdx + 1) % order.length && order.length > 1;
+    return '<span class="ordc' + (on ? " on" : "") + (next ? " next" : "") +
+      (q.status ? " st-" + q.status : "") + '" title="' + esc(q.name) +
+        (q.init == null ? "" : " · initiative " + q.init) +
+        (q.status ? " · " + q.status : "") +
+        (on ? " · up now" : next ? " · on deck" : "") + '">' +
+      tokenFace({ hal: q.hal, token: q.token, name: q.name, cls: "ordface" }) +
+      '<span class="ordn">' + esc(q.short) + "</span>" +
+      (q.init == null ? "" : '<span class="ordi">' + q.init + "</span>") +
+      "</span>";
+  }).join("") + "</div>";
+}
 
 /* ---------- ACTIVE EFFECTS ---------------------------------- */
 /* Collapsible panel header — same Hide/Show mechanism as the Filter panel,
@@ -255,6 +375,12 @@ EXT.partyPanel = function (forceOpen) {
   roster.forEach(function (m, i) {
     const status = m.status || "healthy";
     out += '<div class="tgt"><div class="eh">' +
+      /* The face is fixed once set, so it is set here rather than in the
+         initiative sheet — you choose it the day they join the party and
+         never think about it again. */
+      '<button class="facebtn" data-act="tokenModal" data-kind="party" data-id="' + m.id +
+        '" title="Pick a face for ' + esc(m.name) + '">' +
+        tokenFace({ token: m.token, name: m.name }) + "</button>" +
       '<input class="rowname" value="' + esc(m.name) + '" data-act="partyName" data-i="' + i + '">' +
       '<button class="bt cutsm st-' + status + '" data-act="partyStatus" data-i="' + i + '">' +
       PARTY_STATUS_LABEL[status] + "</button>" +
@@ -535,13 +661,17 @@ EXT.lohModal = function () {
    the whole point is that everyone rolls again. Recycling the names is
    free and usually right: it is often the same goblins. */
 function freshInitRows() {
-  const rows = [{ key: "hal", kind: "hal", name: S.identity.name || "Hal", init: null }];
+  const rows = [{ key: "hal", kind: "hal", name: S.identity.name || "Hal", init: null, token: null }];
   (S.party.roster || []).filter(function (m) { return m.present; }).forEach(function (m) {
-    rows.push({ key: "p:" + m.id, kind: "party", name: m.name, init: null });
+    rows.push({ key: "p:" + m.id, kind: "party", name: m.name, init: null, token: m.token });
   });
+  /* Last fight's enemies come back by name AND by face — it is usually
+     the same goblins, and re-picking the picture every encounter is the
+     kind of chore that stops people using the feature at all. */
   S.combat.order.filter(function (o) { return o.ref && o.ref.type === "foe"; })
     .forEach(function (o) {
-      rows.push({ key: newId("f:"), kind: "foe", name: o.ref.name || "", init: null });
+      rows.push({ key: newId("f:"), kind: "foe", name: o.ref.name || "",
+                  init: null, token: validToken(o.ref.token) });
     });
   return rows;
 }
@@ -550,9 +680,66 @@ function freshInitRows() {
 function rowsFromOrder() {
   return S.combat.order.map(function (o) {
     const kind = o.ref ? o.ref.type : "foe";
-    return { key: o.id, kind: kind, name: CALC.combatantName(S, o.ref), init: o.initiative };
+    let token = o.ref && o.ref.token;
+    if (kind === "party") {
+      const m = (S.party.roster || []).filter(function (x) { return x.id === o.ref.partyId; })[0];
+      token = m ? m.token : null;
+    }
+    return { key: o.id, kind: kind, name: CALC.combatantName(S, o.ref),
+             init: o.initiative, token: validToken(token) };
   });
 }
+
+/* ---------- PICKING A FACE -----------------------------------
+   One picker, two callers. The party panel sets a roster member's face,
+   which is fixed once chosen — Gill looks like Gill in every fight. The
+   initiative sheet sets a foe's, which is not fixed at all, because "the
+   goblins" this week are a different picture from "the goblins" last
+   week and the whole point of a lumped entry is that it is disposable.
+
+   `UI.modal.target` says which: {kind:"party", id} or {kind:"row", i}
+   for a row of the initiative sheet being filled in. */
+EXT.tokenModal = function () {
+  const m = UI.modal;
+  const cur = validToken(m.current);
+  const q = (m.q || "").trim().toLowerCase();
+
+  let body = "<h2>Pick a face</h2><div class=\"msub\">" +
+    esc(m.who ? "For " + m.who : "Whoever this is") + "</div>";
+
+  /* A hundred and fifty faces is too many to scroll past, so there is a
+     search — and it matches the label, which is the only reason the
+     labels exist. */
+  body += '<div class="mrow"><input type="text" id="tok-q" placeholder="orc, dragon, cleric…" ' +
+    'value="' + esc(m.q || "") + '" data-act="tokenSearch" style="flex:1;min-width:150px">' +
+    (q ? '<button class="bt cutsm" data-act="tokenSearchClear">Clear</button>' : "") +
+    '<button class="bt cutsm dg" data-act="tokenSet" data-i="">No face</button></div>';
+
+  let shown = 0;
+  TOKEN_BANDS.forEach(function (band) {
+    const hits = [];
+    for (let i = band.from; i < band.from + band.count; i++) {
+      if (!q || tokenLabel(i).toLowerCase().indexOf(q) >= 0) hits.push(i);
+    }
+    if (!hits.length) return;
+    shown += hits.length;
+    body += '<div class="cardgrp">' + esc(band.label) +
+      ' <span class="cardgrpn">' + hits.length + "</span></div>";
+    if (!q) body += '<div class="foot" style="margin:0 0 6px">' + esc(band.note) + "</div>";
+    body += '<div class="tokgrid">';
+    hits.forEach(function (i) {
+      body += '<button class="tokpick' + (cur === i ? " sel" : "") +
+        '" data-act="tokenSet" data-i="' + i + '" title="' + esc(tokenLabel(i)) + '">' +
+        '<span class="face tok" style="' + tokenStyle(i) + '"></span>' +
+        '<span class="tokname">' + esc(tokenLabel(i)) + "</span></button>";
+    });
+    body += "</div>";
+  });
+  if (!shown) body += '<div class="foot">Nothing matches that.</div>';
+
+  body += '<div class="mfoot"><button class="bt cutsm" data-act="closeModal">Cancel</button></div>';
+  return body;
+};
 
 /* ---------- THE FAVOURITES USE WINDOW ------------------------
    A rail row is 250px wide and can hold one button, which forces every
@@ -695,8 +882,15 @@ EXT.initiativeModal = function () {
 
   body += '<div class="ph2">Who is in it</div>';
   m.rows.forEach(function (r, i) {
+    /* Hal wears his own portrait and the party wear the faces set on the
+       roster; only a foe gets to choose one here, because only a foe's is
+       a fresh decision every fight. */
+    const face = tokenFace({ hal: r.kind === "hal", token: r.token, name: r.name });
     body += '<div class="ordrow">' +
-      '<span class="oi">' + (i + 1) + "</span>" +
+      (r.kind === "foe"
+        ? '<button class="facebtn" data-act="tokenModal" data-kind="row" data-i="' + i +
+          '" title="Pick a face for this line">' + face + "</button>"
+        : '<span class="facebtn fixed">' + face + "</span>") +
       (r.kind === "foe"
         ? '<input class="on rowname" value="' + esc(r.name) +
           '" placeholder="Goblins, the ogre…" data-act="initName" data-i="' + i + '">'
@@ -1192,6 +1386,55 @@ Object.assign(ACT, {
     UI.modal = { type: "initiative", editing: true, rows: rowsFromOrder() };
     render();
   },
+  /* ---- Picking a face ----
+     One opener and one setter, told apart by what they were opened
+     against. A roster member's face is written to the sheet; a row of the
+     initiative sheet's is written to the row, and only reaches the sheet
+     if that fight is actually started. */
+  tokenModal(el) {
+    const kind = el.dataset.kind;
+    let current = null, who = "", back = null;
+    if (kind === "party") {
+      const m = (S.party.roster || []).filter(function (x) { return x.id === el.dataset.id; })[0];
+      current = m ? m.token : null;
+      who = m ? m.name : "";
+    } else if (kind === "person") {
+      const pr = personById(el.dataset.id);
+      current = pr ? pr.token : null;
+      who = pr ? pr.name : "";
+    } else {
+      /* Opening a second modal would throw away the initiative sheet, so
+         its rows ride along and are put back on the way out. */
+      const r = UI.modal.rows[parseInt(el.dataset.i, 10)];
+      current = r ? r.token : null;
+      who = r ? (r.name || "this line") : "";
+      back = { type: "initiative", editing: UI.modal.editing, rows: UI.modal.rows };
+    }
+    UI.modal = { type: "token", target: { kind: kind, id: el.dataset.id, i: el.dataset.i },
+                 current: current, who: who, q: "", back: back };
+    render();
+  },
+  tokenSearch(el) { UI.modal.q = el.value; render(); },
+  tokenSearchClear() { UI.modal.q = ""; render(); },
+  tokenSet(el) {
+    const raw = el.dataset.i;
+    const v = raw === "" ? null : validToken(parseInt(raw, 10));
+    const t = UI.modal.target, back = UI.modal.back;
+    if (t.kind === "party" || t.kind === "person") {
+      const roster = t.kind === "party" ? "party" : "people";
+      mutate(function (st) {
+        const list = roster === "party" ? st.party.roster : st.people;
+        const rec = list.filter(function (x) { return x.id === t.id; })[0];
+        if (rec) rec.token = v;
+      }, "Set a face");
+      UI.modal = null;
+    } else {
+      back.rows[parseInt(t.i, 10)].token = v;
+      UI.modal = back;
+    }
+    render();
+  },
+
   /* ---- The favourites use window ----
      Opening it is free and spends nothing; every button inside goes
      through the same doUse() the rest of the app does. */
@@ -1245,11 +1488,12 @@ Object.assign(ACT, {
   },
   initDrop(el) { UI.modal.rows.splice(parseInt(el.dataset.i, 10), 1); render(); },
   initAddFoe() {
-    UI.modal.rows.push({ key: newId("f:"), kind: "foe", name: "", init: null });
+    UI.modal.rows.push({ key: newId("f:"), kind: "foe", name: "", init: null, token: null });
     render();
   },
   initAddHal() {
-    UI.modal.rows.unshift({ key: "hal", kind: "hal", name: S.identity.name || "Hal", init: null });
+    UI.modal.rows.unshift({ key: "hal", kind: "hal", name: S.identity.name || "Hal",
+                            init: null, token: null });
     render();
   },
   initAddParty() {
@@ -1257,7 +1501,8 @@ Object.assign(ACT, {
     UI.modal.rows.forEach(function (r) { have[r.key] = true; });
     (S.party.roster || []).filter(function (m) { return m.present; }).forEach(function (m) {
       if (!have["p:" + m.id]) {
-        UI.modal.rows.push({ key: "p:" + m.id, kind: "party", name: m.name, init: null });
+        UI.modal.rows.push({ key: "p:" + m.id, kind: "party", name: m.name,
+                             init: null, token: m.token });
       }
     });
     render();
@@ -1278,7 +1523,7 @@ Object.assign(ACT, {
     });
     const order = sorted.map(function (r) {
       return { id: r.key, initiative: r.init,
-               ref: refFor(r.key, r.kind, r.name.trim()) };
+               ref: refFor(r.key, r.kind, r.name.trim(), r.token) };
     });
     const editing = !!UI.modal.editing;
     mutate(function (st) {
@@ -1654,7 +1899,7 @@ render = function () {
      so a later throw in the glow/bar/panel steps below can never leave a
      half-open modal shell on screen with no content and no way to close it. */
   const root = document.getElementById("modal-root");
-  if (UI.modal && ["roll", "override", "settings", "loh", "history", "attack", "initiative", "favUse", "session", "preSession"].indexOf(UI.modal.type) >= 0) {
+  if (UI.modal && ["roll", "override", "settings", "loh", "history", "attack", "initiative", "favUse", "token", "session", "preSession"].indexOf(UI.modal.type) >= 0) {
     let body = "";
     if (UI.modal.type === "roll") body = EXT.rollModal();
     else if (UI.modal.type === "override") body = EXT.overrideModal();
@@ -1663,6 +1908,7 @@ render = function () {
     else if (UI.modal.type === "attack") body = EXT.attackModal();
     else if (UI.modal.type === "initiative") body = EXT.initiativeModal();
     else if (UI.modal.type === "favUse") body = EXT.favUseModal();
+    else if (UI.modal.type === "token") body = EXT.tokenModal();
     else if (UI.modal.type === "session") body = EXT.sessionModal();
     else if (UI.modal.type === "preSession") body = EXT.preSessionModal();
     else if (UI.modal.type === "history") {
@@ -1728,6 +1974,9 @@ render = function () {
   /* Panels injected above didn't exist when the base render folded
      things, so fold again now that the DOM is final. */
   applyPanelFolds();
+  /* Same reason, one step later: the order strip can only be measured
+     once it is in the document. */
+  fitOrderStrip();
 };
 
 /* Re-render once combat.js has patched everything */

@@ -14,7 +14,7 @@ After that, opening Hal is one tap and works with no internet.
 
 ## Before you start
 
-You need these 18 files. They are all in the `hal-sheet` folder:
+You need these 19 files. They are all in the `hal-sheet` folder:
 
 | File | What it is |
 |---|---|
@@ -25,6 +25,7 @@ You need these 18 files. They are all in the `hal-sheet` folder:
 | `app.js` | The buttons, saving, and level-up engine |
 | `combat.js` | Combat mode, casting, active effects, undo, settings |
 | `backup.js` | Local redundancy and optional automatic cloud backup |
+| `tokens.jpg` | Every combatant portrait, on one sheet |
 | `sw.js` | Makes it work offline |
 | `manifest.json` | Makes it installable as an app |
 | `icon-180.png` | Home Screen icon |
@@ -79,9 +80,9 @@ You'll now be on a mostly empty page with setup instructions. Ignore all of it.
    - *If you can't find that link:* go to `https://github.com/YOUR-USERNAME/hal-sheet/upload/main` in your address bar, replacing `YOUR-USERNAME` with your GitHub username.
 2. You'll see a large dashed box that says **Drag files here to add them to your repository**.
 3. Open the `hal-sheet` folder on your computer.
-4. Select the 18 files listed in the table above. (Click the first, then hold **Ctrl** and click each of the others. On a Mac, hold **Cmd**.)
-5. Drag all 17 into the dashed box on the GitHub page.
-6. Wait for all 17 filenames to appear in a list. **Check the count is 17** before continuing.
+4. Select the 19 files listed in the table above. (Click the first, then hold **Ctrl** and click each of the others. On a Mac, hold **Cmd**.)
+5. Drag all 19 into the dashed box on the GitHub page.
+6. Wait for all 19 filenames to appear in a list. **Check the count is 19** before continuing.
 
 ### Step 1.5 — Commit the upload
 
@@ -91,7 +92,7 @@ Scroll down to the box titled **Commit changes**.
 2. Leave **Commit directly to the `main` branch** selected.
 3. Click the green **Commit changes** button.
 
-You should now see all 18 files listed. **Part 1 is done.**
+You should now see all 19 files listed. **Part 1 is done.**
 
 ---
 
@@ -267,11 +268,21 @@ A **carried item's** window shows how many you have and does both directions: ty
 
 **People** (World → People) is where everyone the campaign has introduced goes, alongside the clans, guilds and orders behind them. Nothing is required but a name — and the name can be "the one-eyed innkeeper". Everything else is added a detail at a time: tap **Race**, **Role**, **Where** or any of the other suggestions to add that label, or **Something else** to write your own, and a detail you never add simply doesn't exist on the record. Tap the standing chip to cycle how they regard you (Ally → Friendly → Neutral → Wary → Hostile), which colours the edge of their card, and the fate chip for Alive / Dead / Missing. Add a clan or guild the same way, then open a person and tap the clan to put them in it — the clan's card then counts its members. The search box looks through names, details, notes and clan names at once, so "Gloomwood" or "owes me" finds the right person when the name has gone.
 
+**Tools and kits** sit under Skills in the left rail, and they roll. The 2024 rules give every tool a named ability and a Utilize entry, so a proficiency is a number rather than a line of trivia: Cook's Utensils is Wisdom, Thieves' Tools are Dexterity, Smith's Tools are Strength. Tap one to see where the bonus comes from and what the tool actually does at what DC. Add more in Edit mode — picking from the list gets the 2024 ability right without looking it up — and the ability stays editable, because a DM can call a Cook's Utensils check on Constitution for a night's cooking and the sheet should follow the table.
+
 **Tap any number** — a save, AC, the Lay on Hands pool — to see exactly where it comes from. Yellow entries scale automatically with your level; violet entries come from a feat and stay put.
 
 **Tap Hal's portrait** in the top-left of the header for a full-size view. It automatically swaps between six states as HP changes: pristine, hurt, wounded, bloodied, downed, and gone.
 
 **Tapping a name now does the useful thing, not the wiki.** Tap a spell to cast it, a weapon to open its attack roll, an active condition to remove it. The wiki is still one tap away — look for the small `wiki ↗` control next to the name.
+
+**The turn order runs along the bottom of the combat strip.** Everyone in the fight, in initiative order, each with a portrait — whoever is up is bigger, brighter and in yellow; everyone else is dimmed, and the one immediately after them has a cyan edge. It's a readout, not a control: nothing in it is tappable, because a mis-tap mid-fight that silently changed whose turn it was would be worse than the problem it solved. Correcting the order is what **Turn order** is for. If a fight has too many people for one row, the other portraits shrink in steps until it fits — whoever is up never shrinks.
+
+**Portraits** all come from one image, `tokens.jpg`, in five banded groups: **The party** (Qee, Gill, Dinos, Karlie, Sol), **Faces** (painted portraits for innkeepers and captains), **Adventurers** (rival parties and hired swords), **Kin** (goblins, orcs, lizardfolk, drow, tieflings, beastfolk) and **Monsters** (dragons, undead, things with too many eyes) — 149 in all, searchable by name. Hal is the exception and keeps his own six portraits, which change as he gets hurt.
+
+A party member's face is set once, from the **Party** panel, and is theirs from then on; anyone named Qee, Gill, Dinos, Karlie or Sol is given theirs automatically. An enemy's is picked on the initiative sheet beside their name, and comes back with them next fight. People on the **People** tab wear faces from the same sheet — tap the portrait on any record to set it.
+
+To change the art, drop new files into `portraits/` and run `python tools/build-tokens.py`, which rebuilds `tokens.jpg`.
 
 **Entering combat rolls initiative.** Pressing **Enter combat** opens a sheet with you and everyone marked Present already on it, plus the enemies you named in the last fight (names only — everyone rolls again). Type what each of them got, add enemy lines with **+ Enemy**, and press **Start the fight**: it sorts highest-first, opens on whoever won, and sets the round to 1. Nothing is written until you press that button, so opening it and thinking better of it leaves no trace. Enemies are **one line each, not one per body** — the table rolls once for the goblins, so the sheet holds one entry for the goblins. Mid-fight, **Turn order** opens the same sheet seeded with the numbers already rolled, so you correct rather than retype.
 
@@ -292,7 +303,7 @@ A **carried item's** window shows how many you have and does both directions: ty
 ## If something goes wrong
 
 **The sheet is blank or half-broken.**
-One of the `.js` files probably didn't upload. Go to the **Code** tab and confirm all 18 files are listed with sensible sizes (`rules.js` and `app.js` should each be tens of KB, not 0; each portrait should be a few hundred KB, not 0).
+One of the `.js` files probably didn't upload. Go to the **Code** tab and confirm all 19 files are listed with sensible sizes (`rules.js` and `app.js` should each be tens of KB, not 0; each portrait should be a few hundred KB, not 0).
 
 **Changes aren't saving.**
 Check you're not in Safari Private Browsing — it blocks local storage. Open Hal from the Home Screen icon instead.

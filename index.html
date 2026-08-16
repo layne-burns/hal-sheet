@@ -693,6 +693,98 @@ body.onecol .mpin .mlab{font-size:10px;max-width:84px}
 .tagbar{margin-bottom:9px}
 .tagbar .tag{cursor:pointer;margin:0}
 
+/* ---------- FACES ----------
+   Every portrait in the app that isn't Hal's own comes out of one sheet,
+   addressed by a background-position the markup supplies. Sizing lives
+   here and only here, so the same face renders at 30px in the combat
+   strip and 54px in the picker without either knowing about the other.
+
+   --face is the knob. background-size is the sheet in tiles: 12 wide by
+   13 tall, which is the one number that has to match build-tokens.py. */
+.face{--face:32px;display:block;width:var(--face);height:var(--face);flex:none;
+  border:1px solid var(--line2);background-color:var(--panel2);overflow:hidden}
+.face.tok{background-image:url(tokens.jpg);background-size:1200% 1300%;
+  background-repeat:no-repeat}
+.face.halface img{width:100%;height:100%;object-fit:cover;object-position:50% 12%;display:block}
+/* No token chosen: the initial, which is a portrait nobody has to pick. */
+.face.noface{display:flex;align-items:center;justify-content:center;font-family:var(--m);
+  font-size:calc(var(--face) * .45);color:var(--dim);letter-spacing:0;background:var(--panel3)}
+.facebtn{padding:0;background:none;border:none;flex:none;line-height:0;cursor:pointer}
+.facebtn:hover .face{border-color:var(--cyan)}
+.facebtn.fixed{cursor:default}
+
+/* ---------- THE ORDER, ALONG THE BOTTOM OF THE COMBAT STRIP ----------
+   One row, in initiative order, on a line of its own under the round
+   counter. It had a spell sharing the row with Next turn and Exit combat,
+   which meant it only got the leftovers — and the leftovers on an iPad
+   were not enough to keep it to one line. Full width it fits everywhere,
+   and the same shape reads on the tablet as on a desktop.
+
+   Everyone but the live one is dimmed and desaturated rather than hidden:
+   the whole reason there are faces here is that you can see who is coming
+   without reading, so the picture stays legible and the text recedes. */
+.ordstrip{flex:1 0 100%;min-width:0;display:flex;gap:5px;align-items:center;flex-wrap:wrap;
+  margin-top:7px;padding-top:7px;border-top:1px solid var(--line2)}
+/* flex:none, so a crowded row wraps a whole chip onto the next line
+   rather than squeezing every name down to two letters. */
+.ordc{display:flex;align-items:center;gap:6px;padding:2px 9px 2px 2px;flex:none;
+  border:1px solid var(--line);background:var(--panel);opacity:.7;min-width:0}
+.ordc .ordface{--face:46px;filter:saturate(.5)}
+.ordn{font-family:var(--m);font-size:13.5px;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:118px}
+.ordi{font-family:var(--m);font-size:15px;color:var(--dimmer);flex:none;
+  font-variant-numeric:tabular-nums}
+/* Up now. A slightly bigger face — enough to find at a glance without
+   shoving the row out of line — plus the yellow the app uses everywhere
+   else for "this is the live one". */
+.ordc.on{opacity:1;border-color:var(--yel);background:#1A1800;box-shadow:inset 3px 0 0 var(--yel);
+  padding-right:11px}
+.ordc.on .ordface{--face:55px;border-color:var(--yel);filter:none}
+.ordc.on .ordn{color:var(--yel);font-size:15px}
+.ordc.on .ordi{color:var(--yel);font-size:17px}
+/* On deck. One cyan edge, because "who is immediately after me" is the
+   second question the strip answers. */
+.ordc.next{opacity:.92}
+.ordc.next .ordface{border-color:var(--cyan);filter:saturate(.8)}
+/* An ally's condition rides along, since this is the one place the whole
+   fight is listed. */
+.ordc.st-bloodied .ordface{border-color:var(--yel)}
+.ordc.st-down{opacity:.4}
+.ordc.st-down .ordface{border-color:var(--mag)}
+.ordc.st-down .ordn{text-decoration:line-through}
+/* The fit steps, applied by fitOrderStrip() until the row holds one line.
+   Every one of them is scoped :not(.on) — whoever is up keeps its size
+   through all of them, which is the whole point of stepping the others
+   down. The last two drop the names: at 19px a face is still a face, and
+   a four-letter name is not a name. */
+.ordstrip.fit-1 .ordc:not(.on) .ordface{--face:40px}
+.ordstrip.fit-1 .ordc:not(.on) .ordn{max-width:76px;font-size:12px}
+.ordstrip.fit-2{gap:4px}
+.ordstrip.fit-2 .ordc:not(.on){padding:2px 6px 2px 2px;gap:4px}
+.ordstrip.fit-2 .ordc:not(.on) .ordface{--face:34px}
+.ordstrip.fit-2 .ordc:not(.on) .ordn{max-width:52px;font-size:11px}
+.ordstrip.fit-2 .ordc:not(.on) .ordi{display:none}
+.ordstrip.fit-3{gap:3px}
+.ordstrip.fit-3 .ordc:not(.on){padding:2px;gap:0}
+.ordstrip.fit-3 .ordc:not(.on) .ordface{--face:30px}
+.ordstrip.fit-3 .ordc:not(.on) .ordn,.ordstrip.fit-3 .ordc:not(.on) .ordi{display:none}
+.ordstrip.fit-4{gap:2px}
+.ordstrip.fit-4 .ordc:not(.on){padding:1px;gap:0;border-color:transparent;background:none}
+.ordstrip.fit-4 .ordc:not(.on) .ordface{--face:25px}
+.ordstrip.fit-4 .ordc:not(.on) .ordn,.ordstrip.fit-4 .ordc:not(.on) .ordi{display:none}
+/* ---------- THE FACE PICKER ---------- */
+.tokgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:5px;
+  margin-bottom:12px}
+.tokpick{display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 3px;
+  border:1px solid var(--line);background:var(--panel2);min-width:0}
+.tokpick .face{--face:54px}
+.tokpick:hover{border-color:var(--cyan)}
+.tokpick.sel{border-color:var(--yel);background:#1A1800}
+.tokname{font-family:var(--m);font-size:10.5px;letter-spacing:.04em;color:var(--dimmer);
+  text-align:center;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  max-width:100%}
+.tokpick.sel .tokname{color:var(--yel)}
+
 /* ---------- WHAT EVERYONE ELSE HAS RUNNING ----------
    Shaped like the effects rows above it rather than like a card, because
    it belongs to the same question — the accent bar says whose kind of
@@ -727,7 +819,21 @@ body.onecol .mpin .mlab{font-size:10px;max-width:84px}
    up, exactly like a spell — with one addition: the left edge carries how
    they regard you, so a column of thirty names sorts itself into friends
    and problems before you have read one of them. */
-.card.person{border-left:3px solid var(--acc,var(--line2))}
+/* A face goes in front of the text, spanning the card's three text rows
+   so the name, the meta line and the chips all sit beside it. The card is
+   a two-column grid already (text, then controls); this makes it three
+   without touching anything that doesn't have a face. */
+.card.person{border-left:3px solid var(--acc,var(--line2));
+  grid-template-columns:auto minmax(0,1fr) auto}
+.card.person>.pface{grid-column:1;grid-row:1/span 3;align-self:start;margin:1px 10px 0 0}
+.card.person>.pface .face{--face:60px}
+.card.person>.cardname,.card.person>.cardmeta,.card.person>.cardtags{grid-column:2}
+.card.person>.cardbtns{grid-column:3}
+.card.person>.carddetail{grid-column:1/-1}
+/* The editor is a plain stacked block, so the face just sits at the top
+   of its first row rather than spanning anything. */
+.card.person.carded>.pface{margin:0 9px 0 0}
+.card.person.carded>.pface .face{--face:52px}
 .card.person.gone .cardname{color:var(--dim);text-decoration:line-through}
 .card.person.s-ally{--acc:var(--grn)}
 .card.person.s-friendly{--acc:var(--cyan)}
@@ -944,6 +1050,15 @@ textarea.notes{width:100%;min-height:140px;line-height:1.6;font-family:var(--f);
 .kv:last-child{border-bottom:none}
 .kv span:first-child{color:var(--dim)}
 .gridcols{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:0 18px}
+/* Tool rows in edit mode: a name that takes the space, the ability it
+   rolls on, a doubler and a delete. The rail is 240px, so everything but
+   the name is fixed and small. */
+.toolrow.ed{display:flex;gap:4px;align-items:center;margin-bottom:4px}
+.toolrow.ed input{flex:1;min-width:0;font-size:15px;padding:5px 7px}
+.toolrow.ed select{flex:none;font-size:14px;padding:5px 4px}
+.toolrow.ed .bt,.toolrow.ed .tg{flex:none;padding:5px 7px}
+/* The ability a tool rolls on, beside its bonus. */
+.row .sc{margin-right:5px}
 
 /* ---------- CALENDAR ---------- */
 .calday{font-family:var(--m);font-size:27px;color:var(--yel);letter-spacing:.04em;line-height:1.15}
@@ -1001,6 +1116,21 @@ body.compact .v .n{font-size:24px}
 body.compact .tab{padding:8px 13px;letter-spacing:.1em}
 body.compact .subtabs{margin-left:3px;padding-left:8px}
 body.compact .subtab{padding:5px 9px;letter-spacing:.08em}
+/* The order strip is the widest thing in the combat bar and it is the
+   one thing that must not cost three rows of a 740px screen. It sheds in
+   the order the information is least needed: the initiative number first
+   (the sequence is the order itself, and the number is in the tooltip),
+   then width off the name — the face beside it is doing the identifying,
+   which is why the faces are there. */
+body.compact .ordstrip{gap:4px;margin-top:6px;padding-top:6px}
+body.compact .ordc{padding:2px 7px 2px 2px;gap:5px}
+body.compact .ordc .ordface{--face:42px}
+body.compact .ordc.on .ordface{--face:50px}
+body.compact .ordn{font-size:12.5px;letter-spacing:.04em;max-width:100px}
+body.compact .ordi{font-size:14px}
+/* One column is a phone. The initiative number is the first thing to go —
+   the sequence is the row itself, and the number is in the tooltip. */
+body.onecol .ordi{display:none}
 /* Reminders stay loud enough to notice, quiet enough to not cost a fifth of
    the viewport. The date rides on the same line as the title instead of
    below it, which is the whole of the height difference. */

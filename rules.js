@@ -79,6 +79,77 @@ const TAG_GROUPS = {
   reach:  "Reach"
 };
 
+/* ---------- TOOLS (2024) ------------------------------------
+   The 2024 rules changed what a tool is. In 2014 a tool proficiency was
+   a vague licence to add your bonus when the DM felt like it; in 2024
+   every tool names the ability it is used with, and each one has a
+   Utilize entry saying what it actually does and against what DC. That
+   is the whole reason this table exists — "proficient in Cook's
+   Utensils" is trivia, "+4 Wisdom, and DC 15 tells you the stew is
+   poisoned" is a thing you do at a table.
+
+   `ability` is the ability the tool's own entry names. The DM can still
+   call for a different one — a whole night's cooking is Constitution
+   whatever the table says — so it stays editable per entry; this is the
+   default, not a cage.
+
+   Musical instruments and gaming sets are single entries here rather
+   than one per bagpipe: the rules treat each kind as its own
+   proficiency, and the name field is free text, so "Musical Instrument
+   (lute)" is what you type. */
+const TOOLS_2024 = {
+  alchemist:    { name: "Alchemist's Supplies", ability: "int",
+                  use: "Identify a substance (DC 15), or start a fire (DC 15)." },
+  brewer:       { name: "Brewer's Supplies", ability: "int",
+                  use: "Detect poison or spoilage (DC 15), or identify alcohol (DC 10)." },
+  calligrapher: { name: "Calligrapher's Supplies", ability: "dex",
+                  use: "Write with impressive flourishes (DC 10), or tell whether two samples of handwriting match (DC 15)." },
+  carpenter:    { name: "Carpenter's Tools", ability: "str",
+                  use: "Seal or pry open a door or container (DC 20)." },
+  cartographer: { name: "Cartographer's Tools", ability: "wis",
+                  use: "Draft a map of a small area (DC 15)." },
+  cobbler:      { name: "Cobbler's Tools", ability: "dex",
+                  use: "Modify footwear to give the wearer Advantage on their next Acrobatics check (DC 10)." },
+  cook:         { name: "Cook's Utensils", ability: "wis",
+                  use: "Improve food's flavour (DC 10), or detect spoiled or poisoned food (DC 15)." },
+  disguise:     { name: "Disguise Kit", ability: "cha",
+                  use: "Apply makeup (DC 10)." },
+  forgery:      { name: "Forgery Kit", ability: "dex",
+                  use: "Mimic ten or fewer words of handwriting (DC 15), or duplicate a seal (DC 20)." },
+  gaming:       { name: "Gaming Set", ability: "wis",
+                  use: "Discern whether someone is cheating (DC 10)." },
+  glassblower:  { name: "Glassblower's Tools", ability: "int",
+                  use: "Discern what a glass object last held (DC 10)." },
+  herbalism:    { name: "Herbalism Kit", ability: "int",
+                  use: "Identify a plant (DC 10)." },
+  jeweler:      { name: "Jeweler's Tools", ability: "int",
+                  use: "Discern an object's value (DC 15), or a gem's (DC 10)." },
+  leatherworker:{ name: "Leatherworker's Tools", ability: "dex",
+                  use: "Add a design to a leather item (DC 10)." },
+  mason:        { name: "Mason's Tools", ability: "str",
+                  use: "Chisel a symbol or hole into stone (DC 10)." },
+  instrument:   { name: "Musical Instrument", ability: "cha",
+                  use: "Play a known tune (DC 10), or improvise a song (DC 15)." },
+  navigator:    { name: "Navigator's Tools", ability: "wis",
+                  use: "Plot a course (DC 10)." },
+  painter:      { name: "Painter's Supplies", ability: "wis",
+                  use: "Paint an image of something you have seen (DC 10)." },
+  poisoner:     { name: "Poisoner's Kit", ability: "int",
+                  use: "Apply poison (DC 10)." },
+  potter:       { name: "Potter's Tools", ability: "int",
+                  use: "Discern what a ceramic object last held (DC 10), or reconstruct a shattered one (DC 20)." },
+  smith:        { name: "Smith's Tools", ability: "str",
+                  use: "Pry apart metal (DC 20)." },
+  thieves:      { name: "Thieves' Tools", ability: "dex",
+                  use: "Pick a lock (DC 15), or disarm a trap (DC 15)." },
+  tinker:       { name: "Tinker's Tools", ability: "dex",
+                  use: "Assemble a Tiny item from scrap (DC 20)." },
+  weaver:       { name: "Weaver's Tools", ability: "dex",
+                  use: "Repair a tear in cloth (DC 10), or sew a Tiny design (DC 10)." },
+  woodcarver:   { name: "Woodcarver's Tools", ability: "dex",
+                  use: "Carve a pattern into wood (DC 10)." }
+};
+
 /* ---------- WEAPON MASTERIES -------------------------------- */
 const MASTERIES = {
   vex:    { name: "Vex",    slug: "equipment:weapon",
@@ -736,6 +807,22 @@ const CALC = {
     return { value: m + bonus, sources, proficient:isProf, expertise:isExp };
   },
 
+  /* The same arithmetic a skill gets, for a proficiency that isn't one.
+     Shares the shape of skill() — value plus sources — so the provenance
+     panel can open on a tool without knowing what a tool is. */
+  tool(S, t) {
+    const ab = ABILITY_NAMES[t.ability] ? t.ability : "wis";
+    const m = CALC.mod(S.abilities[ab]);
+    const p = CALC.profBonus(S.level);
+    const bonus = t.expertise ? p * 2 : p;
+    const sources = [{ kind: "ability", label: ABILITY_NAMES[ab] + " modifier", value: m }];
+    sources.push(t.expertise
+      ? { kind: "proficiency", label: "Expertise (2x proficiency)", value: p * 2 }
+      : { kind: "proficiency", label: "Proficiency", value: p });
+    return { value: m + bonus, sources: sources, ability: ab,
+             proficient: true, expertise: !!t.expertise };
+  },
+
   armorClass(S) {
     const a = ARMOR[S.equipment.armor] || ARMOR.none;
     const dex = CALC.mod(S.abilities.dex);
@@ -1153,7 +1240,19 @@ const SEED = {
   saveProficiencies: ["wis", "cha"],
   skillProficiencies: ["deception", "insight", "intimidation", "persuasion"],
   skillExpertise: [],
-  toolProficiencies: ["Cook's Utensils"],
+  /* Tools and anything else you are proficient with that isn't one of the
+     eighteen skills. They were a comma-separated string on the Inventory
+     tab — true, and useless, because the one thing you ever want from a
+     proficiency is the number you add to the roll.
+
+     A tool has no fixed ability the way a skill does: Cook's Utensils is
+     Wisdom when you are judging a stew and Constitution when you are
+     working a kitchen all night, and the DM says which. So the ability is
+     a field you set, not a lookup, and it can be changed in a tap when
+     the call goes the other way. */
+  tools: [
+    { id: "t-cooks", key: "cook", name: "Cook's Utensils", ability: "wis", expertise: false }
+  ],
   weaponProficiencies: ["Simple", "Martial"],
   armorTraining: ["Light", "Medium", "Heavy", "Shields"],
 
@@ -1370,5 +1469,5 @@ if (typeof module !== "undefined" && module.exports) {
     ASI_LEVELS, OATH_SPELLS, SPELLS, PALADIN_SPELL_LIST, FEATS, FEATURES, CONDITIONS,
     STEED_FORMS, STEED_TYPES, STEED_ABILITIES, FOLLOWER_SOURCES, FAMILIAR_TYPES, FAMILIAR_GUIDE,
     COMBAT_RULES, SIZE_ORDER,
-    SKILL_ABILITY, SKILL_NAMES, ABILITY_NAMES, CALC, SEED };
+    TOOLS_2024, SKILL_ABILITY, SKILL_NAMES, ABILITY_NAMES, CALC, SEED };
 }

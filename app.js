@@ -108,6 +108,10 @@ function migrate(st) {
   delete out.settings.creatureTracker;
   out.party = Object.assign({ roster: [] }, st.party || {});
   /* Backfill status on party rosters saved before the status field existed. */
+  /* No `token` default: an absent one has to stay absent, because
+     clampState reads undefined as "nobody has chosen a face yet" and
+     null as "chosen: none". Defaulting it here would make the two
+     indistinguishable. */
   out.party.roster = (out.party.roster || []).map(function (m) {
     return Object.assign({ status: "healthy" }, m);
   });
@@ -116,6 +120,20 @@ function migrate(st) {
      seed's arrays by reference. */
   out.people = st.people || [];
   out.favourites = st.favourites || [];
+
+  /* Tool proficiencies used to be a list of bare names printed on the
+     Inventory tab. They are rollable entries now, so an older save's
+     names are carried across and given a default ability — Wisdom, which
+     is the one most tool checks are called on — rather than dropped. */
+  if (!st.tools && Array.isArray(st.toolProficiencies)) {
+    out.tools = st.toolProficiencies.map(function (n, i) {
+      return { id: "t-" + i + "-" + String(n).toLowerCase().replace(/[^a-z0-9]+/g, ""),
+               name: String(n), ability: "wis", expertise: false };
+    });
+  } else if (st.tools) {
+    out.tools = st.tools;
+  }
+  delete out.toolProficiencies;
   out.session = Object.assign({}, base.session, st.session || {});
   out.session.stats = Object.assign({}, base.session.stats, (st.session || {}).stats || {});
   out.sessionHistory = st.sessionHistory || [];
@@ -243,7 +261,42 @@ function clampState(st) {
      session log or party roster by omitting an array. */
   if (!Array.isArray(st.session.log)) st.session.log = [];
   if (!Array.isArray(st.sessionHistory)) st.sessionHistory = [];
+  /* Tool entries: a name, an ability the roll uses, and whether it is
+     doubled. The ability has to be one of the six or the arithmetic has
+     nothing to stand on. */
+  if (!Array.isArray(st.tools)) st.tools = [];
+  st.tools.forEach(function (t) {
+    if (!t.id) t.id = uid("t");
+    t.name = typeof t.name === "string" && t.name ? t.name : "Tool";
+    if (!ABILITY_NAMES[t.ability]) {
+      t.ability = (TOOLS_2024[t.key] && TOOLS_2024[t.key].ability) || "wis";
+    }
+    t.expertise = !!t.expertise;
+  });
+
   if (!Array.isArray(st.party.roster)) st.party.roster = [];
+  /* The party's faces are fixed, so a roster member named for one of them
+     gets theirs without being asked — including after a rename, since
+     partyAdd names people "Party member 2" and you fix that afterwards.
+
+     The guess only ever fills a blank. `undefined` is "nobody has said",
+     which is what keeps guessing; `null` is "no face, thank you", which
+     is a decision and is left alone. Without that distinction, clearing
+     Gill's face would silently hand it straight back on the next
+     keystroke. */
+  st.party.roster.forEach(function (m) {
+    if (m.token !== undefined && m.token !== null) m.token = validToken(m.token);
+    if (m.token === undefined) {
+      const known = TOKEN_PARTY.map(function (n) { return n.toLowerCase(); })
+        .indexOf(String(m.name || "").trim().toLowerCase());
+      if (known >= 0) m.token = known;
+    }
+  });
+  /* Same for anyone in the order: a foe's face rides on its entry,
+     because there is no roster behind a foe to hold one. */
+  (st.combat.order || []).forEach(function (o) {
+    if (o.ref && o.ref.type === "foe") o.ref.token = validToken(o.ref.token);
+  });
   if (!Array.isArray(st.followers)) st.followers = [];
   /* A follower's HP is the only number it owns, so it's the only one
      that can go out of range — and a summon at 0 HP is already gone. */
@@ -280,6 +333,7 @@ function clampState(st) {
       return { k: String((f && f.k) || ""), v: String((f && f.v) || "") };
     });
     p.groups = Array.isArray(p.groups) ? p.groups : [];
+    p.token = validToken(p.token);
   });
   /* A person can't belong to a clan that has since been deleted, and a
      clan can't belong to anything — drop both rather than render a chip
@@ -1567,6 +1621,36 @@ const ACT = {
       st.customEntries = st.customEntries.filter(function (c) { return c.id !== id; });
     });
   },
+  /* ---- Tools ---- */
+  toolAdd() {
+    const sel = document.getElementById("tool-new");
+    const k = sel ? sel.value : "";
+    if (!k) return;
+    const cat = TOOLS_2024[k];
+    const id = uid("t");
+    mutate(function (st) {
+      st.tools.push(cat
+        ? { id: id, key: k, name: cat.name, ability: cat.ability, expertise: false }
+        : { id: id, key: null, name: "New proficiency", ability: "wis", expertise: false });
+    }, "Add a proficiency");
+  },
+  toolName(el) {
+    const i = parseInt(el.dataset.i, 10), v = el.value;
+    mutate(function (st) { if (st.tools[i]) st.tools[i].name = v; });
+  },
+  toolAbility(el) {
+    const i = parseInt(el.dataset.i, 10), v = el.value;
+    mutate(function (st) { if (st.tools[i]) st.tools[i].ability = v; });
+  },
+  toolExpertise(el) {
+    const i = parseInt(el.dataset.i, 10);
+    mutate(function (st) { if (st.tools[i]) st.tools[i].expertise = !st.tools[i].expertise; });
+  },
+  toolDel(el) {
+    const i = parseInt(el.dataset.i, 10);
+    mutate(function (st) { st.tools.splice(i, 1); }, "Remove a proficiency");
+  },
+
   addItem() {
     mutate(function (st) {
       st.equipment.inventory.push({ id: uid("i"), name: "New item", qty: 1, tags: [],
@@ -2114,8 +2198,66 @@ function leftRail() {
   if (!E) out += '<div class="foot">Tap Edit to change proficiencies</div>';
   out += "</div>";
 
+  out += toolPanel(E);
+
   if (UI.prov) out += provPanel();
   return out;
+}
+
+/* ---------- TOOLS AND OTHER PROFICIENCIES ----------
+   Sits under Skills because it is the same question — what do I add to
+   this roll — and it used to be answered by a comma-separated list on
+   the Inventory tab that named the tool and stopped there.
+
+   In the 2024 rules each tool names the ability it uses, so the number
+   is derivable and the row can carry it. The ability is still editable:
+   the DM can call a Cook's Utensils check on Constitution for a night
+   of cooking, and the sheet should follow the table rather than argue
+   with it. */
+function toolPanel(E) {
+  let out = '<div class="pnl cut"><h3>Tools &amp; kits <span class="cnt">' +
+    (S.tools.length || "none") + "</span></h3>";
+  if (!S.tools.length && !E) {
+    out += '<div class="foot" style="margin:0">No tool proficiencies. Tap Edit to add one.</div></div>';
+    return out;
+  }
+  S.tools.forEach(function (t, i) {
+    const calc = CALC.tool(S, t);
+    const cat = TOOLS_2024[t.key];
+    if (E) {
+      out += '<div class="toolrow ed">' +
+        '<input value="' + esc(t.name) + '" data-act="toolName" data-i="' + i + '">' +
+        '<select data-act="toolAbility" data-i="' + i + '">' +
+          ["str", "dex", "con", "int", "wis", "cha"].map(function (k) {
+            return '<option value="' + k + '"' + (calc.ability === k ? " selected" : "") + ">" +
+              k.toUpperCase() + "</option>";
+          }).join("") + "</select>" +
+        '<button class="tg cutsm' + (t.expertise ? " on" : "") +
+          '" data-act="toolExpertise" data-i="' + i + '" title="Double proficiency">2x</button>' +
+        '<button class="bt cutsm dg" data-act="toolDel" data-i="' + i + '">×</button></div>';
+    } else {
+      out += '<div class="row prof" data-act="prov" data-prov="tool:' + i + '" title="' +
+        esc(cat ? cat.use : "Your DM sets the ability and the DC.") + '">' +
+        '<span><i class="dot' + (t.expertise ? " exp" : "") + '"></i>' + esc(t.name) + "</span>" +
+        '<span><span class="sc">' + calc.ability.toUpperCase() + "</span> " +
+        sign(calc.value) + "</span></div>";
+    }
+  });
+  if (E) {
+    /* Adding from the catalogue rather than by typing is what gets the
+       2024 ability right without anyone having to look it up. */
+    out += '<div class="mrow" style="margin-top:7px"><select id="tool-new">' +
+      '<option value="">Add a tool…</option>' +
+      Object.keys(TOOLS_2024).sort(function (a, b) {
+        return TOOLS_2024[a].name.localeCompare(TOOLS_2024[b].name);
+      }).map(function (k) {
+        return '<option value="' + k + '">' + esc(TOOLS_2024[k].name) + " · " +
+          TOOLS_2024[k].ability.toUpperCase() + "</option>";
+      }).join("") +
+      '<option value="__own">Something else…</option></select>' +
+      '<button class="bt cutsm pri" data-act="toolAdd">Add</button></div>';
+  }
+  return out + "</div>";
 }
 
 /* ---------- PROVENANCE PANEL ---------- */
@@ -2137,6 +2279,12 @@ function provPanel() {
   } else if (key.indexOf("ability:") === 0) {
     const k = key.split(":")[1];
     title = ABILITY_NAMES[k] + " modifier"; data = CALC.abilityMod(S, k);
+  } else if (key.indexOf("tool:") === 0) {
+    const t = S.tools[parseInt(key.split(":")[1], 10)];
+    if (!t) return "";
+    title = t.name; data = CALC.tool(S, t);
+    const cat = TOOLS_2024[t.key];
+    if (cat) data = Object.assign({}, data, { note: cat.use });
   } else if (key.indexOf("skill:") === 0) {
     const k = key.split(":")[1];
     title = SKILL_NAMES[k]; data = CALC.skill(S, k);
@@ -2158,6 +2306,10 @@ function provPanel() {
   out += '<div class="tot"><span>Total</span><b>' + fmt(data.value) + "</b></div>";
   if (data.advantage) out += '<div class="pr k-feature"><span>Advantage</span><b>' + esc(data.advantage) + "</b></div>";
   if (data.stealthDis) out += '<div class="pr k-item"><span>Stealth</span><b>Disadvantage</b></div>';
+  /* What the 2024 rules say the tool actually does, which is the half of
+     a tool proficiency the sheet never used to carry. */
+  if (data.note) out += '<div class="pr k-feature" style="margin-top:6px">' +
+    '<span style="text-align:left">' + esc(data.note) + "</span></div>";
   out += '<div class="pr" style="margin-top:6px;color:var(--dimmer)"><span>' +
     "Yellow scales with level · violet is from a feat</span></div>";
   out += "</div>";
@@ -2582,7 +2734,12 @@ function inventoryTab() {
   out += '<div class="pnl cut"><h3>Proficiencies</h3>' +
     '<div class="kv"><span>Armor</span><span>' + S.armorTraining.join(", ") + "</span></div>" +
     '<div class="kv"><span>Weapons</span><span>' + S.weaponProficiencies.join(", ") + "</span></div>" +
-    '<div class="kv"><span>Tools</span><span>' + S.toolProficiencies.join(", ") + "</span></div>" +
+    '<div class="kv"><span>Tools</span><span>' +
+      (S.tools.length
+        ? S.tools.map(function (t) {
+            return esc(t.name) + " " + sign(CALC.tool(S, t).value);
+          }).join(", ")
+        : "—") + "</span></div>" +
     '<div class="kv"><span>Armor worn</span><span>' + esc((ARMOR[S.equipment.armor] || {}).name || "—") + "</span></div>" +
     "</div>";
   return out;
@@ -2769,6 +2926,132 @@ function followersTab() {
 
   out += combatRulesPanel();
   return out;
+}
+
+/* ---------- TOKENS ----------
+   Every face in the app comes out of one image. tokens.jpg is a 7-wide
+   sheet built by tools/build-tokens.py: the party first, in the order
+   below, then the thirty-six generic faces. A tile is addressed by index
+   and drawn with a background-position, which is why there is one file to
+   cache and one request on a cold open rather than forty-one.
+
+   The party's are fixed — Qee looks like Qee — and everything else is
+   assigned by hand, because "which goblin is this" is a question only the
+   table can answer.
+
+   TOKEN_COLS/ROWS have to match the sheet. If build-tokens.py ever emits
+   a different shape, this is the other half of that change. */
+const TOKEN_COLS = 12, TOKEN_ROWS = 13;
+const TOKEN_PARTY = ["Qee", "Gill", "Dinos", "Karlie", "Sol"];
+
+/* A hundred and fifty faces is too many to scroll, so the picker is
+   banded — and the bands are the source grids, which were themed to
+   begin with. `from` is where each starts on the sheet; the ranges have
+   gaps (row 0 is the party and has seven spare slots) so that every band
+   begins on a row boundary and its index is arithmetic. The build script
+   prints these numbers; the two files have to agree. */
+const TOKEN_BANDS = [
+  { id: "party",  label: "The party",   from: 0,   count: 5,
+    note: "Fixed — these are who they are." },
+  { id: "faces",  label: "Faces",       from: 12,  count: 36,
+    note: "Painted portraits. Innkeepers, captains, the person across the table." },
+  { id: "class",  label: "Adventurers", from: 48,  count: 36,
+    note: "Rival parties, hired swords, the guild that wants what you want." },
+  { id: "kin",    label: "Kin",         from: 84,  count: 36,
+    note: "Goblins, orcs, lizardfolk, drow, tieflings, beastfolk." },
+  { id: "beast",  label: "Monsters",    from: 120, count: 36,
+    note: "Dragons, the undead, things with too many eyes." }
+];
+
+/* Labels, band by band, in sheet order. They name a token in a tooltip
+   and give the picker's search something to match; the picture is the
+   real identifier, so a label being approximate costs nothing. */
+const TOKEN_LABELS = {};
+TOKEN_PARTY.forEach(function (n, i) { TOKEN_LABELS[i] = n; });
+[
+  ["faces", ["Human fighter", "Human veteran", "Orc warrior", "White-haired swordsman",
+    "Human rogue", "Orc woman",
+    "Human wizard", "Gilded monk", "Human scout", "Burning revenant",
+    "Tiefling elder", "Dwarf in a hat",
+    "Dwarf warrior", "Armoured knight", "Grey mage", "Red-bearded brawler",
+    "Laughing dwarf", "Elder scholar",
+    "Storm sage", "Lizardfolk soldier", "Shouting dwarf", "Orc scout",
+    "Warrior with locks", "Tiefling sorceress",
+    "Frost dwarf", "Duelist", "Tiefling warrior", "Cloaked figure",
+    "Bald elder", "White-haired sage",
+    "Horned elder", "Red devil", "Northern warrior", "Golden helm captain",
+    "Gilded elder", "Old campaigner"]],
+  ["class", ["Knight", "Woman-at-arms", "Horned warlord", "Helmed knight",
+    "Paladin", "Elf paladin",
+    "Wizard", "Sorceress", "Old sage", "Warlock", "Death cultist", "Witch",
+    "Masked rogue", "Rogue", "Bandit", "Assassin", "Ranger", "Elf ranger",
+    "Vampire lord", "Shadow priestess", "Bandit chief", "Braided fighter",
+    "Berserker", "Axe maiden",
+    "Norse warrior", "Shieldmaiden", "Cleric", "Radiant priestess",
+    "Hooded archer", "Elf archer",
+    "Antlered druid", "Green druid", "Bard", "Harpist", "Monk", "Martial artist"]],
+  ["kin", ["Goblin", "Goblin scout", "Black dragonborn", "Hooded dragonborn",
+    "Orc", "Half-orc woman",
+    "Duergar", "Half-elf", "Gnoll", "Bugbear", "Lizardfolk", "Green lizardfolk",
+    "Drow", "Drow noble", "Dwarf", "Braided warrior", "Red tiefling", "Blue tiefling",
+    "Vampire", "Vampire lady", "Orc brute", "Kobold", "Orc soldier", "Half-elf warrior",
+    "Leopard", "Lioness", "Goliath", "Braided fighter", "Satyr", "Faun",
+    "Kenku", "Blue kenku", "Cheetah", "Wildcat", "Frost giant", "Fire genasi"]],
+  ["beast", ["Red dragon", "Black dragon", "Blue dragon", "Green dragon",
+    "White dragon", "Brass dragon",
+    "Skeleton knight", "Zombie", "Lich", "Wraith", "Ghoul", "Death knight",
+    "Mind flayer", "Beholder", "Deep fish", "Crab horror", "Carrion crawler", "Ettin",
+    "Owl", "Eagle", "Lion", "Basilisk", "Wolf", "Yeti",
+    "Dire wolf", "Werewolf", "Bull", "Axe beak", "Medusa", "Griffon",
+    "Stone golem", "Iron golem", "Ogre", "Frost ogre", "Devil", "Cockatrice"]]
+].forEach(function (pair) {
+  const band = TOKEN_BANDS.filter(function (b) { return b.id === pair[0]; })[0];
+  pair[1].forEach(function (n, i) { TOKEN_LABELS[band.from + i] = n; });
+});
+
+/* Only the slots a band actually claims are real. The seven spares at the
+   end of row 0 exist on the sheet but must never be chosen — a blank
+   token would read as a bug rather than as a choice. */
+function tokenBandOf(i) {
+  return TOKEN_BANDS.filter(function (b) {
+    return i >= b.from && i < b.from + b.count;
+  })[0] || null;
+}
+function tokenLabel(i) {
+  return TOKEN_LABELS[i] || ("Token " + (i + 1));
+}
+/* The inline style that puts tile `i` in a box. Percentages rather than
+   pixels so the same declaration works at 34px in the combat strip and at
+   64px in the picker. */
+function tokenStyle(i) {
+  const col = i % TOKEN_COLS, row = Math.floor(i / TOKEN_COLS);
+  return "background-position:" +
+    (TOKEN_COLS > 1 ? (col / (TOKEN_COLS - 1)) * 100 : 0) + "% " +
+    (TOKEN_ROWS > 1 ? (row / (TOKEN_ROWS - 1)) * 100 : 0) + "%";
+}
+function validToken(i) {
+  return (typeof i === "number" && tokenBandOf(i)) ? i : null;
+}
+
+/* The face for one combatant, at whatever size the caller's CSS says.
+   Hal is the exception and always will be: he has six portraits of his
+   own that change as he gets hurt, and showing a static token for him
+   would throw that away. Everyone else falls back to their initial, which
+   is a portrait you never have to assign. */
+function tokenFace(opts) {
+  const cls = "face" + (opts.cls ? " " + opts.cls : "");
+  if (opts.hal) {
+    const p = CALC.portraitFor(S);
+    return '<span class="' + cls + ' halface"><img src="' + p.file + '" alt="" ' +
+      'title="' + esc(p.label) + '"></span>';
+  }
+  const t = validToken(opts.token);
+  if (t == null) {
+    const initial = (String(opts.name || "?").trim()[0] || "?").toUpperCase();
+    return '<span class="' + cls + ' noface">' + esc(initial) + "</span>";
+  }
+  return '<span class="' + cls + ' tok" style="' + tokenStyle(t) +
+    '" title="' + esc(tokenLabel(t)) + '"></span>';
 }
 
 /* ---------- ACTIVE EFFECTS ----------
@@ -3066,7 +3349,15 @@ function peopleCard(p) {
   const members = p.kind === "group" ? membersOf(p.id) : [];
   const extra = Math.max(0, filledFields(p).length - PEOPLE_META_FIELDS);
 
+  /* A face on the record is the whole point of a record about a person:
+     "the one-eyed innkeeper" is a description you wrote down because you
+     could picture him, and a name in a list is not a picture. It's the
+     same sheet the combat strip draws from, so somebody you fought is
+     already wearing the face you gave them there. */
   let out = '<div class="card person s-' + p.standing + (p.status === "dead" ? " gone" : "") + '">' +
+    '<button class="facebtn pface" data-act="tokenModal" data-kind="person" data-id="' + p.id +
+      '" title="Pick a face for ' + esc(p.name || "this one") + '">' +
+      tokenFace({ token: p.token, name: p.name }) + "</button>" +
     '<button class="namebtn cardname" data-act="expand" data-id="pp-' + p.id + '">' +
       esc(p.name || "(unnamed)") + "</button>" +
     '<span class="cardmeta">' + peopleMetaLine(p) + "</span>" +
@@ -3114,7 +3405,10 @@ function peopleEditor(p) {
   const used = p.fields.map(function (f) { return f.k.toLowerCase(); });
 
   let out = '<div class="card carded person s-' + p.standing + '">' +
-    '<div class="prow"><input class="pname" value="' + esc(p.name) +
+    '<div class="prow">' +
+    '<button class="facebtn pface" data-act="tokenModal" data-kind="person" data-id="' + p.id +
+      '" title="Pick a face">' + tokenFace({ token: p.token, name: p.name }) + "</button>" +
+    '<input class="pname" value="' + esc(p.name) +
       '" placeholder="' + (p.kind === "group" ? "Name of the clan, guild or order" : "Name, or what you call them") +
       '" data-act="peopleName" data-id="' + p.id + '">' +
     '<button class="bt cutsm pri" data-act="peopleEdit" data-id="' + p.id + '">Done</button>' +

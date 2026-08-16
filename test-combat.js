@@ -1020,6 +1020,145 @@ eq("a round went by", fastPath.round, 2);
 eq("and the timed effect lost exactly that one round", fastPath.effects[0].r, 9);
 
 
+/* The initiative sheet's rows live on the modal, not the sheet. */
+function UI_rows() { return w.eval("UI.modal && UI.modal.rows ? UI.modal.rows : []"); }
+function CALC_name(o) { return orderName(state(), o); }
+
+console.log("\n=== FACES: ONE SHEET, ADDRESSED BY INDEX ===");
+/* The sheet's shape is split across two files — build-tokens.py lays it
+   out and app.js addresses it — so the numbers agreeing is worth an
+   assertion rather than a comment. */
+eq("the sheet is twelve wide", w.eval("TOKEN_COLS"), 12);
+eq("and thirteen tall", w.eval("TOKEN_ROWS"), 13);
+eq("five bands", w.eval("TOKEN_BANDS.length"), 5);
+eq("every band but the party is a full grid",
+   w.eval("TOKEN_BANDS.map(function(b){return b.count;})"), [5, 36, 36, 36, 36]);
+ok("every band starts on a row boundary",
+   w.eval("TOKEN_BANDS.every(function(b){return b.from % TOKEN_COLS === 0;})"));
+ok("no band runs off the sheet",
+   w.eval("TOKEN_BANDS.every(function(b){return b.from + b.count <= TOKEN_COLS * TOKEN_ROWS;})"));
+ok("bands never overlap", w.eval(
+   "TOKEN_BANDS.every(function(b,i){var p=TOKEN_BANDS[i-1];return !p || b.from >= p.from + p.count;})"));
+ok("every claimed slot has a label",
+   w.eval("TOKEN_BANDS.every(function(b){" +
+     "for(var i=b.from;i<b.from+b.count;i++){if(!TOKEN_LABELS[i])return false;}return true;})"));
+/* The seven spares at the end of row 0 exist on the image but must never
+   be choosable — a blank face would read as a bug. */
+eq("the spare slots are not valid tokens", w.eval("validToken(7)"), null);
+eq("nor is a number past the end", w.eval("validToken(999)"), null);
+eq("nor is a non-number", w.eval("validToken('3')"), null);
+eq("but a real one is", w.eval("validToken(84)"), 84);
+
+/* A tile's position is arithmetic on the index. Index 84 is column 0 of
+   row 7, so 0% across and 7/12 down. */
+ok("tile 0 is the top-left corner", /background-position:0% 0%/.test(w.eval("tokenStyle(0)")));
+ok("tile 84 is the start of row seven",
+   /background-position:0% 58\.33/.test(w.eval("tokenStyle(84)")));
+ok("tile 11 is the far right of row zero",
+   /background-position:100% 0%/.test(w.eval("tokenStyle(11)")));
+
+console.log("\n=== THE PARTY'S FACES ARE FIXED ===");
+click(byAct("tab", { tab: "combat" }));
+click(byAct("partyAdd"));
+setVal(byAct("partyName", { i: "0" }), "Gill");
+eq("a roster member named for one of the party gets their face",
+   state().party.roster[0].token, 1);
+ok("and the panel offers to change it", !!byAct("tokenModal", { kind: "party" }));
+click(byAct("tokenModal", { kind: "party", id: state().party.roster[0].id }));
+ok("the picker opens", /Pick a face/.test(text()));
+ok("banded rather than one long scroll", /Adventurers/.test(text()) && /Monsters/.test(text()));
+eq("every choosable face is offered", $$(".tokpick").length, 149);
+/* The labels exist so the picker can be searched — that is their whole
+   job, so it is the thing worth testing about them. */
+setVal($("#tok-q"), "dragon");
+const dragonHits = $$(".tokpick").length;
+ok("search narrows it", dragonHits > 0 && dragonHits < 149);
+ok("and matches across bands", /Kin/.test(text()) && /Monsters/.test(text()));
+setVal($("#tok-q"), "");
+click(byAct("tokenSet", { i: "120" }));
+eq("picking writes the face to the roster", state().party.roster[0].token, 120);
+ok("and closes the picker", !$(".tokpick"));
+/* Chosen beats guessed: the clamp must not keep re-deriving a face the
+   player has already overruled. */
+setVal(byAct("partyName", { i: "0" }), "Gill");
+eq("renaming does not overwrite a face you chose", state().party.roster[0].token, 120);
+click(byAct("tokenModal", { kind: "party", id: state().party.roster[0].id }));
+click(byAct("tokenSet", { i: "" }));
+eq("and it can be cleared", state().party.roster[0].token, null);
+setVal(byAct("partyName", { i: "0" }), "Gill");
+
+console.log("\n=== A FOE'S FACE IS PICKED WHERE ITS NAME IS ===");
+if (byAct("combatEnd")) click(byAct("combatEnd"));
+click(byAct("combatStart"));
+click(byAct("initAddFoe"));
+const foeRow = String(UI_rows().length - 1);
+setVal(byAct("initName", { i: foeRow }), "Goblins");
+ok("a foe line offers a face", !!byAct("tokenModal", { kind: "row", i: foeRow }));
+ok("Hal's line does not — he has his own portraits",
+   !byAct("tokenModal", { kind: "row", i: "0" }));
+click(byAct("tokenModal", { kind: "row", i: foeRow }));
+click(byAct("tokenSet", { i: "84" }));
+ok("picking a foe's face returns you to the initiative sheet",
+   /Roll for initiative/.test(text()));
+/* The order from the last fight is still standing — what matters is
+   that this one has not started. */
+eq("nothing has been committed yet", state().combat.active, false);
+setVal(byAct("initValue", { i: "0" }), "12");
+setVal(byAct("initValue", { i: foeRow }), "18");
+click(byAct("initCommit"));
+const foeEntry = state().combat.order.filter(function (o) { return o.ref.type === "foe"; })[0];
+eq("committing carries the face onto the entry", foeEntry.ref.token, 84);
+/* A foe has no roster behind it, so its face has to ride on the entry —
+   which is what lets the next fight offer the same goblins back. */
+click(byAct("combatEnd"));
+click(byAct("combatStart"));
+ok("the next fight offers that foe again, face and all",
+   UI_rows().some(function (r) { return r.name === "Goblins" && r.token === 84; }));
+ok("but not its roll", UI_rows().every(function (r) { return r.init == null; }));
+click(byAct("closeModal"));
+
+console.log("\n=== THE ORDER, ALONG THE COMBAT STRIP ===");
+click(byAct("combatStart"));
+setVal(byAct("initValue", { i: "0" }), "9");
+setVal(byAct("initValue", { i: "1" }), "20");
+setVal(byAct("initValue", { i: "2" }), "14");
+click(byAct("initCommit"));
+const strip = $(".ordstrip");
+ok("the strip is drawn", !!strip);
+eq("one chip per combatant", $$(".ordstrip .ordc").length, state().combat.order.length);
+eq("in initiative order, not rotated to whoever is up",
+   $$(".ordstrip .ordc").map(function (c) { return c.querySelector(".ordn").textContent; }),
+   state().combat.order.map(function (o) {
+     const n = CALC_name(o);
+     return o.ref.type === "foe" ? n : n.split(/\s+/)[0];
+   }));
+eq("exactly one chip is lit", $$(".ordstrip .ordc.on").length, 1);
+eq("and it is whoever is up", $(".ordstrip .ordc.on").getAttribute("title").split(" ·")[0],
+   CALC_name(state().combat.order.filter(function (o) {
+     return o.id === state().combat.currentId; })[0]));
+eq("exactly one is flagged on deck", $$(".ordstrip .ordc.next").length, 1);
+/* Surnames are what stop seven chips fitting on a row, and nobody at the
+   table says them. */
+ok("chips use first names", /^Hal$/.test(
+   $$(".ordstrip .ordc").filter(function (c) {
+     return /Hal Briarshade/.test(c.getAttribute("title")); })[0].querySelector(".ordn").textContent));
+ok("but a lumped enemy keeps its whole label", $$(".ordstrip .ordc").some(function (c) {
+   return c.querySelector(".ordn").textContent === "Goblins"; }));
+ok("the full name stays in the tooltip",
+   $$(".ordstrip .ordc").some(function (c) { return /Hal Briarshade/.test(c.getAttribute("title")); }));
+
+/* The highlight moves and the list does not. */
+const beforeNames = $$(".ordstrip .ordc").map(function (c) { return c.querySelector(".ordn").textContent; });
+const wasOn = $(".ordstrip .ordc.on").getAttribute("title");
+click(byAct("endTurn"));
+eq("advancing a turn leaves the order alone",
+   $$(".ordstrip .ordc").map(function (c) { return c.querySelector(".ordn").textContent; }), beforeNames);
+ok("but moves the highlight", $(".ordstrip .ordc.on").getAttribute("title") !== wasOn);
+
+/* It is a readout. A mis-tap mid-fight that silently changed whose turn
+   it was would be worse than the problem it solved. */
+ok("no chip is a control", !$(".ordstrip [data-act]"));
+
 console.log("\n" + "=".repeat(46));
 console.log(pass + " passed, " + fail + " failed");
 console.log("=".repeat(46) + "\n");

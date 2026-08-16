@@ -332,6 +332,21 @@ Object.assign(CALC, {
     return "?";
   },
 
+  /* Which face an order entry wears, looked up live for the same reason
+     the name is: a party member's portrait belongs to the roster, so
+     changing it there has to change it everywhere at once rather than
+     leaving a stale copy in whatever fight was running at the time. A
+     foe has no roster behind it, so its face rides on the entry. */
+  combatantToken(S, ref) {
+    if (!ref) return null;
+    if (ref.type === "party") {
+      const m = (S.party.roster || []).filter(function (x) { return x.id === ref.partyId; })[0];
+      return m && typeof m.token === "number" ? m.token : null;
+    }
+    if (ref.type === "foe") return typeof ref.token === "number" ? ref.token : null;
+    return null;
+  },
+
   /* Everything between here and your next turn, worked out in one go.
 
      The table keeps its own initiative, so the sheet's turn order is a
