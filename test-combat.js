@@ -61,6 +61,10 @@ function orderName(st, o) {
     const m = st.party.roster.filter(function (x) { return x.id === o.ref.partyId; })[0];
     return m ? m.name : "(removed)";
   }
+  if (o.ref.type === "follower") {
+    const f = st.followers.filter(function (x) { return x.id === o.ref.followerId; })[0];
+    return f ? f.name : "(gone)";
+  }
   if (o.ref.type === "foe") return o.ref.name || "Enemy";
   return "?";
 }
@@ -79,7 +83,11 @@ function enterCombat(rolls) {
 
 console.log("\n=== BOOT WITH COMBAT MODULE ===");
 ok("app still boots", $("#app").innerHTML.length > 2000);
-ok("out-of-combat strip shown", /Out of combat/.test(text()));
+/* Out of combat the strip stopped announcing that nothing is happening
+   and started carrying the company instead. The control that starts a
+   fight is still there, on the tab you would look for it on. */
+ok("out of combat, the strip is a control rather than an announcement",
+   !/Out of combat/.test(text()) && !!byAct("combatStart"));
 ok("Enter combat button present", !!byAct("combatStart"));
 click(byAct("combatStart"));
 ok("it asks everyone to roll rather than reusing the last order", /Roll for initiative/.test(text()));
@@ -1262,6 +1270,145 @@ ok("but moves the highlight", $(".ordstrip .ordc.on").getAttribute("title") !== 
 /* It is a readout. A mis-tap mid-fight that silently changed whose turn
    it was would be worse than the problem it solved. */
 ok("no chip is a control", !$(".ordstrip [data-act]"));
+
+console.log("\n=== COMPANIONS: EVERYTHING THAT CAME ALONG ===");
+if (byAct("combatEnd")) click(byAct("combatEnd"));
+click(byAct("tab", { tab: "combat" }));
+while (state().party.roster.length) click(byAct("partyDel", { i: "0" }));
+click(byAct("partyAdd"));
+setVal(byAct("partyName", { i: "0" }), "Gill");
+const gillId = state().party.roster[0].id;
+
+click(byAct("tab", { tab: "followers" }));
+ok("the tab offers to add one", !!$("#cmp-new"));
+setVal($("#cmp-new"), "Bramble");
+setVal($("#cmp-role"), "mount");
+setVal($("#cmp-owner"), "hal");
+click(byAct("companionAdd"));
+const bramble = state().followers.filter(function (f) { return f.name === "Bramble"; })[0];
+ok("a companion joins without a spell", !!bramble);
+eq("with a role", bramble.role, "mount");
+eq("and an owner", bramble.owner, "hal");
+eq("and no hit points, because a horse is not a summon", bramble.maxHP, undefined);
+/* The whole point of the owner field: the mule can be Gil's. */
+setVal($("#cmp-new"), "Mule");
+setVal($("#cmp-role"), "pack");
+setVal($("#cmp-owner"), gillId);
+click(byAct("companionAdd"));
+const mule = state().followers.filter(function (f) { return f.name === "Mule"; })[0];
+eq("a follower can belong to somebody else", mule.owner, gillId);
+ok("a pack animal is not a fighter",
+   !w.eval("CALC.followerBlock(S, S.followers.filter(function(f){return f.name==='Mule';})[0]).inCombat"));
+
+console.log("\n=== A NON-COMBATANT RIDES ON ITS OWNER'S CORNER ===");
+click(byAct("tab", { tab: "combat" }));
+/* An order with the baggage in it is an order you stop reading, so the
+   mule is a badge on Gil rather than a line of its own. */
+ok("the mule is a badge, not a chip",
+   /Mule/.test($(".ordstrip").innerHTML) && $$(".ordstrip .badges").length === 1);
+ok("and it says whose it is",
+   /Gill's/.test($(".ordstrip .badge").getAttribute("title")));
+ok("the mount is its own chip, because it fights",
+   $$(".ordstrip .ordc").some(function (c) { return /Bramble/.test(c.getAttribute("title")); }));
+
+console.log("\n=== OUT OF COMBAT, THE COMPANY RIDES ALONG ===");
+/* It used to announce "Out of combat" on every tab, which is the absence
+   of news taking a band of the screen to say so. Now it carries who is
+   with you, and only the control that starts a fight stays behind. */
+/* Notes rather than Map — this harness does not inline the world data. */
+click(byAct("tab", { tab: "notes" }));
+ok("the company shows on a tab that is not Combat", !!$(".strip.explore .ordstrip"));
+ok("without announcing that nothing is happening",
+   !/Out of combat/.test($("#app").textContent));
+ok("and without the control that starts one", !byAct("combatStart"));
+click(byAct("tab", { tab: "combat" }));
+ok("which is still on the Combat tab", !!byAct("combatStart"));
+ok("nothing is dimmed when nobody's turn it is",
+   /\.ordstrip\.explore \.ordc\{opacity:1/.test(
+     fs.readFileSync(path.join(dir, "index.html"), "utf8").replace(/\s+/g, "")
+       .replace(/\.ordstrip\.explore\.ordc\{/, ".ordstrip.explore .ordc{")) ||
+   /explore \.ordc\{[^}]*opacity:1/.test(fs.readFileSync(path.join(dir, "index.html"), "utf8")));
+
+console.log("\n=== MOUNTING ===");
+enterCombat([14, 19, 11]);
+let order = state().combat.order.map(function (o) { return orderName(state(), o); });
+ok("an unridden mount rolls for itself", order.indexOf("Bramble") >= 0);
+ok("but the pack animal never does", order.indexOf("Mule") < 0);
+const moveBefore = state().combat.turn.movementUsed;
+/* The strip's Mount control carries no id — it takes the first free
+   mount, which is the useful default when you press it mid-fight. */
+click(byAct("mountModal"));
+ok("the strip offers it, since there is something to ride", true);
+ok("mounting asks rather than just happening", /Mount up/.test(text()));
+ok("it names the price", /half your Speed/.test(text()));
+eq("and defaults to you", w.eval("UI.modal.rider"), "hal");
+click(byAct("mountConfirm"));
+eq("mounting costs half your Speed, 2024 rules",
+   state().combat.turn.movementUsed, moveBefore + Math.floor(state().identity.speed / 2));
+eq("the mount now carries you", state().followers.filter(function (f) {
+  return f.name === "Bramble"; })[0].riddenBy, "hal");
+order = state().combat.order.map(function (o) { return orderName(state(), o); });
+ok("and gives up its own turn, which would never come round",
+   order.indexOf("Bramble") < 0);
+ok("chained to its rider in the strip instead", $$(".ordstrip .ordc.ridden").length === 1);
+eq("two faces on the one chip", $$(".ordstrip .ordc.ridden .face").length, 2);
+
+/* An ally's movement is their own to spend, and this sheet has never
+   tracked it — inventing a number would be worse than leaving it. */
+click(byAct("dismount", { id: bramble.id }));
+const moveNow = state().combat.turn.movementUsed;
+/* The strip's Mount control carries no id — it takes the first free
+   mount, which is the useful default when you press it mid-fight. */
+click(byAct("mountModal"));
+w.eval("UI.modal.rider = '" + gillId + "'; render();");
+ok("an ally can be the rider", /Gill/.test(text()));
+ok("and is told the sheet is not deducting for them", /their movement is theirs/.test(text()));
+click(byAct("mountConfirm"));
+eq("so your movement is untouched", state().combat.turn.movementUsed, moveNow);
+eq("but the sheet knows who is up there", state().followers.filter(function (f) {
+  return f.name === "Bramble"; })[0].riddenBy, gillId);
+
+console.log("\n=== DISMOUNTING PUTS IT BACK IN LINE ===");
+/* The strip's control covers Hal, which is the case with a movement cost
+   the sheet actually tracks. An ally gets off from the mount's own panel
+   on the Followers tab, where the rest of its settings live. */
+ok("the strip does not offer to dismount somebody else", !byAct("dismount"));
+click(byAct("tab", { tab: "followers" }));
+click(byAct("dismount", { id: bramble.id }));
+click(byAct("tab", { tab: "combat" }));
+order = state().combat.order.map(function (o) { return orderName(state(), o); });
+const riderAt = order.indexOf("Gill");
+eq("immediately after whoever got off", order[riderAt + 1], "Bramble");
+ok("and unchained in the strip", !$$(".ordstrip .ordc.ridden").length);
+
+console.log("\n=== A FAMILIAR TAKES ITS OWN TURN ===");
+/* Find Familiar's whole point is that it acts on its own initiative,
+   unlike the steed, which shares yours. */
+w.eval("mutate(function (st) { st.followers.push({ id:'fam1', source:'findFamiliar'," +
+  " name:'Pip', form:'owl', creatureType:'fey', spellLevel:1, hp:1, tempHP:0 }); });");
+if (byAct("combatEnd")) click(byAct("combatEnd"));
+click(byAct("combatStart"));
+ok("the familiar is offered a line of its own",
+   UI_rows().some(function (r) { return r.name === "Pip"; }));
+ok("the steed never is, because it shares your count",
+   !UI_rows().some(function (r) { return /Steed/.test(r.name); }));
+click(byAct("closeModal"));
+
+console.log("\n=== TIES ARE SETTLED BY HAND ===");
+click(byAct("combatStart"));
+setVal(byAct("initValue", { i: "0" }), "14");
+setVal(byAct("initValue", { i: "1" }), "14");
+setVal(byAct("initValue", { i: "2" }), "9");
+ok("two rows on the same roll get arrows", !!byAct("initMove", { i: "0", d: "1" }));
+ok("a row that tied with nobody does not",
+   !byAct("initMove", { i: "2", d: "-1" }) && !byAct("initMove", { i: "2", d: "1" }));
+const firstBefore = UI_rows()[0].name;
+click(byAct("initMove", { i: "0", d: "1" }));
+eq("the arrow swaps them", UI_rows()[1].name, firstBefore);
+click(byAct("initCommit"));
+const committed = state().combat.order.map(function (o) { return orderName(state(), o); });
+eq("and the order you left them in is the order they act in",
+   committed[1], firstBefore);
 
 console.log("\n" + "=".repeat(46));
 console.log(pass + " passed, " + fail + " failed");

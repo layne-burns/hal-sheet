@@ -47,9 +47,12 @@ const UI = { prov: null, modal: null, alert: null, filter: [], expanded: {},
 function load() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
-    if (!raw) return deepClone(SEED);
-    const parsed = JSON.parse(raw);
-    return migrate(parsed);
+    /* A brand new sheet goes through migrate() as well, on an empty
+       object. It used to return the seed directly, which meant every
+       fill-in migrate does — most recently the party's dossiers — was
+       applied to sheets that had been played and skipped on sheets that
+       had not. One path, so there is one answer. */
+    return migrate(raw ? JSON.parse(raw) : {});
   } catch (e) {
     console.warn("Load failed, falling back to seed:", e);
     return deepClone(SEED);
@@ -120,6 +123,25 @@ function migrate(st) {
      start them empty rather than letting Object.assign hand back the
      seed's arrays by reference. */
   out.people = st.people || [];
+  /* Seed dossiers are inserted ONCE, by id, and never touched again.
+
+     This is the only data in the app that arrives from the code rather
+     than from the player, which makes it the only data an update could
+     destroy. Inserting rather than merging is what makes that impossible:
+     edit Gill's card and the edit is yours, and a later release that
+     rewrites this text rewrites nothing on a sheet that already has it.
+
+     `dropped` is the other half. Without it, deleting a seeded person
+     would resurrect them on the next launch — which is the same bug
+     wearing a friendlier face. */
+  out.peopleDropped = st.peopleDropped || [];
+  if (typeof PARTY_DOSSIERS !== "undefined") {
+    PARTY_DOSSIERS.forEach(function (d) {
+      if (out.peopleDropped.indexOf(d.id) >= 0) return;
+      if (out.people.some(function (p) { return p.id === d.id; })) return;
+      out.people.push(deepClone(d));
+    });
+  }
   out.favourites = st.favourites || [];
 
   /* Tool proficiencies used to be a list of bare names printed on the
@@ -304,9 +326,23 @@ function clampState(st) {
   st.followers = st.followers.filter(function (f) {
     const b = CALC.followerBlock(st, f);
     if (!b) return false;
+    /* A companion may have no HP at all — a mule is not a thing you track
+       hit points for, any more than an ally is. Only clamp what exists,
+       and only let HP be the thing that removes a follower where HP is
+       the thing that keeps it alive. A summon at 0 is gone; a mule at no
+       HP is just a mule. */
+    if (b.maxHP == null) { delete f.hp; f.tempHP = 0; return true; }
     f.hp = Math.max(0, Math.min(typeof f.hp === "number" ? f.hp : b.maxHP, b.maxHP));
     f.tempHP = Math.max(0, f.tempHP || 0);
     return f.hp > 0;
+  });
+  /* Who is riding what. A mount whose rider left the party, or a rider
+     whose mount was dismissed, is not mounted any more. */
+  st.followers.forEach(function (f) {
+    if (!f.riddenBy) return;
+    const ok = f.riddenBy === "hal" ||
+      st.party.roster.some(function (m) { return m.id === f.riddenBy; });
+    if (!ok) delete f.riddenBy;
   });
   /* Carried gear predates having ids, so anything without one is given
      one here rather than at every call site that might create an item.
@@ -321,6 +357,7 @@ function clampState(st) {
      name — everything else is optional by design, so the clamp fills
      shape rather than content. */
   if (!Array.isArray(st.people)) st.people = [];
+  if (!Array.isArray(st.peopleDropped)) st.peopleDropped = [];
   const peopleIds = {};
   st.people.forEach(function (p) {
     if (!p.id) p.id = uid("p");
@@ -1256,6 +1293,180 @@ const ACT = {
     });
   },
 
+  /* ---- Companions ----
+     Everything about a companion is typed, so every one of these is one
+     field and a re-render. */
+  companionAdd() {
+    function val(id) { const el = document.getElementById(id); return el ? el.value : ""; }
+    const name = val("cmp-new").trim();
+    const role = COMPANION_ROLES[val("cmp-role")] ? val("cmp-role") : "mount";
+    const owner = val("cmp-owner") || "hal";
+    if (!name) return;
+    const id = uid("c");
+    mutate(function (st) {
+      st.followers.push({ id: id, source: "companion", name: name, role: role,
+                          owner: owner, token: null, kind: "", speed: 40, note: "" });
+      logWorld(st, "cmp:" + id, "Joined the party — " + name);
+    }, "Add " + name);
+    const box = document.getElementById("cmp-new");
+    if (box) box.value = "";
+    render();
+  },
+  companionDel(el) {
+    const id = el.dataset.id;
+    mutate(function (st) {
+      st.followers = st.followers.filter(function (f) { return f.id !== id; });
+    }, "Remove a companion");
+  },
+  companionName(el) {
+    const id = el.dataset.id, v = el.value;
+    mutate(function (st) {
+      const f = st.followers.filter(function (x) { return x.id === id; })[0];
+      if (f) f.name = v;
+    });
+  },
+  companionRole(el) {
+    const id = el.dataset.id, v = el.value;
+    mutate(function (st) {
+      const f = st.followers.filter(function (x) { return x.id === id; })[0];
+      if (!f || !COMPANION_ROLES[v]) return;
+      f.role = v;
+      /* Something that stopped being a mount cannot still be carrying
+         somebody, and something that stopped being a combatant has no
+         business in the turn order. */
+      if (!COMPANION_ROLES[v].mount) delete f.riddenBy;
+      if (!COMPANION_ROLES[v].combat) {
+        st.combat.order = st.combat.order.filter(function (o) {
+          return !(o.ref && o.ref.type === "follower" && o.ref.followerId === id);
+        });
+      }
+    }, "Change a companion's role");
+  },
+  companionOwner(el) {
+    const id = el.dataset.id, v = el.value;
+    mutate(function (st) {
+      const f = st.followers.filter(function (x) { return x.id === id; })[0];
+      if (f) f.owner = v;
+    }, "Reassign a companion");
+  },
+  companionField(el) {
+    const id = el.dataset.id, f = el.dataset.f;
+    const raw = el.value;
+    mutate(function (st) {
+      const c = st.followers.filter(function (x) { return x.id === id; })[0];
+      if (!c) return;
+      if (f === "speed" || f === "maxHP") {
+        const n = raw === "" ? null : parseInt(raw, 10);
+        if (n == null || !isFinite(n)) { delete c[f]; }
+        else { c[f] = Math.max(0, n); }
+        /* Giving something hit points for the first time fills the bar,
+           rather than starting it at nothing. */
+        if (f === "maxHP" && typeof c.maxHP === "number" && typeof c.hp !== "number") {
+          c.hp = c.maxHP;
+        }
+      } else {
+        c[f] = raw;
+      }
+    });
+  },
+
+  /* ---- Mounting ----
+     A modal rather than a button, because getting on a horse costs half
+     your movement and doing that by mis-tap in the middle of a turn is
+     the kind of thing you cannot undo without arguing about it. It also
+     has two questions worth asking: who is getting on, and onto what. */
+  mountModal(el) {
+    const mounts = allMounts().filter(function (f) { return !f.riddenBy; });
+    if (!mounts.length) return;
+    const picked = el && el.dataset.id
+      ? mounts.filter(function (f) { return f.id === el.dataset.id; })[0]
+      : null;
+    UI.modal = { type: "mount", rider: "hal",
+                 mount: (picked || mounts[0]).id };
+    render();
+  },
+  mountRider(el) { UI.modal.rider = el.value; render(); },
+  mountPick(el) { UI.modal.mount = el.value; render(); },
+  mountConfirm() {
+    const m = UI.modal;
+    const mount = S.followers.filter(function (f) { return f.id === m.mount; })[0];
+    if (!mount) return;
+    const rider = m.rider;
+    const riderIsHal = rider === "hal";
+    /* Half your Speed, rounded down — the 2024 cost of mounting or
+       dismounting. Only Hal's is deducted: an ally's movement is their
+       own to spend and this sheet has never tracked it, so pretending to
+       would be a number nobody is keeping honest. */
+    const cost = riderIsHal ? Math.floor(S.identity.speed / 2) : 0;
+    mutate(function (st) {
+      /* One rider per mount, and one mount per rider. */
+      st.followers.forEach(function (f) {
+        if (f.riddenBy === rider) delete f.riddenBy;
+      });
+      const f = st.followers.filter(function (x) { return x.id === m.mount; })[0];
+      if (f) f.riddenBy = rider;
+      /* A ridden mount moves on its rider's turn, so its own slot in the
+         order has to go — leaving it there would be a turn that comes
+         round and has nothing to do. The strip draws it chained to the
+         rider instead. */
+      st.combat.order = st.combat.order.filter(function (o) {
+        return !(o.ref && o.ref.type === "follower" && o.ref.followerId === m.mount);
+      });
+      if (st.combat.currentId && !st.combat.order.some(function (o) {
+        return o.id === st.combat.currentId; })) {
+        st.combat.currentId = st.combat.order.length ? st.combat.order[0].id : null;
+      }
+      if (riderIsHal && st.combat.active) {
+        st.combat.turn.movementUsed = Math.min(st.identity.speed,
+          st.combat.turn.movementUsed + cost);
+      }
+    }, ownerName(rider) + " mounts " + mount.name);
+    UI.modal = null;
+    UI.alert = { info: ownerName(rider) + " is on " + mount.name +
+      (riderIsHal && S.combat.active ? " — " + cost + " ft of movement spent" : "") +
+      ". The mount acts on their turn." };
+    render();
+  },
+  dismount(el) {
+    const id = el.dataset.id;
+    const mount = S.followers.filter(function (f) { return f.id === id; })[0];
+    if (!mount || !mount.riddenBy) return;
+    const rider = mount.riddenBy;
+    const riderIsHal = rider === "hal";
+    const cost = riderIsHal ? Math.floor(S.identity.speed / 2) : 0;
+    mutate(function (st) {
+      const f = st.followers.filter(function (x) { return x.id === id; })[0];
+      if (f) delete f.riddenBy;
+      /* Back into the order, immediately after whoever got off. It acts
+         on its own now, and the turn right after the rider's is where a
+         creature that was moving with them a moment ago belongs. Only
+         where it is a fighter — a riding pony goes back to being
+         scenery. */
+      const b = f ? CALC.followerBlock(st, f) : null;
+      if (st.combat.active && b && b.inCombat) {
+        const already = st.combat.order.some(function (o) {
+          return o.ref && o.ref.type === "follower" && o.ref.followerId === id;
+        });
+        if (!already) {
+          const riderId = rider === "hal" ? "hal" : "p:" + rider;
+          const at = st.combat.order.findIndex(function (o) { return o.id === riderId; });
+          const entry = { id: "f:" + id, initiative: null,
+                          ref: { type: "follower", followerId: id } };
+          if (at >= 0) st.combat.order.splice(at + 1, 0, entry);
+          else st.combat.order.push(entry);
+        }
+      }
+      if (riderIsHal && st.combat.active) {
+        st.combat.turn.movementUsed = Math.min(st.identity.speed,
+          st.combat.turn.movementUsed + cost);
+      }
+    }, ownerName(rider) + " dismounts");
+    UI.alert = { info: ownerName(rider) + " is off " + mount.name +
+      (riderIsHal && S.combat.active ? " — " + cost + " ft of movement spent" : "") +
+      (S.combat.active ? ". It takes its own turn from here." : ".") };
+    render();
+  },
+
   /* ---- Watching everyone else's effects ----
      A notebook, so every one of these is one field and a re-render. The
      only judgement anywhere is that adding with nothing typed does
@@ -1404,6 +1615,9 @@ const ACT = {
     const gone = personById(id);
     mutate(function (st) {
       st.people = st.people.filter(function (p) { return p.id !== id; });
+      /* A seeded record has to be remembered as deleted, or the next
+         launch puts it straight back. */
+      if (/^p-seed-/.test(id) && st.peopleDropped.indexOf(id) < 0) st.peopleDropped.push(id);
       /* clampState drops the dangling memberships; this is only the log. */
       logWorld(st, "peopledel:" + id, "Removed from your people — " +
         ((gone && gone.name) || id));
@@ -2880,14 +3094,170 @@ function followerRail() {
     S.followers.map(function (f) { return followerCard(f, false); }).join("") + "</div>";
 }
 
+/* ---------- COMPANIONS: EVERYTHING THAT CAME ALONG ----------
+   The follower list was for things Hal conjured, which meant the mule
+   carrying the tents had nowhere to be. A companion is the same record
+   with none of the spell attached: a name, a face, who it belongs to,
+   and what it is for.
+
+   `owner` is the one field that makes it worth having. A follower used
+   to be Hal's by construction; a party that gifts the mule to Gil needs
+   somewhere to say so, and once it is said, a non-combatant can ride on
+   its owner's card instead of taking a line of its own. */
+
+function companionsOf(ownerId) {
+  return S.followers.filter(function (f) {
+    return f.source === "companion" && (f.owner || "hal") === ownerId;
+  });
+}
+/* The ones that belong on the owner's card rather than in the fight:
+   pack animals, riding animals, the dog. */
+function badgesOf(ownerId) {
+  return companionsOf(ownerId).filter(function (f) {
+    const b = CALC.followerBlock(S, f);
+    return b && !b.inCombat;
+  });
+}
+function ownerName(id) {
+  if (!id || id === "hal") return S.identity.name || "Hal";
+  const m = (S.party.roster || []).filter(function (x) { return x.id === id; })[0];
+  return m ? m.name : "(gone)";
+}
+function ownerToken(id) {
+  if (!id || id === "hal") return null;
+  const m = (S.party.roster || []).filter(function (x) { return x.id === id; })[0];
+  return m ? m.token : null;
+}
+/* Everyone a follower could be given to. */
+function ownerOptions() {
+  return [{ id: "hal", name: S.identity.name || "Hal" }].concat(
+    (S.party.roster || []).map(function (m) { return { id: m.id, name: m.name }; }));
+}
+
+/* Every mount in the party, whoever it belongs to. Drives the Mount
+   control, which only exists when there is something to ride. */
+function allMounts() {
+  return S.followers.filter(function (f) {
+    const b = CALC.followerBlock(S, f);
+    return b && b.isMount;
+  });
+}
+function mountRiddenBy(riderId) {
+  return S.followers.filter(function (f) { return f.riddenBy === riderId; })[0] || null;
+}
+
+/* The editor for one companion. Everything about it is typed, because
+   nothing about it is derived. */
+function companionPanel(f) {
+  const b = CALC.followerBlock(S, f);
+  const rider = f.riddenBy ? ownerName(f.riddenBy) : null;
+  let out = '<div class="pnl cut a-cmp"><h3>' + esc(f.name || "Companion") +
+    '<span class="cnt">' + esc(b.role.label) + " · " + esc(ownerName(f.owner)) + "'s" +
+    (rider ? " · carrying " + esc(rider) : "") + "</span></h3>";
+
+  out += '<div class="prow">' +
+    '<button class="facebtn" data-act="tokenModal" data-kind="follower" data-id="' + f.id +
+      '" title="Pick a face"><span class="face fol-face' +
+      (validToken(f.token) == null ? " noface" : " tok sh" + tokenSheet(f.token)) + '"' +
+      (validToken(f.token) == null ? "" : ' style="' + tokenStyle(f.token) + '"') + ">" +
+      (validToken(f.token) == null ? esc((f.name || "?").trim()[0] || "?").toUpperCase() : "") +
+      "</span></button>" +
+    '<input value="' + esc(f.name) + '" placeholder="Name" style="flex:1;min-width:120px" ' +
+      'data-act="companionName" data-id="' + f.id + '">' +
+    '<button class="bt cutsm dg" data-act="companionDel" data-id="' + f.id + '">Remove</button></div>';
+
+  out += '<div class="prow" style="margin-top:7px"><span class="lbl">Is</span>' +
+    '<select data-act="companionRole" data-id="' + f.id + '">' +
+      Object.keys(COMPANION_ROLES).map(function (k) {
+        return '<option value="' + k + '"' + (f.role === k ? " selected" : "") + ">" +
+          esc(COMPANION_ROLES[k].label) + "</option>";
+      }).join("") + "</select>" +
+    '<span class="lbl">Belongs to</span>' +
+    '<select data-act="companionOwner" data-id="' + f.id + '">' +
+      ownerOptions().map(function (o) {
+        return '<option value="' + o.id + '"' + ((f.owner || "hal") === o.id ? " selected" : "") +
+          ">" + esc(o.name) + "</option>";
+      }).join("") + "</select></div>";
+  out += '<div class="foot" style="margin:4px 0 0">' + esc(b.role.note) + "</div>";
+
+  out += '<div class="prow" style="margin-top:7px">' +
+    '<span class="lbl">Kind</span><input value="' + esc(f.kind || "") +
+      '" placeholder="Warhorse, mule, wolf…" style="flex:1;min-width:110px" ' +
+      'data-act="companionField" data-id="' + f.id + '" data-f="kind">' +
+    '<span class="lbl">Speed</span><input type="number" min="0" style="width:74px" value="' +
+      (f.speed || "") + '" placeholder="40" data-act="companionField" data-id="' + f.id +
+      '" data-f="speed">' +
+    '<span class="lbl">Max HP</span><input type="number" min="0" style="width:74px" value="' +
+      (typeof f.maxHP === "number" ? f.maxHP : "") + '" placeholder="—" ' +
+      'data-act="companionField" data-id="' + f.id + '" data-f="maxHP"></div>';
+  out += '<div class="foot" style="margin:4px 0 0">Leave HP blank for anything you would not ' +
+    "track hit points for — the same reason the party roster keeps a status and not a number.</div>";
+
+  if (b.hasHP) {
+    const pct = Math.round((f.hp / b.maxHP) * 100);
+    out += '<div class="folhp" style="margin-top:8px"><span class="lbl">HP</span>' +
+      '<div class="hpbar"><div class="hpfill ' + (pct <= 25 ? "crit" : pct <= 60 ? "hurt" : "") +
+      '" style="width:' + pct + '%"></div></div>' +
+      '<span class="folnum">' + f.hp + "<small>/" + b.maxHP + "</small></span>" +
+      '<button class="bt cutsm dg" data-act="followerDamageModal" data-id="' + f.id +
+      '">Damage…</button></div>';
+  }
+
+  if (b.isMount) {
+    out += '<div class="prow" style="margin-top:8px">' +
+      (f.riddenBy
+        ? '<span class="lbl">Carrying ' + esc(rider) + "</span>" +
+          '<button class="bt cutsm" data-act="dismount" data-id="' + f.id + '">Dismount</button>'
+        : '<button class="bt cutsm pri" data-act="mountModal" data-id="' + f.id + '">Mount…</button>') +
+      "</div>";
+  }
+  return out + "</div>";
+}
+
+/* The badge a non-combatant wears on its owner's portrait. A third the
+   size, bottom-right, the way a pet follows a person around. It is the
+   answer to "where does the mule go" that doesn't cost the mule a line
+   in the turn order. */
+function companionBadges(ownerId) {
+  const list = badgesOf(ownerId);
+  if (!list.length) return "";
+  return '<span class="badges">' + list.slice(0, 3).map(function (f) {
+    const t = validToken(f.token);
+    return '<span class="badge' + (t == null ? " noface" : " tok sh" + tokenSheet(t)) + '"' +
+      (t == null ? "" : ' style="' + tokenStyle(t) + '"') +
+      ' title="' + esc(f.name) + " — " + esc((COMPANION_ROLES[f.role] || {}).label || "companion") +
+      ', ' + esc(ownerName(ownerId)) + "'s\">" +
+      (t == null ? esc((f.name || "?").trim()[0] || "?").toUpperCase() : "") + "</span>";
+  }).join("") + "</span>";
+}
+
 function followersTab() {
-  let out = "";
+  let out = '<div class="pnl cut"><h3>Add a companion <span class="cnt">' +
+    "horses, mules, dogs — anything that came along</span></h3>" +
+    '<div class="prow">' +
+    '<input type="text" id="cmp-new" placeholder="Name — Bramble, the mule…" ' +
+      'style="flex:1;min-width:150px">' +
+    '<select id="cmp-role">' +
+      Object.keys(COMPANION_ROLES).map(function (k) {
+        return '<option value="' + k + '"' + (k === "mount" ? " selected" : "") + ">" +
+          esc(COMPANION_ROLES[k].label) + "</option>";
+      }).join("") + "</select>" +
+    '<select id="cmp-owner">' +
+      ownerOptions().map(function (o) {
+        return '<option value="' + o.id + '">' + esc(o.name) + "'s</option>";
+      }).join("") + "</select>" +
+    '<button class="bt cutsm pri" data-act="companionAdd">+ Add</button></div>' +
+    '<div class="foot">A summon arrives by spell and brings its own stat block. This is for ' +
+    "everything else — and anything that isn't a fighter stays out of the turn order and rides " +
+    "on its owner's portrait instead.</div></div>";
+
   if (!S.followers.length) {
     out += '<div class="pnl cut"><h3>Followers <span class="cnt">none</span></h3>' +
-      '<div class="foot" style="margin:0">Nothing summoned. Cast <b>Find Steed</b> from the Spells ' +
-      "tab and it will ask you what answers.</div></div>";
+      '<div class="foot" style="margin:0">Nothing summoned and nothing along for the road. ' +
+      "Cast <b>Find Steed</b> from the Spells tab and it will ask you what answers.</div></div>";
   }
   S.followers.forEach(function (f) {
+    if (f.source === "companion") { out += companionPanel(f); return; }
     const b = CALC.followerBlock(S, f);
     out += '<div class="pnl cut a-' + followerAccent(f) + '"><h3>' + esc(b.statName) +
       '<span class="cnt">' + esc(b.size) + " " + esc(b.type.name) + " · " + esc(b.alignment) +

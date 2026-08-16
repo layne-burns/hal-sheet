@@ -810,6 +810,52 @@ body.onecol .mpin .mlab{font-size:10px;max-width:84px}
 .ordstrip.fit-4 .ordc:not(.on){padding:1px;gap:0;border-color:transparent;background:none}
 .ordstrip.fit-4 .ordc:not(.on) .ordface{--face:25px}
 .ordstrip.fit-4 .ordc:not(.on) .ordn,.ordstrip.fit-4 .ordc:not(.on) .ordi{display:none}
+/* ---------- COMPANIONS ON A CARD ----------
+   A pack animal has no business in the turn order — an order with the
+   baggage in it is an order you stop reading — but it has to be
+   somewhere, and the somewhere is its owner's corner. A third the size,
+   bottom-right, the way a dog follows a person about. */
+.ordc{position:relative}
+.badges{position:absolute;right:-3px;bottom:-3px;display:flex;gap:1px;pointer-events:none;z-index:2}
+.badge{display:block;width:calc(var(--face,46px) * .34);height:calc(var(--face,46px) * .34);
+  border:1px solid var(--line2);background-color:var(--panel3);background-repeat:no-repeat;
+  box-shadow:0 0 0 1px var(--panel)}
+.badge.tok.sh1{background-image:url(tokens.jpg);background-size:1200% 2800%}
+.badge.tok.sh2{background-image:url(tokens2.jpg);background-size:1200% 1800%}
+.badge.noface{display:flex;align-items:center;justify-content:center;font-family:var(--m);
+  font-size:calc(var(--face,46px) * .2);color:var(--dim);line-height:1}
+
+/* A rider and their mount share a turn, so they share a chip — linked
+   side by side rather than listed twice, since the second listing would
+   be a turn that never comes round. */
+.ordlink{font-family:var(--m);font-size:13px;color:var(--dimmer);margin:0 1px;flex:none}
+.ordc .mountface{--face:34px}
+.ordc.on .mountface{--face:40px}
+.ordc.ridden{padding-right:11px}
+
+/* ---------- THE COMPANY, OUT OF COMBAT ----------
+   Same chips, three quarters the size and none of the dimming: nobody's
+   turn it is, so there is no live one to pick out, and nothing here is
+   urgent enough to shout. It rides on every tab, because who is with you
+   is worth knowing on the map as much as in a fight. */
+.ordstrip.explore{border-top:none;margin-top:0;padding-top:0}
+.strip.explore{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.ordstrip.explore .ordc{opacity:1;border-color:var(--line2)}
+.ordstrip.explore .ordface{--face:34px;filter:none}
+.ordstrip.explore .mountface{--face:26px}
+.ordstrip.explore .ordn{font-size:12.5px;max-width:84px}
+body.compact .ordstrip.explore .ordface{--face:31px}
+
+/* A companion's own panel on the Followers tab. */
+.a-cmp{--acc:var(--grn)}
+.pnl.a-cmp>h3{color:var(--grn)}
+.fol-face{--face:44px;display:block;width:var(--face);height:var(--face);flex:none;
+  border:1px solid var(--line2);background-color:var(--panel2);background-repeat:no-repeat}
+.fol-face.tok.sh1{background-image:url(tokens.jpg);background-size:1200% 2800%}
+.fol-face.tok.sh2{background-image:url(tokens2.jpg);background-size:1200% 1800%}
+.fol-face.noface{display:flex;align-items:center;justify-content:center;font-family:var(--m);
+  font-size:20px;color:var(--dim);background:var(--panel3)}
+
 /* ---------- THE FACE PICKER ---------- */
 .tokgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:5px;
   margin-bottom:12px}

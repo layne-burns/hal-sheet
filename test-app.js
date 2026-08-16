@@ -1430,58 +1430,89 @@ eq("and pressing it takes you there",
 console.log("\n=== PEOPLE: NOTHING IS REQUIRED BUT A NAME ===");
 click(byAct("tab", { tab: "people" }));
 ok("the People tab exists", /Who you know/i.test(text()));
-ok("it says so when empty", /Nobody yet/i.test(text()));
-$("#people-new").value = "Gill";
+/* The party's dossiers are seeded, so it is never empty on a fresh
+   sheet — which is the point of seeding them. */
+const seeded = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).people;
+ok("the party is already in it", seeded.length >= 5);
+ok("with their stories, not just their names",
+   seeded.some(function (p) { return /Eadro/.test(p.note); }));
+ok("and their faces", seeded.every(function (p) { return typeof p.token === "number"; }));
+$("#people-new").value = "Corvaunus";
 click(byAct("peopleAdd", { kind: "person" }));
 const people1 = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).people;
-eq("a person is added with only a name", people1.length, 1);
-eq("and the name is what you typed", people1[0].name, "Gill");
-eq("with no fields at all", people1[0].fields.length, 0);
+eq("a person is added with only a name", people1.length, seeded.length + 1);
+const newPerson = people1[people1.length - 1];
+eq("and the name is what you typed", newPerson.name, "Corvaunus");
+eq("with no fields at all", newPerson.fields.length, 0);
 ok("adding opens the editor", !!$(".card.carded.person"));
 ok("the editor offers labels rather than demanding them", $$(".hintchip").length > 4);
 ok("including an escape from the suggestions", /Something else/.test(text()));
 
-const gid0 = people1[0].id;
+/* The one just added, not people[0] — the party's dossiers are seeded
+   and occupy the front of the list. */
+const gid0 = newPerson.id;
+function person(id) {
+  return JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).people
+    .filter(function (p) { return p.id === id; })[0];
+}
 click(byAct("peopleFieldAdd", { id: gid0, k: "Race" }));
 const fk = $('[data-act="peopleField"][data-id="' + gid0 + '"][data-i="0"][data-part="v"]');
 fk.value = "Locathah";
 fk.dispatchEvent(new w.Event("change", { bubbles: true }));
-eq("a detail you added holds what you typed",
-   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).people[0].fields,
+eq("a detail you added holds what you typed", person(gid0).fields,
    [{ k: "Race", v: "Locathah" }]);
 click(byAct("peopleStanding", { id: gid0 }));
-eq("standing cycles on tap",
-   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).people[0].standing, "ally");
+eq("standing cycles on tap", person(gid0).standing, "ally");
 click(byAct("peopleEdit", { id: gid0 }));
 ok("Done closes the editor", !$(".card.carded.person"));
 ok("the card shows the label with the value", /Race/.test(text()) && /Locathah/.test(text()));
 
 $("#people-new").value = "The Ashguard";
 click(byAct("peopleAdd", { kind: "group" }));
-const grpId = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).people[1].id;
-eq("a clan is the same shape, different kind",
-   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).people[1].kind, "group");
+const allNow = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).people;
+const grpId = allNow[allNow.length - 1].id;
+eq("a clan is the same shape, different kind", person(grpId).kind, "group");
 click(byAct("peopleEdit", { id: grpId }));
 click(byAct("peopleEdit", { id: gid0 }));
 click(byAct("peopleGroup", { id: gid0, g: grpId }));
-eq("a person can be put in a clan",
-   JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).people[0].groups, [grpId]);
+eq("a person can be put in a clan", person(gid0).groups, [grpId]);
 click(byAct("peopleEdit", { id: gid0 }));
 ok("the clan card counts its members", /1 member/.test(text()));
 ok("the person card names the clan they're in", /The Ashguard/.test(text()));
 
 $('[data-act="peopleSearch"]').value = "Locathah";
 $('[data-act="peopleSearch"]').dispatchEvent(new w.Event("change", { bubbles: true }));
-ok("search finds a person by a detail, not just a name", /Gill/.test(text()));
+ok("search finds a person by a detail, not just a name", /Corvaunus/.test(text()));
 ok("and hides the ones that don't match", /Nothing matches that/.test(text()));
 click(byAct("peopleSearchClear"));
 ok("clearing search brings everyone back", /The Ashguard/.test(text()));
 
+const beforeDel = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).people.length;
 click(byAct("peopleEdit", { id: grpId }));
 click(byAct("peopleDel", { id: grpId }));
 const afterDel = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).people;
-eq("deleting a clan removes it", afterDel.length, 1);
-eq("and takes the membership with it", afterDel[0].groups, []);
+eq("deleting a clan removes it", afterDel.length, beforeDel - 1);
+eq("and takes the membership with it", person(gid0).groups, []);
+
+/* A seeded dossier is inserted once and then belongs to the player. An
+   update must never write over an edit, and a deletion must stick. */
+console.log("\n=== SEEDED DOSSIERS BELONG TO YOU ONCE THEY ARRIVE ===");
+const sol = person("p-seed-sol");
+ok("Sol arrived with the sheet", !!sol);
+click(byAct("peopleEdit", { id: "p-seed-sol" }));
+setVal(byAct("peopleField", { id: "p-seed-sol", i: "0", part: "v" }), "Kenku, she says");
+click(byAct("peopleEdit", { id: "p-seed-sol" }));
+eq("an edit to a seeded card takes", person("p-seed-sol").fields[0].v, "Kenku, she says");
+/* Re-running the migration is what an app update does. */
+w.eval("S = migrate(JSON.parse(localStorage.getItem('hal-briarshade-sheet-v1'))); save(); render();");
+eq("and survives the next update", person("p-seed-sol").fields[0].v, "Kenku, she says");
+click(byAct("peopleEdit", { id: "p-seed-sol" }));
+click(byAct("peopleDel", { id: "p-seed-sol" }));
+ok("deleting one removes it", !person("p-seed-sol"));
+ok("and it is remembered as deleted", JSON.parse(
+   w.localStorage.getItem("hal-briarshade-sheet-v1")).peopleDropped.indexOf("p-seed-sol") >= 0);
+w.eval("S = migrate(JSON.parse(localStorage.getItem('hal-briarshade-sheet-v1'))); save(); render();");
+ok("so an update does not resurrect them", !person("p-seed-sol"));
 
 console.log("\n=== FAVOURITES: THE LIST YOU WRITE YOURSELF ===");
 click(byAct("tab", { tab: "combat" }));

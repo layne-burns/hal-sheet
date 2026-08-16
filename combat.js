@@ -16,6 +16,7 @@ function newId(prefix) { _idSeq += 1; return prefix + Date.now() + "_" + _idSeq;
 function refFor(id, kind, name, token) {
   if (kind === "hal") return { type: "hal" };
   if (kind === "party") return { type: "party", partyId: id.slice(2) };
+  if (kind === "follower") return { type: "follower", followerId: id.slice(2) };
   if (kind === "foe") return { type: "foe", name: name || "Enemy", token: validToken(token) };
   return { type: kind };
 }
@@ -123,20 +124,30 @@ EXT.combatBar = function () {
     (c.order.length ? "Turn order — " + c.order.length + " in the fight" : "Set the turn order") +
     '">' + (c.order.length ? "Order " + c.order.length : "Order") + "</button>";
   if (!c.active) {
-    /* "Out of combat" is the absence of news. It used to sit above every
-       tab in the app announcing that nothing was happening — a whole
-       strip of a 740px screen spent saying so on the Calendar. It is a
-       control, not a status, so it lives where you would go looking for
-       it: the Combat tab. The IN-combat strip below still follows you
-       everywhere, because that one IS news. */
-    if (((S.ui && S.ui.tab) || "combat") !== "combat") return "";
-    /* No turn-order button out of combat: entering one now asks for
-       initiative outright, and an order left over from the last fight is
-       not something to curate between fights. */
-    return '<div class="strip cut"><span class="lbl">Out of combat</span>' +
-      '<button class="bt cutsm pri" data-act="combatStart">Enter combat</button>' +
-      (S.effects.length ? '<span class="lbl" style="margin-left:auto">' + S.effects.length +
-        " active effect(s) — durations pause outside combat</span>" : "") + "</div>";
+    /* Out of combat the strip carries the company and nothing else. It
+       used to announce "Out of combat" above every tab in the app, which
+       is the absence of news taking a whole band of a 740px screen to
+       say so.
+
+       What IS worth carrying everywhere is who is with you — the party,
+       the summons, the mounts, and the mule riding on somebody's corner.
+       No dimming, because nobody's turn it is, and three quarters the
+       size, because nothing here is urgent.
+
+       Entering combat is a control rather than a status, so it stays on
+       the Combat tab where you would go looking for it. */
+    const onCombatTab = ((S.ui && S.ui.tab) || "combat") === "combat";
+    const company = companyStrip();
+    if (!onCombatTab && !company) return "";
+    return '<div class="strip cut explore">' +
+      (onCombatTab
+        ? '<button class="bt cutsm pri" data-act="combatStart">Enter combat</button>' +
+          (allMounts().length && !allMounts().every(function (f) { return f.riddenBy; })
+            ? '<button class="bt cutsm" data-act="mountModal">Mount…</button>' : "") +
+          (S.effects.length ? '<span class="lbl">' + S.effects.length +
+            " effect(s) — durations pause out of combat</span>" : "")
+        : "") +
+      company + "</div>";
   }
   const t = c.turn;
   const slotNote = t.slotUsed ? "used" : "open";
@@ -165,6 +176,22 @@ EXT.combatBar = function () {
       '<button class="bt cutsm" data-act="move" data-d="-5">+5</button></span>' +
     (t.hitLanded ? '<span class="hitflag" title="Smites are available">Hit landed</span>'
                  : '<button class="bt cutsm" data-act="logHit" title="Log a hit — arms your smites">Hit</button>') +
+    /* Getting on and off a horse costs half your Speed, which is exactly
+       the sort of thing that gets forgotten mid-fight — so the control
+       lives in the strip, next to the movement it spends. Only when
+       there is something to ride; a party with no mounts never sees it. */
+    (function () {
+      const mounts = allMounts();
+      if (!mounts.length) return "";
+      const mine = mountRiddenBy("hal");
+      if (mine) {
+        return '<button class="bt cutsm" data-act="dismount" data-id="' + mine.id +
+          '" title="Get off ' + esc(mine.name) + " — half your Speed\">Dismount</button>";
+      }
+      const free = mounts.filter(function (f) { return !f.riddenBy; });
+      if (!free.length) return "";
+      return '<button class="bt cutsm" data-act="mountModal" title="Get on — half your Speed">Mount</button>';
+    })() +
     /* The table runs its own initiative, so the turns between yours often
        pass without anyone touching the sheet. This catches it up in one
        press instead of four, and says how far it will jump so you can see
@@ -280,8 +307,65 @@ function fitOrderStrip() {
      too small to tell apart. */
 }
 
+/* Who is with you, out of combat. Not the turn order — there isn't one —
+   just the company: Hal, whoever is present, and every follower that is
+   its own creature rather than a badge on somebody's corner.
+
+   Renders nothing at all when it would be Hal on his own, because a
+   strip with one face in it is a strip that is only taking up room. */
+function companyStrip() {
+  const rows = [];
+  rows.push({ name: S.identity.name || "Hal", hal: true, token: null, owner: "hal" });
+  (S.party.roster || []).filter(function (m) { return m.present; }).forEach(function (m) {
+    rows.push({ name: m.name, token: m.token, owner: m.id,
+                status: m.status && m.status !== "healthy" ? m.status : "" });
+  });
+  S.followers.forEach(function (f) {
+    const b = CALC.followerBlock(S, f);
+    if (!b) return;
+    /* A non-combatant rides on its owner's card, not in the line. */
+    if (f.source === "companion" && !b.inCombat) return;
+    rows.push({ name: f.name, token: f.token, owner: null,
+                sub: b.role ? b.role.label : b.type.name,
+                ridden: !!f.riddenBy, rider: f.riddenBy });
+  });
+  if (rows.length < 2 && !S.followers.length) return "";
+
+  return '<div class="ordstrip explore">' + rows.map(function (r) {
+    /* A mount already on somebody is drawn chained to them, not twice. */
+    if (r.ridden) return "";
+    const mount = r.owner ? S.followers.filter(function (f) { return f.riddenBy === r.owner; })[0] : null;
+    const short = r.name.split(/\s+/)[0];
+    return '<span class="ordc' + (r.status ? " st-" + r.status : "") +
+      (mount ? " ridden" : "") + '" title="' + esc(r.name) +
+        (r.sub ? " — " + esc(r.sub) : "") +
+        (mount ? " · riding " + esc(mount.name) : "") +
+        (r.status ? " · " + r.status : "") + '">' +
+      tokenFace({ hal: r.hal, token: r.token, name: r.name, cls: "ordface" }) +
+      (r.owner ? companionBadges(r.owner) : "") +
+      (mount
+        ? '<span class="ordlink">+</span>' +
+          tokenFace({ token: mount.token, name: mount.name, cls: "ordface mountface" })
+        : "") +
+      '<span class="ordn">' + esc(short) + "</span></span>";
+  }).join("") + "</div>";
+}
+
 /* Everything one entry needs to draw itself, in one place so the big chip
    and the small ones can't disagree about who somebody is. */
+/* Who this combatant is riding, if anyone. A mounted pair shares a turn,
+   so the strip shows them chained rather than as two entries — one of
+   which would be a turn that never comes round. */
+function ordMount(o) {
+  const rider = o.ref.type === "hal" ? "hal"
+              : o.ref.type === "party" ? o.ref.partyId : null;
+  if (!rider) return null;
+  const m = S.followers.filter(function (f) { return f.riddenBy === rider; })[0];
+  if (!m) return null;
+  const b = CALC.followerBlock(S, m);
+  return b ? { name: m.name, token: m.token, kind: b.type.name } : null;
+}
+
 function ordInfo(o) {
   const name = CALC.combatantName(S, o.ref);
   let status = "";
@@ -301,6 +385,7 @@ function ordInfo(o) {
     hal: o.ref.type === "hal",
     token: CALC.combatantToken(S, o.ref),
     status: status,
+    mount: ordMount(o),
     init: o.initiative
   };
 }
@@ -330,11 +415,22 @@ function orderStrip() {
     const on = i === curIdx;
     const next = i === (curIdx + 1) % order.length && order.length > 1;
     return '<span class="ordc' + (on ? " on" : "") + (next ? " next" : "") +
+      (q.mount ? " ridden" : "") +
       (q.status ? " st-" + q.status : "") + '" title="' + esc(q.name) +
         (q.init == null ? "" : " · initiative " + q.init) +
         (q.status ? " · " + q.status : "") +
+        (q.mount ? " · riding " + esc(q.mount.name) : "") +
         (on ? " · up now" : next ? " · on deck" : "") + '">' +
       tokenFace({ hal: q.hal, token: q.token, name: q.name, cls: "ordface" }) +
+      (o.ref.type === "hal" ? companionBadges("hal")
+        : o.ref.type === "party" ? companionBadges(o.ref.partyId) : "") +
+      /* Chained, not listed twice. The mount moves on this turn, so it
+         belongs to this chip — a slot of its own would be a turn that
+         never comes round. */
+      (q.mount
+        ? '<span class="ordlink">+</span>' +
+          tokenFace({ token: q.mount.token, name: q.mount.name, cls: "ordface mountface" })
+        : "") +
       '<span class="ordn">' + esc(q.short) + "</span>" +
       (q.init == null ? "" : '<span class="ordi">' + q.init + "</span>") +
       "</span>";
@@ -710,6 +806,21 @@ function freshInitRows() {
   (S.party.roster || []).filter(function (m) { return m.present; }).forEach(function (m) {
     rows.push({ key: "p:" + m.id, kind: "party", name: m.name, init: null, token: m.token });
   });
+  /* Followers that fight roll for themselves. A familiar always does —
+     it acts on its own turn, not yours — and so does a mount, but only
+     while nobody is on it: a ridden mount moves on its rider's turn and
+     a second slot for it would be a turn that never happens.
+
+     A pack animal is not offered at all. An order with the baggage in it
+     is an order you stop reading. */
+  S.followers.forEach(function (f) {
+    const b = CALC.followerBlock(S, f);
+    if (!b) return;
+    if (f.source === "findSteed" || (b.isMount && f.riddenBy)) return;
+    if (f.source !== "findFamiliar" && !b.inCombat) return;
+    rows.push({ key: "f:" + f.id, kind: "follower", name: f.name,
+                init: null, token: f.token });
+  });
   /* Last fight's enemies come back by name AND by face — it is usually
      the same goblins, and re-picking the picture every encounter is the
      kind of chore that stops people using the feature at all. */
@@ -725,15 +836,74 @@ function freshInitRows() {
 function rowsFromOrder() {
   return S.combat.order.map(function (o) {
     const kind = o.ref ? o.ref.type : "foe";
-    let token = o.ref && o.ref.token;
-    if (kind === "party") {
-      const m = (S.party.roster || []).filter(function (x) { return x.id === o.ref.partyId; })[0];
-      token = m ? m.token : null;
-    }
     return { key: o.id, kind: kind, name: CALC.combatantName(S, o.ref),
-             init: o.initiative, token: validToken(token) };
+             init: o.initiative, token: CALC.combatantToken(S, o.ref) };
   });
 }
+
+/* ---------- GETTING ON A HORSE ------------------------------
+   Two questions and a price. Who is getting on, onto what, and — if it
+   is Hal and a fight is running — half his Speed, which the 2024 rules
+   charge for mounting and which is exactly the sort of thing that gets
+   forgotten and then argued about.
+
+   An ally's movement is not deducted. The sheet has never tracked an
+   ally's movement and inventing a number for it would be worse than
+   leaving it to the person whose turn it is. */
+EXT.mountModal = function () {
+  const m = UI.modal;
+  const free = allMounts().filter(function (f) { return !f.riddenBy || f.id === m.mount; });
+  const mount = free.filter(function (f) { return f.id === m.mount; })[0] || free[0];
+  if (!mount) return "<h2>Nothing to ride</h2>" +
+    '<div class="mfoot"><button class="bt cutsm" data-act="closeModal">Close</button></div>';
+  const b = CALC.followerBlock(S, mount);
+  const riderIsHal = m.rider === "hal";
+  const cost = Math.floor(S.identity.speed / 2);
+  const left = S.identity.speed - S.combat.turn.movementUsed;
+
+  let body = "<h2>Mount up</h2><div class=\"msub\">The mount acts on its rider's turn.</div>";
+
+  body += '<div class="mrow"><span class="lbl">Rider</span>' +
+    '<select data-act="mountRider" style="flex:1;min-width:130px">' +
+      ownerOptions().map(function (o) {
+        return '<option value="' + o.id + '"' + (m.rider === o.id ? " selected" : "") + ">" +
+          esc(o.name) + "</option>";
+      }).join("") + "</select></div>";
+
+  body += '<div class="mrow"><span class="lbl">Mount</span>' +
+    '<select data-act="mountPick" style="flex:1;min-width:130px">' +
+      free.map(function (f) {
+        return '<option value="' + f.id + '"' + (m.mount === f.id ? " selected" : "") + ">" +
+          esc(f.name) + (f.kind ? " · " + esc(f.kind) : "") + "</option>";
+      }).join("") + "</select></div>";
+
+  body += '<div class="sb"><div class="sbrow"><span>Its speed</span><b>' + esc(b.speed) +
+    '</b><span class="sbwhy">what you move at while mounted</span></div>' +
+    '<div class="sbrow"><span>Its role</span><b>' + esc(b.role.label) + "</b>" +
+    '<span class="sbwhy">' + (b.inCombat ? "takes its own turn when nobody is on it"
+                                         : "stays out of the turn order") + "</span></div>";
+  if (riderIsHal) {
+    body += '<div class="sbrow"><span>Costs</span><b>' + cost +
+      ' ft</b><span class="sbwhy">half your Speed, 2024 rules</span></div>' +
+      '<div class="sbrow"><span>You have</span><b>' + left +
+      ' ft</b><span class="sbwhy">' + (S.combat.active ? "left this turn" : "out of combat, nothing is spent") +
+      "</span></div>";
+  } else {
+    body += '<div class="sbrow"><span>Costs</span><b>their half</b>' +
+      '<span class="sbwhy">not deducted here — their movement is theirs to spend</span></div>';
+  }
+  body += "</div>";
+
+  if (riderIsHal && S.combat.active && left < cost) {
+    body += '<div class="warnbox" style="margin-top:11px">That is more movement than you have ' +
+      "left. You can still do it — the sheet will take you to zero.</div>";
+  }
+
+  body += '<div class="mfoot">' +
+    '<button class="bt cutsm pri" data-act="mountConfirm">Mount up</button>' +
+    '<button class="bt cutsm" data-act="closeModal">Cancel</button></div>';
+  return body;
+};
 
 /* ---------- PICKING A FACE -----------------------------------
    One picker, two callers. The party panel sets a roster member's face,
@@ -760,8 +930,16 @@ EXT.tokenModal = function () {
     (q ? '<button class="bt cutsm" data-act="tokenSearchClear">Clear</button>' : "") +
     '<button class="bt cutsm dg" data-act="tokenSet" data-i="">No face</button></div>';
 
+  /* Where the picker was opened FOR something — a familiar, a mount —
+     the band that holds those faces comes first. Everything is still
+     there below it; this only saves scrolling past four hundred goblins
+     to find a horse. */
+  const bands = m.band
+    ? TOKEN_BANDS.filter(function (b) { return (b.use || []).indexOf(m.band) >= 0; })
+        .concat(TOKEN_BANDS.filter(function (b) { return (b.use || []).indexOf(m.band) < 0; }))
+    : TOKEN_BANDS;
   let shown = 0;
-  TOKEN_BANDS.forEach(function (band) {
+  bands.forEach(function (band) {
     const hits = [];
     for (let i = band.from; i < band.from + band.count; i++) {
       if (!q || tokenLabel(i).toLowerCase().indexOf(q) >= 0) hits.push(i);
@@ -914,6 +1092,14 @@ EXT.favUseModal = function () {
    initiative, so "Goblins 14" is the whole of what the sheet needs to
    know, and typing six goblins in to watch them all act at 14 was never
    buying anything. */
+/* Does row i share a roll with its neighbour in direction d? A blank is
+   not a tie — "we never got their number" is not "they rolled the same
+   as you", and two blanks in a row are just two unknowns. */
+function tiedWith(rows, i, d) {
+  const a = rows[i], b = rows[i + d];
+  return !!(a && b && a.init != null && b.init != null && a.init === b.init);
+}
+
 EXT.initiativeModal = function () {
   const m = UI.modal;
   const editing = !!m.editing;
@@ -944,6 +1130,17 @@ EXT.initiativeModal = function () {
           "</span>") +
       '<input type="number" class="oinit" data-act="initValue" data-i="' + i +
         '" placeholder="Roll" value="' + (r.init == null ? "" : r.init) + '">' +
+      /* Ties are settled by hand. The rules leave it to the table, and a
+         sort cannot know that the rogue goes before the ogre on a 14 —
+         so the arrows are here, and they only appear between people who
+         actually tied, because nudging anyone else would be undone by
+         the sort the moment you commit. */
+      (tiedWith(m.rows, i, -1)
+        ? '<button class="bt cutsm" data-act="initMove" data-i="' + i +
+          '" data-d="-1" title="Go before the one above, on the same roll">↑</button>' : "") +
+      (tiedWith(m.rows, i, 1)
+        ? '<button class="bt cutsm" data-act="initMove" data-i="' + i +
+          '" data-d="1" title="Go after the one below, on the same roll">↓</button>' : "") +
       '<button class="bt cutsm dg" data-act="initDrop" data-i="' + i + '" title="Not in this fight">×</button>' +
       "</div>";
   });
@@ -1563,7 +1760,7 @@ Object.assign(ACT, {
      if that fight is actually started. */
   tokenModal(el) {
     const kind = el.dataset.kind;
-    let current = null, who = "", back = null;
+    let current = null, who = "", back = null, band = null;
     if (kind === "party") {
       const m = (S.party.roster || []).filter(function (x) { return x.id === el.dataset.id; })[0];
       current = m ? m.token : null;
@@ -1572,6 +1769,15 @@ Object.assign(ACT, {
       const pr = personById(el.dataset.id);
       current = pr ? pr.token : null;
       who = pr ? pr.name : "";
+    } else if (kind === "follower") {
+      const fo = S.followers.filter(function (x) { return x.id === el.dataset.id; })[0];
+      current = fo ? fo.token : null;
+      who = fo ? fo.name : "";
+      /* A steed wants the Beasts band and a familiar wants Familiars —
+         opening on the right one saves scrolling past four hundred
+         goblins to find a horse. */
+      band = fo ? (fo.source === "findFamiliar" ? "familiar"
+                 : (COMPANION_ROLES[fo.role] || {}).mount ? "mount" : "summon") : null;
     } else {
       /* Opening a second modal would throw away the initiative sheet, so
          its rows ride along and are put back on the way out. */
@@ -1581,7 +1787,7 @@ Object.assign(ACT, {
       back = { type: "initiative", editing: UI.modal.editing, rows: UI.modal.rows };
     }
     UI.modal = { type: "token", target: { kind: kind, id: el.dataset.id, i: el.dataset.i },
-                 current: current, who: who, q: "", back: back };
+                 current: current, who: who, q: "", band: band, back: back };
     render();
   },
   tokenSearch(el) { UI.modal.q = el.value; render(); },
@@ -1590,10 +1796,10 @@ Object.assign(ACT, {
     const raw = el.dataset.i;
     const v = raw === "" ? null : validToken(parseInt(raw, 10));
     const t = UI.modal.target, back = UI.modal.back;
-    if (t.kind === "party" || t.kind === "person") {
-      const roster = t.kind === "party" ? "party" : "people";
+    if (t.kind === "party" || t.kind === "person" || t.kind === "follower") {
       mutate(function (st) {
-        const list = roster === "party" ? st.party.roster : st.people;
+        const list = t.kind === "party" ? st.party.roster
+                   : t.kind === "person" ? st.people : st.followers;
         const rec = list.filter(function (x) { return x.id === t.id; })[0];
         if (rec) rec.token = v;
       }, "Set a face");
@@ -1655,8 +1861,22 @@ Object.assign(ACT, {
   initValue(el) {
     const v = el.value === "" ? null : parseInt(el.value, 10);
     UI.modal.rows[parseInt(el.dataset.i, 10)].init = (v == null || isNaN(v)) ? null : v;
+    /* Re-render, because the tie arrows only exist between rows that
+       actually tied and cannot know that until the number is in. Safe to
+       do here: these commit on change rather than on every keystroke, so
+       the field has already been left by the time this runs. */
+    render();
   },
   initDrop(el) { UI.modal.rows.splice(parseInt(el.dataset.i, 10), 1); render(); },
+  /* Swapping two rows that rolled the same. The sort on commit is stable,
+     so the order they are left in here is the order they act in. */
+  initMove(el) {
+    const i = parseInt(el.dataset.i, 10), d = parseInt(el.dataset.d, 10);
+    const rows = UI.modal.rows, j = i + d;
+    if (j < 0 || j >= rows.length) return;
+    const tmp = rows[i]; rows[i] = rows[j]; rows[j] = tmp;
+    render();
+  },
   initAddFoe() {
     UI.modal.rows.push({ key: newId("f:"), kind: "foe", name: "", init: null, token: null });
     render();
@@ -2108,7 +2328,7 @@ render = function () {
      so a later throw in the glow/bar/panel steps below can never leave a
      half-open modal shell on screen with no content and no way to close it. */
   const root = document.getElementById("modal-root");
-  if (UI.modal && ["roll", "override", "settings", "loh", "history", "attack", "initiative", "favUse", "token", "note", "session", "preSession"].indexOf(UI.modal.type) >= 0) {
+  if (UI.modal && ["roll", "override", "settings", "loh", "history", "attack", "initiative", "favUse", "token", "note", "mount", "session", "preSession"].indexOf(UI.modal.type) >= 0) {
     let body = "";
     if (UI.modal.type === "roll") body = EXT.rollModal();
     else if (UI.modal.type === "override") body = EXT.overrideModal();
@@ -2119,6 +2339,7 @@ render = function () {
     else if (UI.modal.type === "favUse") body = EXT.favUseModal();
     else if (UI.modal.type === "token") body = EXT.tokenModal();
     else if (UI.modal.type === "note") body = EXT.noteModal();
+    else if (UI.modal.type === "mount") body = EXT.mountModal();
     else if (UI.modal.type === "session") body = EXT.sessionModal();
     else if (UI.modal.type === "preSession") body = EXT.preSessionModal();
     else if (UI.modal.type === "history") {

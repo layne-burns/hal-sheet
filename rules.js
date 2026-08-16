@@ -79,6 +79,109 @@ const TAG_GROUPS = {
   reach:  "Reach"
 };
 
+/* ---------- THE PARTY, WRITTEN DOWN ----------
+   These are seed records, and seed records are the one thing in this app
+   that arrive from the code rather than from the player. That makes them
+   dangerous in a way nothing else here is: an update that shipped them
+   naively would overwrite whatever had been added to them at the table.
+
+   So the rule is: a dossier is inserted ONCE, by id, and never touched
+   again. Edit Gill's card and the edit is yours forever; a later update
+   that changes this text changes nothing on a sheet that already has it.
+   Delete one and it stays deleted — S.people.dropped remembers, because
+   resurrecting somebody the player removed is the same bug wearing a
+   friendlier face.
+
+   The upside of only ever inserting is that a dossier added in a future
+   update simply appears, without anyone migrating anything.
+
+   The text is deliberately split the way the People tab splits it: the
+   facts that fit a label go in `fields`, and the part that is a story
+   goes in `note`. Writing it all into one paragraph would have been
+   easier and would have wasted the tab. */
+const PARTY_DOSSIERS = [
+  { id: "p-seed-sol", kind: "person", name: "Sol", token: 4,
+    standing: "ally", status: "alive",
+    fields: [
+      { k: "Race", v: "Kenku" },
+      { k: "Role", v: "Party — the one who came back" },
+      { k: "Where", v: "Nowhere she recognises any more" },
+      { k: "Wants", v: "To find out where her people went" }
+    ],
+    note: "Stepped through a portal. It felt like minutes. She came back " +
+      "and it was the future — and her people had gone with the time she " +
+      "lost. Nobody has been able to tell her where."
+  },
+  { id: "p-seed-karlie", kind: "person", name: "Karlie", token: 3,
+    standing: "ally", status: "alive",
+    fields: [
+      { k: "Race", v: "Tortle" },
+      { k: "Role", v: "Party" },
+      { k: "Wants", v: "Nothing to do with magic" },
+      { k: "Careful", v: "Does not know he is magical" }
+    ],
+    note: "Has latent magical ability and firm opinions about magic users, " +
+      "the second of which he is much louder about than he would be if he " +
+      "knew about the first. Nobody has told him."
+  },
+  { id: "p-seed-gill", kind: "person", name: "Gill", token: 1,
+    standing: "ally", status: "alive",
+    fields: [
+      { k: "Race", v: "Locathah" },
+      { k: "Role", v: "Party — found Hal, kept him" },
+      { k: "Kin", v: "Something between a young uncle and an older brother" },
+      { k: "Faith", v: "Eadro, casually" }
+    ],
+    note: "Found Hal two years ago, hungry, and took him in. Introduced him " +
+      "to Eadro — and where Gill's reverence is casual, Hal took to it " +
+      "absolutely and immediately. He has never quite got used to that."
+  },
+  { id: "p-seed-dinos", kind: "person", name: "Dinos Mavropanos VI", token: 2,
+    standing: "ally", status: "alive",
+    fields: [
+      { k: "Race", v: "Human" },
+      { k: "Role", v: "Farmer, and an archer out of necessity" },
+      { k: "Where", v: "The farms around Gloomwood" },
+      { k: "Kin", v: "Five Dinoses back: farmer, farmer, farmer, deadbeat, disgraced noble" },
+      { k: "Wants", v: "To find out what happened to his parents" }
+    ],
+    note: "Sixth of the name. His father farmed, his grandfather farmed, his " +
+      "great-grandfather farmed; the two before that were a deadbeat and a " +
+      "noble disgraced out of distant lands for something that happened on " +
+      "an island years before anyone heard about it.\n\n" +
+      "He learned archery, nature and survival helping his family and the " +
+      "farms around them — useful against rabbits and wolves, and against " +
+      "the bipeds he could not make out in the dark.\n\n" +
+      "He is back in town for the first time in a long while, volunteering " +
+      "for the caravan disappearances. The farm is with his uncle Kostas " +
+      "Mavropanos III and the staff. He has not heard from his parents in " +
+      "weeks, and he thinks he knows why."
+  },
+  { id: "p-seed-qee", kind: "person", name: "Qee Harefoot Oswald", token: 0,
+    standing: "ally", status: "alive",
+    fields: [
+      { k: "Race", v: "Harengon" },
+      { k: "Role", v: "Party" },
+      { k: "Looks", v: "Blindfolded since infancy — deliberately" },
+      { k: "Kin", v: "Five generations of Oswalds, most of them dead in “accidents”" },
+      { k: "Wants", v: "Allies strong enough to bring down the world government" }
+    ],
+    note: "His great-great-great-grandfather Lee was sent to the Fracture by " +
+      "Kurst for killing the king — framed, Qee says, by the Kurst family " +
+      "to be rid of the man. Exploring the Fracture and the rest of Cyrnn, " +
+      "Lee learned what else they had done, up to and including opening the " +
+      "Fracture themselves.\n\n" +
+      "That knowledge came down five generations to Qee. He has worn a " +
+      "blindfold since he was a baby: the Eye of Evil, opened by the same " +
+      "people, is used to program what eyes are allowed to see. His family " +
+      "have been spreading the truth ever since, and have been hunted down " +
+      "one by one in what the government calls accidents caused by wearing " +
+      "a blindfold all the time.\n\n" +
+      "He is on this adventure to find allies strong enough to help him " +
+      "finish it."
+  }
+];
+
 /* ---------- TOOLS (2024) ------------------------------------
    The 2024 rules changed what a tool is. In 2014 a tool proficiency was
    a vague licence to add your bonus when the DM felt like it; in 2024
@@ -597,7 +700,40 @@ const FOLLOWER_SOURCES = {
     /* Here it is the other way round: the form IS the stat block, and
        the creature type only changes what the familiar counts as. */
     formIsFlavour:false
+  },
+  /* Everything that came along without being conjured. A bought horse, a
+     mule carrying the tents, a dog that followed you out of Gloomwood.
+     No stat block is computed for these — there is nothing to compute,
+     because nothing about them is derived from Hal. What the sheet holds
+     is what you told it. */
+  companion: {
+    key:"companion", label:"Companion", slug:"srd:Mounts",
+    unique:false, defaultName:"Companion", formIsFlavour:true
   }
+};
+
+/* What a companion is FOR, which decides how the app treats it.
+
+   The distinction that earns its keep is `combat`: a warhorse rolls
+   initiative and takes a slot in the order, and a mule carrying the
+   tents does not and must not — an order with the baggage in it is an
+   order you stop reading. A non-combatant rides on its owner's card
+   instead, as a badge in the corner.
+
+   `mount` is separate from `combat` because they vary independently: a
+   riding horse is a mount you would not put in the turn order, and a war
+   dog is a combatant you cannot ride. */
+const COMPANION_ROLES = {
+  mount:     { label:"Mount", mount:true,  combat:true,
+               note:"Ridden, and in the fight. Takes its own initiative when nobody is on it." },
+  ridingn:   { label:"Riding animal", mount:true, combat:false,
+               note:"Ridden, but not a war animal. Stays off the turn order." },
+  warbeast:  { label:"War beast", mount:false, combat:true,
+               note:"Fights beside you. Rolls its own initiative." },
+  pack:      { label:"Pack animal", mount:false, combat:false,
+               note:"Carries what you cannot. Never in the turn order." },
+  companion: { label:"Companion", mount:false, combat:false,
+               note:"Along for the road. Never in the turn order." }
 };
 
 /* ------------------------------------------------------------
@@ -1032,7 +1168,41 @@ const CALC = {
     if (!f) return null;
     if (f.source === "findSteed") return CALC.steedBlock(S, f);
     if (f.source === "findFamiliar") return CALC.familiarBlock(S, f);
+    if (f.source === "companion") return CALC.companionBlock(S, f);
     return null;
+  },
+
+  /* A companion's "block" is mostly what you typed. Nothing here is
+     derived from Hal, because nothing about a bought horse is — which is
+     the whole difference between this and the two summons above.
+
+     HP is optional and usually absent. A summoned steed has a real HP
+     bar because the spell gives it real numbers; a mule does not, for
+     the same reason the party roster tracks a status rather than a
+     number. Where you do want one — a warhorse in a fight that matters —
+     you type it, and the bar appears. */
+  companionBlock(S, f) {
+    const role = COMPANION_ROLES[f.role] || COMPANION_ROLES.companion;
+    const hasHP = typeof f.maxHP === "number" && f.maxHP > 0;
+    return {
+      source: FOLLOWER_SOURCES.companion,
+      type: { name: f.kind || "Beast", key: "companion" },
+      statName: f.name || "Companion",
+      formLabel: role.label,
+      size: f.size || "Large",
+      alignment: "Unaligned",
+      speed: (f.speed || 40) + " ft.",
+      ac: f.ac || null,
+      maxHP: hasHP ? f.maxHP : null,
+      hasHP: hasHP,
+      role: role,
+      isMount: !!role.mount,
+      inCombat: !!role.combat,
+      cardLine: [role.label, f.kind, f.note].filter(Boolean).join(" · ") || role.label,
+      traits: [], actions: [], bonusActions: [], reactions: [],
+      combatRules: [],
+      ends: ""
+    };
   },
 
   layOnHandsMax(S) {
@@ -1349,7 +1519,13 @@ const SEED = {
          groups: [groupId],         which clans/guilds a person belongs to
          note: "" }                 the long-form remainder
   */
+  /* Empty in the seed. The party's dossiers live in PARTY_DOSSIERS and
+     are inserted once by migrate(), which is what stops an update from
+     overwriting anything written at the table — see the note there. */
   people: [],
+  /* Seeded dossiers the player has deleted. Without this, deleting one
+     would resurrect it on the next launch. */
+  peopleDropped: [],
 
   /* The things you actually reach for, pinned to the right column so they
      are one tap away from any tab. Entries are {kind,id} pointers into
@@ -1469,5 +1645,6 @@ if (typeof module !== "undefined" && module.exports) {
     ASI_LEVELS, OATH_SPELLS, SPELLS, PALADIN_SPELL_LIST, FEATS, FEATURES, CONDITIONS,
     STEED_FORMS, STEED_TYPES, STEED_ABILITIES, FOLLOWER_SOURCES, FAMILIAR_TYPES, FAMILIAR_GUIDE,
     COMBAT_RULES, SIZE_ORDER,
-    TOOLS_2024, SKILL_ABILITY, SKILL_NAMES, ABILITY_NAMES, CALC, SEED };
+    COMPANION_ROLES, PARTY_DOSSIERS, TOOLS_2024,
+    SKILL_ABILITY, SKILL_NAMES, ABILITY_NAMES, CALC, SEED };
 }

@@ -328,6 +328,10 @@ Object.assign(CALC, {
     /* A foe carries its own name on the entry. There is no roster behind
        it on purpose: the table rolls one initiative for the goblins, so
        the sheet holds one line for the goblins. */
+    if (ref.type === "follower") {
+      const f = (S.followers || []).filter(function (x) { return x.id === ref.followerId; })[0];
+      return f ? f.name : "(gone)";
+    }
     if (ref.type === "foe") return ref.name || "Enemy";
     return "?";
   },
@@ -342,6 +346,10 @@ Object.assign(CALC, {
     if (ref.type === "party") {
       const m = (S.party.roster || []).filter(function (x) { return x.id === ref.partyId; })[0];
       return m && typeof m.token === "number" ? m.token : null;
+    }
+    if (ref.type === "follower") {
+      const f = (S.followers || []).filter(function (x) { return x.id === ref.followerId; })[0];
+      return f && typeof f.token === "number" ? f.token : null;
     }
     if (ref.type === "foe") return typeof ref.token === "number" ? ref.token : null;
     return null;
