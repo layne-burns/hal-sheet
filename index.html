@@ -1088,6 +1088,14 @@ h3.collapse::after{display:none}
   display:flex;align-items:flex-start;justify-content:center;
   overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;
   touch-action:pan-y}
+/* The page behind must not scroll while a modal is open. overscroll-
+   behavior alone is not enough on the iPads this runs on — Safari only
+   learned it in 16 — and without a real lock the touch chains through to
+   the document, which rubber-bands and reads as the modal refusing to
+   scroll. Set on <html> rather than <body> so no geometry the layout
+   measurement depends on moves. */
+html.modal-open{overflow:hidden}
+html.modal-open body{overflow:hidden}
 /* --appvh is the viewport height in the coordinate space the stylesheet
    actually lays out in; render() publishes it. Plain vh is the device
    height, which under zoom is a smaller number — it capped this at 70% of
@@ -1096,13 +1104,19 @@ h3.collapse::after{display:none}
 /* No max-height and no overflow of its own — the mask above scrolls, and
    two nested scrollers is exactly the collision that made touch
    unreliable. margin:auto centres it while still letting it grow past the
-   viewport and be scrolled to. */
+   viewport and be scrolled to.
+
+   The zoom is here rather than on <body> so that .mask, which is
+   position:fixed, sits OUTSIDE any zoomed subtree — WebKit does not
+   handle a fixed scroller inside one, and that was the snap-back. The
+   modal itself still reads at the app's size. render() publishes
+   --mzoom. */
 .modal{background:var(--panel);border:1px solid var(--cyan);max-width:640px;width:100%;
-  padding:18px 20px;position:relative;margin:auto}
+  padding:18px 20px;position:relative;margin:auto;zoom:var(--mzoom,100%)}
 /* The close control sits over the modal's own scroll, so it is reachable
    whatever the content is doing. A modal you can open and not close is
    worse than one you cannot open. */
-.modal .mx{position:sticky;top:0;float:right;margin:-8px -8px 0 8px;z-index:3;
+.modal .mx{position:absolute;top:8px;right:8px;z-index:3;
   width:34px;height:34px;flex:none;display:flex;align-items:center;justify-content:center;
   font-size:22px;line-height:1;background:var(--panel2);border:1px solid var(--line2);
   color:var(--dim);cursor:pointer}

@@ -549,7 +549,12 @@ click(byAct("scaleUI", { dir: "1" }));
 eq("caps at 200%, never exceeds it", state().settings.uiScale, 200);
 /* The setting is a multiple of the design size, not a raw zoom: 100% means
    "the size this sheet is meant to be read at", which renders at 80%. */
-eq("body zoom applies the design baseline to the setting", $("body").style.zoom, "160%");
+/* The zoom lives on #app, not <body> — a position:fixed overlay inside a
+   zoomed subtree is the WebKit bug that broke modal scrolling on iPad. */
+eq("the app zoom applies the design baseline to the setting", $("#app").style.zoom, "160%");
+ok("and the body itself is left unzoomed", !$("body").style.zoom);
+eq("with the modal told to match", 
+   doc.documentElement.style.getPropertyValue("--mzoom"), "160%");
 click(byAct("resetUIScale"));
 eq("Reset returns to 100%", state().settings.uiScale, 100);
 click(byAct("scaleUI", { dir: "-1" }));

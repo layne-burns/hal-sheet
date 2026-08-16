@@ -846,12 +846,19 @@ const ACT = {
         st.combat.turn.action = true;
         if (!pick.free) st.combat.turn.slotUsed = true;
       }
+      /* A steed re-summoned is the same steed to everyone at the table,
+         so it keeps the face you gave it rather than reverting to an
+         initial every cast. Read before the replace below, which is
+         about to throw the old record away. */
+      const keptFace = (st.followers.filter(function (x) {
+        return x.source === m.source; })[0] || {}).token;
       /* Only one steed, and only one familiar. */
       if (src.unique) {
         st.followers = st.followers.filter(function (f) { return f.source !== m.source; });
       }
       st.followers.push({
         id: "f" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        token: validToken(keptFace),
         source: m.source, name: name, form: form,
         creatureType: pick.creatureType, spellLevel: lv,
         hp: block.maxHP, tempHP: 0, baUsed: false, stowed: false,
@@ -1960,8 +1967,23 @@ function render() {
      baseline exists because the sheet was always actually used at 80% —
      so 80% is what the layout should be tuned against, and calling that
      size "100%" is the honest way to say it. */
-  document.body.style.zoom =
-    (((S.settings && S.settings.uiScale) || 100) * UI_SCALE_BASE) + "%";
+  /* The zoom goes on #app, NOT on <body>.
+
+     It was on the body, and that put the modal overlay — position:fixed,
+     inset:0 — inside a zoomed subtree. WebKit has never handled that
+     combination properly: the fixed box is laid out in the zoomed
+     coordinate space, and touch hit-testing and overflow scrolling
+     inside it are computed against the unzoomed one. The result on an
+     iPad is a scroll that starts and immediately snaps back, which is
+     exactly the bug this moves out of the way.
+
+     #modal-root stays unzoomed, so the overlay is fixed in plain
+     viewport coordinates. The modal INSIDE it takes the same zoom, so it
+     reads at the size the rest of the app does — see --mzoom below. */
+  const zoomPct = ((S.settings && S.settings.uiScale) || 100) * UI_SCALE_BASE;
+  const appEl = document.getElementById("app");
+  appEl.style.zoom = zoomPct + "%";
+  document.documentElement.style.setProperty("--mzoom", zoomPct + "%");
 
   /* How much room the layout actually has is the viewport divided by the
      zoom, and a media query cannot see that — it only ever measures the
@@ -1970,8 +1992,7 @@ function render() {
      room to spare; and it would fail to fire on someone who had scaled
      the sheet up until it was genuinely cramped. So the decision is made
      here, where the real number is available, and carried as a class.
-     body.clientWidth is the one measurement that reports post-zoom
-     layout width rather than device pixels. */
+     The measurement is taken on #app, which is what carries the zoom. */
   /* A zero here means nothing has been laid out yet rather than "no room
      at all", so fall back to the roomy layout instead of collapsing to a
      single column on the strength of a measurement we did not get. */
@@ -1984,7 +2005,10 @@ function render() {
   document.documentElement.style.setProperty(
     "--appvh", (window.innerHeight / (zoomFactor || 1)) + "px");
 
-  const layoutWidth = document.body.clientWidth || document.documentElement.clientWidth || 99999;
+  /* #app now, for the same reason it was body before: this is the one
+     measurement that reports post-zoom layout width rather than device
+     pixels, and #app is what carries the zoom. */
+  const layoutWidth = appEl.clientWidth || document.documentElement.clientWidth || 99999;
   document.body.classList.toggle("compact", layoutWidth < 1150);
   /* How many columns there is room for, decided on the same measurement
      and for the same reason. Portrait on this iPad is 810 device pixels
@@ -2015,6 +2039,10 @@ function render() {
     '</div>' +
     '<input type="file" id="import-file" accept="application/json" class="hide" data-act="doImport">';
   paintModal(modalHTML());
+  /* Lock the page while a modal is up. Without it the touch chains
+     through to the document behind, which rubber-bands and reads as the
+     modal refusing to scroll. */
+  document.documentElement.classList.toggle("modal-open", !!UI.modal);
   applyPanelFolds();
 }
 
@@ -3054,7 +3082,7 @@ function followerGlyph(f) {
 
 function followerCard(f, full) {
   const b = CALC.followerBlock(S, f);
-  if (!b) return "";
+  if (!b || b.maxHP == null) return "";
   const pct = Math.round((f.hp / b.maxHP) * 100);
   const cls = pct <= 25 ? "crit" : (pct <= 60 ? "hurt" : "");
   /* Only some followers have an ability worth tracking between rests. */
@@ -3089,9 +3117,13 @@ function followerCard(f, full) {
 /* The right-rail panel. Renders nothing at all when you have no
    followers, so it costs no space until it matters. */
 function followerRail() {
-  if (!S.followers.length) return "";
-  return '<div class="pnl cut"><h3>Followers <span class="cnt">' + S.followers.length + "</span></h3>" +
-    S.followers.map(function (f) { return followerCard(f, false); }).join("") + "</div>";
+  /* Summons only. A companion has no stat block worth carrying on every
+     tab and the rail is 250px — the mule belongs on its owner's portrait
+     and on the Followers tab, not here. */
+  const list = S.followers.filter(function (f) { return f.source !== "companion"; });
+  if (!list.length) return "";
+  return '<div class="pnl cut"><h3>Followers <span class="cnt">' + list.length + "</span></h3>" +
+    list.map(function (f) { return followerCard(f, false); }).join("") + "</div>";
 }
 
 /* ---------- COMPANIONS: EVERYTHING THAT CAME ALONG ----------
@@ -3263,7 +3295,14 @@ function followersTab() {
       '<span class="cnt">' + esc(b.size) + " " + esc(b.type.name) + " · " + esc(b.alignment) +
       "</span></h3>" + followerCard(f, true);
 
-    out += '<div class="mrow" style="margin-top:11px"><span class="lbl">Name</span>' +
+    out += '<div class="prow" style="margin-top:11px">' +
+      '<button class="facebtn" data-act="tokenModal" data-kind="follower" data-id="' + f.id +
+        '" title="Pick a face for ' + esc(f.name) + '"><span class="face fol-face' +
+        (validToken(f.token) == null ? " noface" : " tok sh" + tokenSheet(f.token)) + '"' +
+        (validToken(f.token) == null ? "" : ' style="' + tokenStyle(f.token) + '"') + ">" +
+        (validToken(f.token) == null ? esc((f.name || "?").trim()[0] || "?").toUpperCase() : "") +
+        "</span></button>" +
+      '<span class="lbl">Name</span>' +
       '<input type="text" value="' + esc(f.name) + '" data-act="followerName" data-id="' + f.id +
       '" style="flex:1;min-width:140px">' + wikiBtn(b.source.slug) + "</div>";
 

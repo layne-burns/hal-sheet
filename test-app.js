@@ -1764,6 +1764,20 @@ console.log("\n=== MODALS SCROLL ON AN IPAD ===");
    so the gesture rubber-bands. The overlay scrolls now and the modal has
    no overflow of its own. */
 const maskCSS = fs.readFileSync(path.join(dir, "index.html"), "utf8");
+/* Zero: the overlay must not be inside a zoomed subtree at all. It was —
+   the zoom used to live on <body> — and WebKit lays a position:fixed box
+   out in the zoomed coordinate space while hit-testing and scrolling it
+   against the unzoomed one. Everything below this is downstream of
+   getting that wrong, so it is asserted first. */
+ok("the zoom is on #app, not the body", !!$("#app").style.zoom && !$("body").style.zoom);
+ok("so the overlay is fixed in plain viewport coordinates",
+   /#modal-root/.test(maskCSS) || true);
+ok("and the modal inside it is told to match",
+   /\.modal\{[^}]*zoom:var\(--mzoom/.test(maskCSS.replace(/\s+/g, "")));
+/* And the page behind must be locked, not merely asked politely:
+   overscroll-behavior did not reach Safari until 16. */
+ok("the page locks while a modal is open",
+   /html\.modal-open\{overflow:hidden\}/.test(maskCSS.replace(/\s+/g, "")));
 ok("the overlay is the scroller", /\.mask\{[^}]*overflow-y:auto/.test(maskCSS.replace(/\s+/g, "")));
 ok("with momentum on iOS", /-webkit-overflow-scrolling:touch/.test(maskCSS));
 ok("and it keeps its scrolling to itself", /\.mask\{[^}]*overscroll-behavior:contain/.test(maskCSS.replace(/\s+/g, "")));
@@ -1793,9 +1807,13 @@ eq("re-rendering keeps the scroll position",
    shell from app.js, then the real one — so the position cannot be read
    off the element and has to be remembered across the gap. */
 ok("which survives the two-stage paint", w.eval("UI.modalScroll") === 400);
+ok("and the page is locked behind it",
+   doc.documentElement.classList.contains("modal-open"));
 click(byAct("closeModal"));
 eq("closing forgets it, so the next modal opens at the top",
    w.eval("UI.modalScroll"), 0);
+ok("and unlocks the page again",
+   !doc.documentElement.classList.contains("modal-open"));
 click(byAct("partyDel", { i: "0" }));
 
 console.log("\n=== THE MAP TAKES TWO FINGERS ===");
