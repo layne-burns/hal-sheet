@@ -573,7 +573,10 @@ function doableCard(x) {
     '<button class="namebtn cardname" data-act="expand" data-id="' + key + '">' + esc(x.name) + "</button>" +
     '<span class="cardmeta">' + esc(cost) + "</span>" +
     '<div class="cardtags">' +
-      tagHTML(tagsOf((x.kind === "spell" ? "spell:" : "action:") + x.id, x.tags), false) + "</div>" +
+      /* Clickable, matching the Spells and Features cards — a tag here is
+         the same filter as everywhere else, so tapping it should work the
+         same way whichever tab you tapped it from. */
+      tagHTML(tagsOf((x.kind === "spell" ? "spell:" : "action:") + x.id, x.tags), true) + "</div>" +
     '<div class="cardbtns">' +
       '<button class="bt cutsm pri" data-act="use" data-kind="' + x.kind + '" data-id="' + x.id + '">' +
       (x.kind === "spell" ? "Cast" : "Use") + "</button>" +
@@ -585,11 +588,24 @@ function doableCard(x) {
 }
 
 EXT.canDoPanel = function () {
-  const list = CALC.castables(S).filter(function (x) {
+  /* Affordability and the tag filter are two different reasons for a card
+     to be missing, and the foot note below has to tell them apart —
+     "not affordable" on a card you filtered out on purpose is a lie. */
+  const affordable = CALC.castables(S).filter(function (x) {
     if (x.afterHit && S.combat.active && !S.combat.turn.hitLanded) return false;
     return x.affordable;
   });
-  let out = '<div class="pnl cut" data-condense="Yours"><h3>What you can do now ' +
+  const list = affordable.filter(function (x) {
+    const tags = tagsOf((x.kind === "spell" ? "spell:" : "action:") + x.id, x.tags);
+    return matchesFilter(tags);
+  });
+  /* The same Filter panel Spells and Features use, sharing the one
+     UI.filter — a tag picked here stays picked when you flip tabs, so
+     "only Bonus Action" doesn't reset itself the moment you go check a
+     spell's text. This was the piece missing from the Combat tab: the
+     busiest list in the app, with no way to narrow it mid-fight. */
+  let out = filterPanel();
+  out += '<div class="pnl cut" data-condense="Yours"><h3>What you can do now ' +
     '<span class="cnt">' + list.length + "</span></h3>";
   if (S.combat.active) {
     const t = S.combat.turn;
@@ -623,8 +639,12 @@ EXT.canDoPanel = function () {
     ungrouped.forEach(function (x) { out += doableCard(x); });
   }
 
-  const hidden = CALC.castables(S).length - list.length;
-  if (hidden > 0) out += '<div class="foot">' + hidden + " option(s) hidden — not affordable right now</div>";
+  const hiddenCost = CALC.castables(S).length - affordable.length;
+  const hiddenFilter = affordable.length - list.length;
+  const footBits = [];
+  if (hiddenCost > 0) footBits.push(hiddenCost + " not affordable right now");
+  if (hiddenFilter > 0) footBits.push(hiddenFilter + " filtered out");
+  if (footBits.length) out += '<div class="foot">' + footBits.join(" · ") + "</div>";
   return out + "</div>";
 };
 
