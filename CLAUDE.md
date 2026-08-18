@@ -145,26 +145,20 @@ grouped tabs (Combat / Character / World, ten tabs, digits `1`–`9` then `0`);
 an Active Effects tab that also tracks what *other* people have running;
 initiative rolled on entering combat with lumped enemies; 545 portraits in
 eleven bands across two sheets; tool proficiencies as rollable 2024 rows;
-companions, mounts, and mount/dismount; the party's dossiers; and the iPad
-scrolling fix.
+companions, mounts, and mount/dismount; the party's dossiers; the iPad
+scrolling fix; a grabbable scrollbar on every modal, since the scrolling
+fix above wasn't the last word on that; the tag filter restored to the
+Combat tab (it had never had one — the busiest list in the app was the
+one you couldn't narrow mid-fight); a summoned steed can now actually be
+mounted (`isMount` was never set on it, so no Mount control ever offered
+it); and a Channel Divinity filter chip tying the resource to what spends
+it.
 
 ### Outstanding
 
-1. **Channel Divinity category and filter.** Add a `"Channel Divinity"` tag to
-   the action and feature registries, tag Nature's Wrath, Divine Sense, Turn
-   the Faithless and the rest, and add a filter chip across the action lists,
-   the Features tab and the resource views.
-2. **Extra Attack / Nick at level 5.** `CALC.attackAction` already folds Nick
-   into the Attack action and never spends the Bonus Action, and `extraAttack`
-   unlocks at Paladin 5 — so one attack at level 4 is correct behaviour. This
-   needs checking against an actual level-5 sheet, then fixing whatever is
-   genuinely wrong there rather than "fixing" the RAW.
-3. **Damage routing for mount versus rider.** They already have separate
-   modals (the top-bar Damage for Hal, `followerDamageModal` for a follower
-   with HP), so nothing conflates them — but there is no dedicated targeting
-   flow from the hit logger. Decide whether one is wanted.
-4. **Minor:** a stray `qee.webp` sits untracked in the repo root, byte-identical
-   to `portraits/qee.webp` and unused. Safe to delete.
+Nothing at the moment. The four items that lived here — Channel Divinity's
+filter, Extra Attack at level 5, the mount-vs-rider damage question, and
+the stray `qee.webp` — are resolved; see below for what was decided.
 
 ### Decisions already taken — do not relitigate
 
@@ -176,3 +170,14 @@ scrolling fix.
 - The company strip shows on **every** tab out of combat, but must never say
   "Out of combat" — just the portraits.
 - Toolbar labels are **short by default**, with the long form in tooltips.
+- **Extra Attack / Nick at level 5 was already correct.** Checked against an
+  actual levelled-up sheet (not just a unit test clone): at level 5 the
+  Attack action sequence is 2 main attacks plus Nick's folded-in third, and
+  the Bonus Action stays open. One attack at level 4 was correct RAW all
+  along — nothing needed fixing.
+- **No dedicated targeting flow from the hit logger.** `logHit()` just arms
+  smites; it has no concept of a target and never has. Hal's top-bar Damage
+  and each mount/companion's own `Damage…` button already cover every case
+  that matters. A picker that asked "who got hit" on every press would be
+  overhead for a question the existing buttons already answer by which one
+  you tap.
