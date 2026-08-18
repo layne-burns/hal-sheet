@@ -2077,14 +2077,86 @@ function paintModal(html) {
   root.innerHTML = html;
 
   const mask = root.querySelector(".mask");
-  if (!mask || !UI.modalScroll) return;
-  /* Reading scrollHeight forces the layout that setting innerHTML just
-     invalidated. Without it the element is still zero-height at this
-     instant, so assigning scrollTop clamps to 0 and the restore is a
-     no-op — which looks exactly like not having written this at all. */
-  void mask.scrollHeight;
-  mask.scrollTop = UI.modalScroll;
+  if (!mask) return;
+  if (UI.modalScroll) {
+    /* Reading scrollHeight forces the layout that setting innerHTML just
+       invalidated. Without it the element is still zero-height at this
+       instant, so assigning scrollTop clamps to 0 and the restore is a
+       no-op — which looks exactly like not having written this at all. */
+    void mask.scrollHeight;
+    mask.scrollTop = UI.modalScroll;
+  }
+  /* Same layout-forcing problem for the scrollbar: size it after the
+     restore above, and resync it on every native scroll the mask gets
+     from a mouse wheel, a keyboard, or its own touch-scroll fallback —
+     none of which drive the thumb except through this. */
+  syncModalScrollbar(mask);
+  mask.addEventListener("scroll", function () { syncModalScrollbar(mask); });
 }
+
+/* Sizes and positions the drag thumb from the mask's own scroll metrics.
+   Hidden entirely when there's nothing to scroll, so a short modal (most
+   of them) shows no rail at all. */
+function syncModalScrollbar(mask) {
+  const bar = mask.parentElement.querySelector(".mscroll");
+  if (!bar) return;
+  const thumb = bar.querySelector(".mthumb");
+  const trackH = bar.clientHeight;
+  const overflow = mask.scrollHeight - mask.clientHeight;
+  if (overflow <= 1 || trackH <= 0) {
+    bar.classList.remove("show");
+    return;
+  }
+  bar.classList.add("show");
+  const thumbH = Math.max(30, trackH * (mask.clientHeight / mask.scrollHeight));
+  thumb.style.height = thumbH + "px";
+  thumb.style.top = (trackH - thumbH) * (mask.scrollTop / overflow) + "px";
+}
+
+/* Dragging the thumb. Delegated on document rather than attached to the
+   thumb itself, because paintModal() rewrites the mask — and the thumb
+   with it — on every render; a listener on the node would be listening
+   to a node that's already gone by the time you next touch the screen.
+   Plain pointer events rather than the mask's own touch-scroll: this
+   sets scrollTop directly from the drag distance, so it can't be broken
+   by whatever WebKit's touch-pan recognizer is doing on a given day. */
+let modalDrag = null;
+document.addEventListener("pointerdown", function (e) {
+  const thumb = e.target.closest(".mthumb");
+  if (!thumb) return;
+  const mask = document.querySelector("#modal-root .mask");
+  if (!mask) return;
+  e.preventDefault();
+  modalDrag = {
+    mask: mask, startY: e.clientY, startScroll: mask.scrollTop,
+    trackH: thumb.parentElement.clientHeight, thumbH: thumb.offsetHeight
+  };
+  if (thumb.setPointerCapture) thumb.setPointerCapture(e.pointerId);
+});
+document.addEventListener("pointermove", function (e) {
+  if (!modalDrag) return;
+  const range = modalDrag.mask.scrollHeight - modalDrag.mask.clientHeight;
+  const travel = modalDrag.trackH - modalDrag.thumbH;
+  if (range <= 0 || travel <= 0) return;
+  modalDrag.mask.scrollTop = modalDrag.startScroll +
+    (e.clientY - modalDrag.startY) * (range / travel);
+  /* The mask's native 'scroll' event would eventually resync the thumb
+     on its own, but it fires async and a fast drag would visibly lag
+     behind the finger. Syncing it here too keeps the thumb glued to the
+     pointer instead of catching up a frame late. */
+  syncModalScrollbar(modalDrag.mask);
+});
+["pointerup", "pointercancel"].forEach(function (ev) {
+  document.addEventListener(ev, function () { modalDrag = null; });
+});
+/* paintModal() resizes the thumb on every render, which covers a modal
+   opening or its content changing shape. What it can't cover is the
+   viewport itself changing under a modal that isn't re-rendering — an
+   iPad rotating mid-read — so that gets its own listener. */
+window.addEventListener("resize", function () {
+  const mask = document.querySelector("#modal-root .mask");
+  if (mask) syncModalScrollbar(mask);
+});
 
 /* ---------- PER-TAB PANEL FOLDING ----------
    Every panel folds, and each one remembers its own state per tab: the
@@ -5241,6 +5313,14 @@ function modalClose() {
   return '<button class="mx" data-act="closeModal" title="Close" aria-label="Close">×</button>';
 }
 
+/* The one place that assembles a modal's outer shell, so the drag
+   scrollbar's markup only has to be written once rather than kept in
+   sync between here and combat.js's second paint. */
+function maskWrap(body) {
+  return '<div class="mask"><div class="modal cut">' + modalClose() + body + "</div>" +
+    '<div class="mscroll" aria-hidden="true"><div class="mthumb"></div></div></div>';
+}
+
 function modalHTML() {
   if (!UI.modal) return "";
   const t = UI.modal.type;
@@ -5359,7 +5439,7 @@ function modalHTML() {
   }
 
   if (!body) return "";
-  return '<div class="mask"><div class="modal cut">' + modalClose() + body + "</div></div>";
+  return maskWrap(body);
 }
 
 /* The spell asks before it spends. Every choice here is one the spell

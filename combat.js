@@ -2373,7 +2373,7 @@ render = function () {
       body += '<div class="mfoot"><button class="bt cutsm dg" data-act="undo">Undo last</button>' +
         '<button class="bt cutsm" data-act="closeModal">Close</button></div>';
     }
-    paintModal('<div class="mask"><div class="modal cut">' + modalClose() + body + "</div></div>");
+    paintModal(maskWrap(body));
   }
 
   /* Glow overlay */

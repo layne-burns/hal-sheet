@@ -1088,6 +1088,33 @@ h3.collapse::after{display:none}
   display:flex;align-items:flex-start;justify-content:center;
   overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;
   touch-action:pan-y}
+/* A GRABBABLE SCROLLBAR, BECAUSE THE ABOVE STILL ISN'T ENOUGH.
+   The mask scrolling natively is the right shape, and it still would not
+   take a touch-drag reliably on the iPad this runs on, even after moving
+   the zoom off <body>. Rather than chase WebKit's touch-pan gesture
+   recognizer a third time, this hands scrolling to plain pointer events —
+   down, move, up — which set scrollTop directly and don't go through
+   whatever the recognizer is getting wrong.
+
+   position:fixed anchors it to the viewport regardless of where it sits
+   in the DOM, so the mask's own scroll offset never drags it along — it
+   is a sibling of .modal, not nested inside it, only so that .modal's
+   zoom (see below) never touches its geometry. touch-action:none on the
+   whole rail keeps the browser from trying to pan the page underneath a
+   drag that starts on it. */
+.mscroll{position:fixed;top:20px;bottom:20px;right:8px;width:24px;z-index:55;
+  background:rgba(8,11,14,.55);border:1px solid var(--line2);
+  visibility:hidden;pointer-events:none;touch-action:none}
+/* visibility, not display: syncModalScrollbar() reads this element's own
+   height to size the thumb, and a display:none element has none to
+   read — hiding it that way meant it could never measure its way back
+   to visible. Kept laid out and invisible instead. */
+.mscroll.show{visibility:visible;pointer-events:auto}
+/* Height and top are set in px by syncModalScrollbar() — a percentage
+   would fight the min-height a short modal needs to stay grabbable. */
+.mscroll .mthumb{position:absolute;left:2px;right:2px;min-height:30px;
+  background:var(--panel2);border:1px solid var(--cyan);cursor:grab}
+.mscroll .mthumb:active{border-color:var(--mag);cursor:grabbing}
 /* The page behind must not scroll while a modal is open. overscroll-
    behavior alone is not enough on the iPads this runs on — Safari only
    learned it in 16 — and without a real lock the touch chains through to
