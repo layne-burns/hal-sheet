@@ -1194,6 +1194,19 @@ eq("totalling a roll adds no session log lines",
    state().session.log.length, logLenBeforeAttacks);
 ok("and burns no undo-history slots either",
    JSON.parse(w.localStorage.getItem("hal-briarshade-history-v1") || "[]").length <= histLenBeforeAttacks);
+
+/* A note of its own, written fresh here rather than relying on one
+   from earlier in the file — the nudge-cadence tests above deliberately
+   strip every "note" kind entry from the live log twice over to
+   simulate elapsed time, so nothing written before this point can be
+   trusted to still be there. */
+click(byAct("sessionModal"));
+click(byAct("noteModal"));
+click(byAct("noteKind", { k: "plain" }));
+setVal(byAct("noteField", { f: "text" }), "Left town at dusk, heading for the Fracture.");
+click(byAct("noteSave"));
+click(byAct("closeModal"));
+
 console.log("\n=== END SESSION ARCHIVES AND RESETS THE LOG ===");
 const histCountBefore = state().sessionHistory.length;
 click(byAct("sessionModal"));
@@ -1212,6 +1225,52 @@ ok("the exported markdown names the party",
    /- Party: \*\*Gill\*\*/.test(w.eval('sessionMarkdownFor("last")')));
 ok("session modal now offers to export the last session", !!byAct("sessionExport"));
 click(byAct("closeModal"));
+
+console.log("\n=== SESSION EXPLORER (NOTES TAB) ===");
+const histIdx = st.sessionHistory.length - 1;
+const rowId = "sess-" + archived.startedAt;
+click(byAct("tab", { tab: "notes" }));
+ok("the Sessions panel is on the Notes tab", /Sessions/.test(text()));
+ok("rows start collapsed — no export button visible yet",
+   !byAct("sessionCopy", { which: "hist:" + histIdx }));
+click(byAct("expand", { id: rowId }));
+ok("expanding shows who was there", /Gill/.test(text()));
+ok("and the story that session actually logged", /Left town at dusk/.test(text()));
+ok("export controls address this one session specifically, not just current/last",
+   !!byAct("sessionCopy", { which: "hist:" + histIdx }));
+const histMd = w.eval('sessionMarkdownFor("hist:' + histIdx + '")');
+ok("that export is genuinely this session's markdown",
+   /Gill/.test(histMd) && /Left town at dusk/.test(histMd));
+ok("a past session's snapshot is honest that it isn't from back then",
+   /not necessarily as of this session/.test(histMd));
+
+console.log("\n=== HAL'S DIARY ===");
+ok("no diary entry yet for this session", /No diary entry yet/.test(text()));
+click(byAct("diaryEdit", { key: String(archived.startedAt) }));
+ok("the composer opens", /Hal.s Diary/.test(text()));
+ok("nothing to clear on a first entry", !byAct("diaryClear"));
+const ta = byAct("diaryField");
+ta.value = "# A Night in Town\n\nWe **arrived** and the *innkeeper* seemed uneasy.";
+ta.dispatchEvent(new w.Event("change", { bubbles: true }));
+click(byAct("diarySave"));
+st = state();
+const rawLogBefore = JSON.stringify(archived.log);
+ok("the diary lands on its own record, separate from the session",
+   !!st.diaries[String(archived.startedAt)]);
+eq("the raw log this diary was written from is untouched",
+   JSON.stringify(st.sessionHistory[histIdx].log), rawLogBefore);
+ok("the diary is still visible on the (still-expanded) row",
+   /A Night in Town/.test(text()));
+ok("markdown actually rendered — bold text, not literal asterisks",
+   /<b>arrived<\/b>/.test($("#app").innerHTML) && !/\*\*arrived\*\*/.test(text()));
+ok("a heading rendered as a heading, not a hash mark in the paragraph",
+   /<h3>A Night in Town<\/h3>/.test($("#app").innerHTML));
+click(byAct("diaryEdit", { key: String(archived.startedAt) }));
+ok("editing an existing entry offers to clear it", !!byAct("diaryClear"));
+click(byAct("diaryClear"));
+ok("clearing removes the diary record", !state().diaries[String(archived.startedAt)]);
+eq("...and still never touched the session's own log",
+   JSON.stringify(state().sessionHistory[histIdx].log), rawLogBefore);
 
 /* The guarantee worth having: skipping is not a different code path with
    its own idea of what a round costs. Build a six-strong order with Hal in

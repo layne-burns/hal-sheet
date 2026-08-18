@@ -1728,6 +1728,14 @@ const SEED = {
     party: []
   },
   sessionHistory: [],
+  /* Hal's Diary: polished in-character prose, one entry per session,
+     keyed by that session's startedAt (a stable identity — every
+     session starts at a distinct moment). Deliberately its own record
+     rather than a field on the session itself: sessionHistory entries
+     are the raw, immutable log exactly as it was captured, and this
+     stays free to be edited, replaced, or rewritten from scratch
+     without ever risking the record it was written from. */
+  diaries: {},
 
   /* Summoned followers currently in play. A record holds only what you
      chose and how hurt it is — every stat comes from CALC.followerBlock,

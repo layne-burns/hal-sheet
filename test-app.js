@@ -54,6 +54,32 @@ ok("HP 26/35 shown", /26\/35/.test(text()));
 ok("AC 16 shown", />16</.test($("#app").innerHTML));
 ok("no console errors on boot", true);
 
+console.log("\n=== MARKDOWN RENDERING (HAL'S DIARY) ===");
+/* No library — a hand-rolled renderer for the one use this app has for
+   it. Escapes first, transforms the escaped text second, which is the
+   part actually worth testing: this is the one place in the app that
+   renders text nobody typed by hand at the keyboard — pasted from
+   wherever an LLM skill wrote it — so it has to survive looking like
+   markup without becoming any. */
+eq("a heading becomes a heading", w.eval('mdToHtml("# Title")'), "<h3>Title</h3>");
+eq("bold and italic both work, and don't eat each other",
+   w.eval('mdToHtml("**bold** and *italic*")'), "<p><b>bold</b> and <i>italic</i></p>");
+eq("a bullet list becomes a real list",
+   w.eval('mdToHtml("- one\\n- two")'), "<ul><li>one</li><li>two</li></ul>");
+eq("a blank line is a paragraph break, not a stray tag",
+   w.eval('mdToHtml("first\\n\\nsecond")'), "<p>first</p><p>second</p>");
+ok("a script tag pasted into the diary is never live markup",
+   !/<script>/.test(w.eval('mdToHtml("<script>alert(1)</script>")')));
+eq("...it reads back as the literal text instead",
+   w.eval('mdToHtml("<script>alert(1)</script>")'), "<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>");
+/* Parsed as real DOM, not just checked as a string — an escaped
+   onerror= is still the substring "onerror=" in the output, harmlessly,
+   so the actual question is whether it ever becomes a live attribute. */
+ok("an <img onerror> never becomes a real element with a live handler",
+   w.eval('(function(){ var d = document.createElement("div"); ' +
+     'd.innerHTML = mdToHtml("<img src=x onerror=alert(1)>"); ' +
+     'return !d.querySelector("img"); })()'));
+
 console.log("\n=== AURA IS HIDDEN BELOW LEVEL 6 ===");
 eq("no Aura toggle at level 4", $$('[data-key="auraOfProtection"]').length, 0);
 ok("Take Heart toggle exists", !!byAct("toggle", { key: "takeHeart" }));

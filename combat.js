@@ -1305,7 +1305,17 @@ function sessionToMarkdown(s) {
   out += "*" + fmtTime(s.startedAt) + " to " + fmtTime(s.endedAt) + "*\n\n";
   if (s.party && s.party.length) out += "- Party: **" + s.party.join(", ") + "**\n";
   if (s.stats.highestDCSet != null) out += "- Highest save DC set: **" + s.stats.highestDCSet + "**\n";
-  out += "\n" + snapshotMarkdown();
+  /* The snapshot is always Hal's stats right now — computed fresh, not
+     stored per session (see CALC.characterSnapshot in rules.js). For
+     the session actually running that's exactly right. For an old one
+     pulled out of history — the Session Explorer's whole reason to
+     exist — it would silently show a level from three sessions later
+     with nothing marking it as such, which is worse than not printing
+     it. Said plainly instead of guessed at, since nothing here stores
+     what Hal looked like back then. */
+  const isCurrentSession = S.session.active && s.startedAt === S.session.startedAt;
+  out += "\n" + snapshotMarkdown() +
+    (isCurrentSession ? "" : "\n*(Hal's stats as of now — not necessarily as of this session.)*\n");
 
   /* .filter() already returns a fresh array, so sorting it below reorders
      only this copy — s.log itself, the immutable record of what was
@@ -1390,6 +1400,13 @@ function sessionFor(which) {
       ? Object.assign({}, S.session, { endedAt: Date.now() })
       : null;
   }
+  /* "hist:N" addresses the Session Explorer's list, oldest first, the
+     same order it's stored in and the order a person reading down a
+     history naturally expects — not the newest-first order the list
+     itself is drawn in. */
+  if (typeof which === "string" && which.indexOf("hist:") === 0) {
+    return S.sessionHistory[parseInt(which.slice(5), 10)] || null;
+  }
   return S.sessionHistory[S.sessionHistory.length - 1] || null;
 }
 
@@ -1423,6 +1440,97 @@ function sessionExportControls() {
     "Share opens the iPad share sheet, so it can go to Files, Mail or another device. " +
     "Every cloud sync also writes them to your backup gist as <b>hal-session-notes.md</b>, " +
     "which reads as a formatted page on any computer.</div>";
+  return out;
+}
+
+/* ---------- SESSION EXPLORER (Notes tab) ------------------------
+   The live Session log modal only ever shows the one session running
+   right now. This is the same information — story, activity, technical,
+   the export buttons, and now Hal's Diary — for every session that's
+   ever been recorded, including the one still running if there is one.
+   Collapsed by default, one row per session, so a long campaign doesn't
+   turn the Notes tab into a wall of old logs. */
+EXT.sessionExplorer = function () {
+  const rows = S.sessionHistory.map(function (s, idx) {
+    return { s: s, which: "hist:" + idx };
+  });
+  if (S.session && S.session.active) {
+    rows.push({ s: Object.assign({}, S.session, { endedAt: Date.now() }), which: "current", live: true });
+  }
+  rows.reverse(); /* newest first, whether that's the running one or not */
+
+  let out = '<div class="pnl cut"><h3>Sessions <span class="cnt">' + rows.length + "</span></h3>";
+  if (!rows.length) {
+    return out + '<div class="foot" style="margin:0">Nothing recorded yet. Start a session from the ' +
+      "Combat tab — it shows up here right away, and stays once it ends.</div></div>";
+  }
+  out += "</div>";
+  rows.forEach(function (r) { out += sessionExplorerRow(r.s, r.which, !!r.live); });
+  return out;
+};
+
+/* One collapsed line, or the full record: story always shown once
+   opened (it's what you're here for), activity and technical each
+   behind their own sub-toggle the same way the live modal hides them,
+   and Hal's Diary last — the polished half, once there is one. */
+function sessionExplorerRow(s, which, live) {
+  const key = String(s.startedAt);
+  const rowId = "sess-" + key;
+  const open = !!UI.expanded[rowId];
+  let out = '<div class="pnl cut"><h3 class="collapse" data-act="expand" data-id="' + rowId + '">' +
+    "<span>" + esc(fmtDate(s.startedAt)) + (live ? " · running now" : "") + "</span>" +
+    '<span class="chev">' + (open ? "Hide" : "Show") + "</span></h3>";
+  if (!open) return out + "</div>";
+
+  const story = s.log.filter(isNarrative);
+  const activity = s.log.filter(function (e) { return logKind(e) === "activity"; });
+  const technical = s.log.filter(function (e) { return logKind(e) === "technical"; });
+
+  out += '<div class="foot">' + fmtTime(s.startedAt) + " to " + fmtTime(s.endedAt) +
+    (s.party && s.party.length ? " · " + esc(s.party.join(", ")) : "") +
+    " · " + s.log.length + " event(s)</div>";
+
+  out += '<div class="ph2" style="margin-top:8px">What happened</div>';
+  if (!story.length) out += '<div class="foot">Nothing written down.</div>';
+  story.slice().reverse().forEach(function (e) {
+    out += '<div class="gain ' + (e.kind === "flag" ? "k-flag" : "k-note") + '">' +
+      '<span class="gk">' + esc(calLabel(e) || fmtTime(e.t)) + "</span><span>" +
+      (e.kind === "flag" ? "⚠ " : "") + esc(e.label) + "</span></div>";
+  });
+
+  out += sessionLogSubsection("Game activity", activity, "sessAct-" + key);
+  out += sessionLogSubsection("Technical log", technical, "sessTech-" + key);
+
+  out += '<div class="mrow" style="margin-top:8px">' +
+    '<button class="bt cutsm pri" data-act="sessionCopy" data-which="' + which + '">Copy markdown</button>' +
+    '<button class="bt cutsm" data-act="sessionExport" data-which="' + which + '">Share</button></div>';
+
+  const diary = S.diaries[key];
+  out += '<div class="ph2" style="margin-top:12px">Hal’s Diary</div>';
+  if (diary) {
+    out += '<div class="etext" style="font-size:17px">' + mdToHtml(diary.markdown) + "</div>" +
+      '<div class="foot" style="margin:2px 0 6px">Last written ' + fmtDate(diary.updatedAt) + "</div>" +
+      '<div class="mrow"><button class="bt cutsm" data-act="diaryEdit" data-key="' + key + '">Edit…</button></div>';
+  } else {
+    out += '<div class="foot">No diary entry yet. Copy the markdown above, run it through whatever writes ' +
+      "the prose, and paste the result back in — the raw log above it is untouched either way.</div>" +
+      '<div class="mrow" style="margin-top:4px"><button class="bt cutsm pri" data-act="diaryEdit" data-key="' +
+      key + '">Write it…</button></div>';
+  }
+  return out + "</div>";
+}
+
+function sessionLogSubsection(title, entries, id) {
+  const hidden = !UI.expanded[id];
+  let out = '<div class="ph2" style="margin-top:10px">' + esc(title) +
+    ' <span class="sc">' + entries.length + "</span>" +
+    '<button class="bt cutsm" style="margin-left:8px" data-act="expand" data-id="' + id + '">' +
+    (hidden ? "Show" : "Hide") + "</button></div>";
+  if (hidden) return out;
+  if (!entries.length) return out + '<div class="foot">Nothing here.</div>';
+  entries.slice().reverse().forEach(function (e) {
+    out += '<div class="gain"><span class="gk">' + fmtTime(e.t) + "</span><span>" + esc(e.label) + "</span></div>";
+  });
   return out;
 }
 
@@ -1703,6 +1811,30 @@ EXT.noteModal = function () {
 
   body += '<div class="mfoot">' +
     '<button class="bt cutsm ' + (line ? "pri" : "dim") + '" data-act="noteSave">Save it</button>' +
+    '<button class="bt cutsm" data-act="closeModal">Cancel</button></div>';
+  return body;
+};
+
+/* ---------- HAL'S DIARY ----------------------------------------
+   The polished half of a session, as opposed to the raw log a session
+   actually keeps. Nothing here is generated by the app — the export
+   button above hands you the raw markdown (Snapshot plus the three
+   categories) to run through whatever writes prose, and this is where
+   the result comes back in. One draft at a time, textarea in, markdown
+   rendered out, stored on S.diaries keyed by the session's startedAt so
+   it can never collide with or overwrite the log it was written from. */
+EXT.diaryModal = function () {
+  const m = UI.modal;
+  const existing = S.diaries[m.key];
+  const body = "<h2>Hal's Diary</h2>" +
+    '<div class="msub">Paste the polished write-up here. The raw log underneath it never changes ' +
+    "— this is a second record, not an edit to the first.</div>" +
+    '<textarea class="notes" style="min-height:220px" placeholder="# What actually happened…" ' +
+    'data-act="diaryField">' + esc(m.text) + "</textarea>" +
+    (existing ? '<div class="foot" style="margin-top:4px">Last written ' +
+      fmtDate(existing.updatedAt) + " " + fmtTime(existing.updatedAt) + "</div>" : "") +
+    '<div class="mfoot"><button class="bt cutsm pri" data-act="diarySave">Save</button>' +
+    (existing ? '<button class="bt cutsm dg" data-act="diaryClear">Clear entry</button>' : "") +
     '<button class="bt cutsm" data-act="closeModal">Cancel</button></div>';
   return body;
 };
@@ -2466,6 +2598,34 @@ Object.assign(ACT, {
     render();
   },
 
+  /* ---- Hal's Diary ---- */
+  diaryEdit(el) {
+    const key = el.dataset.key;
+    const existing = S.diaries[key];
+    UI.modal = { type: "diary", key: key, text: existing ? existing.markdown : "" };
+    render();
+  },
+  diaryField(el) { UI.modal.text = el.value; render(); },
+  diarySave() {
+    const m = UI.modal;
+    const text = (m.text || "").trim();
+    if (!text) { ACT.closeModal(); return; }
+    mutate(function (st) {
+      /* Unlabelled — this isn't a character-state change the session
+         log has any business narrating, it's the app's own bookkeeping
+         about a record that lives beside the session, not in it. */
+      st.diaries[m.key] = { markdown: text, updatedAt: Date.now() };
+    });
+    UI.modal = null;
+    render();
+  },
+  diaryClear() {
+    const m = UI.modal;
+    mutate(function (st) { delete st.diaries[m.key]; });
+    UI.modal = null;
+    render();
+  },
+
   /* ---- Undo ---- */
   /* The escape hatch for when the offline copy is stubborn: throw away
      every cache, drop the worker, and reload from the network. Nothing
@@ -2620,7 +2780,7 @@ render = function () {
      so a later throw in the glow/bar/panel steps below can never leave a
      half-open modal shell on screen with no content and no way to close it. */
   const root = document.getElementById("modal-root");
-  if (UI.modal && ["roll", "override", "settings", "loh", "history", "attack", "initiative", "favUse", "token", "note", "mount", "session", "preSession"].indexOf(UI.modal.type) >= 0) {
+  if (UI.modal && ["roll", "override", "settings", "loh", "history", "attack", "initiative", "favUse", "token", "note", "mount", "session", "preSession", "diary"].indexOf(UI.modal.type) >= 0) {
     let body = "";
     if (UI.modal.type === "roll") body = EXT.rollModal();
     else if (UI.modal.type === "override") body = EXT.overrideModal();
@@ -2634,6 +2794,7 @@ render = function () {
     else if (UI.modal.type === "mount") body = EXT.mountModal();
     else if (UI.modal.type === "session") body = EXT.sessionModal();
     else if (UI.modal.type === "preSession") body = EXT.preSessionModal();
+    else if (UI.modal.type === "diary") body = EXT.diaryModal();
     else if (UI.modal.type === "history") {
       const h = histLoad().slice().reverse();
       body = "<h2>Recent changes</h2><div class=\"msub\">Most recent first. Undo steps back one at a time.</div>";

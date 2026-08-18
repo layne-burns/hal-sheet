@@ -79,6 +79,7 @@ function migrate(st) {
   out.combat.currentId = (st.combat || {}).currentId || null;
   out.effects = st.effects || [];
   out.watch = st.watch || [];
+  out.diaries = st.diaries || {};
 
   /* The creature roster is gone. It carried an AC per enemy, which turned
      "does that hit?" into a number the character has no way of knowing —
@@ -535,6 +536,59 @@ function esc(s) {
   });
 }
 function sign(n) { return (n >= 0 ? "+" : "−") + Math.abs(n); }
+
+/* A small hand-rolled markdown renderer, not a library — this app has
+   no runtime dependencies and a diary entry is a paragraph or two of
+   prose, not a document that needs tables or nested lists. Headers,
+   bold, italic, bullet lists, blockquotes, and a rule. Escapes first
+   and transforms the escaped text, so pasted markdown that happens to
+   contain something that looks like a tag can never become one — the
+   diary is exactly the place untrusted text (pasted from wherever an
+   LLM skill wrote it) is going to end up. */
+function mdToHtml(md) {
+  const lines = esc(md || "").split("\n");
+  let html = "", inList = false, inQuote = false;
+  function closeList() { if (inList) { html += "</ul>"; inList = false; } }
+  function closeQuote() { if (inQuote) { html += "</blockquote>"; inQuote = false; } }
+  function inline(s) {
+    return s.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+      .replace(/__(.+?)__/g, "<b>$1</b>")
+      .replace(/(^|[^*])\*([^*]+)\*/g, "$1<i>$2</i>")
+      .replace(/(^|[^_])_([^_]+)_/g, "$1<i>$2</i>");
+  }
+  lines.forEach(function (line) {
+    const h = line.match(/^(#{1,3})\s+(.*)/);
+    if (h) {
+      closeList(); closeQuote();
+      /* h3..h5 — the diary's own headers stay visibly smaller than the
+         app's h2 modal titles and h1 export title, so a pasted "# Recap"
+         never reads as if it belongs to the app's own chrome. */
+      const lvl = h[1].length + 2;
+      html += "<h" + lvl + ">" + inline(h[2]) + "</h" + lvl + ">";
+      return;
+    }
+    if (/^(---|\*\*\*)\s*$/.test(line)) { closeList(); closeQuote(); html += "<hr>"; return; }
+    const li = line.match(/^[-*]\s+(.*)/);
+    if (li) {
+      closeQuote();
+      if (!inList) { html += "<ul>"; inList = true; }
+      html += "<li>" + inline(li[1]) + "</li>";
+      return;
+    }
+    /* esc() already turned a leading > into &gt;. */
+    const q = line.match(/^&gt;\s?(.*)/);
+    if (q) {
+      closeList();
+      if (!inQuote) { html += "<blockquote>"; inQuote = true; }
+      html += "<p>" + inline(q[1]) + "</p>";
+      return;
+    }
+    closeList(); closeQuote();
+    if (line.trim() !== "") html += "<p>" + inline(line) + "</p>";
+  });
+  closeList(); closeQuote();
+  return html;
+}
 function link(slug, label) {
   const u = wiki(slug);
   return u ? '<a href="' + u + '" target="_blank" rel="noopener">' + esc(label) + "</a>" : esc(label);
@@ -3284,6 +3338,12 @@ function notesTab() {
          : "<span>" + esc(S.identity[p[0]]) + "</span>") + "</div>";
   });
   out += "</div></div>";
+
+  /* combat.js owns the session log this reads, the same way it owns
+     everything else that only makes sense once a fight or a session
+     exists — this just calls into it, the way effectsTab() already
+     calls CALC.activeMods. */
+  out += typeof EXT.sessionExplorer === "function" ? EXT.sessionExplorer() : "";
 
   out += '<div class="pnl cut"><h3>Backstory</h3>' +
     (E ? '<textarea class="notes" data-act="editField" data-path="notes.backstory">' +
