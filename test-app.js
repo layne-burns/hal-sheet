@@ -68,6 +68,15 @@ eq("a bullet list becomes a real list",
    w.eval('mdToHtml("- one\\n- two")'), "<ul><li>one</li><li>two</li></ul>");
 eq("a blank line is a paragraph break, not a stray tag",
    w.eval('mdToHtml("first\\n\\nsecond")'), "<p>first</p><p>second</p>");
+/* One blank line is the ordinary gap between two <p> tags and needs
+   nothing extra. Deliberate extra room — two or three blank lines,
+   typed on purpose — used to disappear entirely, the same as one:
+   the actual bug report. Each blank line past the first now shows up
+   as its own line instead of being silently absorbed. */
+eq("two blank lines add one visible break beyond the ordinary gap",
+   w.eval('mdToHtml("first\\n\\n\\nsecond")'), "<p>first</p><br><p>second</p>");
+eq("three blank lines add two",
+   w.eval('mdToHtml("first\\n\\n\\n\\nsecond")'), "<p>first</p><br><br><p>second</p>");
 ok("a script tag pasted into the diary is never live markup",
    !/<script>/.test(w.eval('mdToHtml("<script>alert(1)</script>")')));
 eq("...it reads back as the literal text instead",

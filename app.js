@@ -547,7 +547,7 @@ function sign(n) { return (n >= 0 ? "+" : "−") + Math.abs(n); }
    LLM skill wrote it) is going to end up. */
 function mdToHtml(md) {
   const lines = esc(md || "").split("\n");
-  let html = "", inList = false, inQuote = false;
+  let html = "", inList = false, inQuote = false, blanks = 0;
   function closeList() { if (inList) { html += "</ul>"; inList = false; } }
   function closeQuote() { if (inQuote) { html += "</blockquote>"; inQuote = false; } }
   function inline(s) {
@@ -557,6 +557,20 @@ function mdToHtml(md) {
       .replace(/(^|[^_])_([^_]+)_/g, "$1<i>$2</i>");
   }
   lines.forEach(function (line) {
+    if (line.trim() === "") {
+      /* One blank line is an ordinary paragraph break, and the <p> tags
+         either side of it already carry their own gap — nothing extra
+         needed there. Every blank line past the first was typed on
+         purpose, deliberate room in a diary entry, and used to just
+         disappear: three blank lines and one read as the same gap.
+         Each one past the first becomes its own line instead, so the
+         space typed is the space that shows up. */
+      blanks++;
+      if (blanks > 1) html += "<br>";
+      closeList(); closeQuote();
+      return;
+    }
+    blanks = 0;
     const h = line.match(/^(#{1,3})\s+(.*)/);
     if (h) {
       closeList(); closeQuote();
@@ -584,7 +598,7 @@ function mdToHtml(md) {
       return;
     }
     closeList(); closeQuote();
-    if (line.trim() !== "") html += "<p>" + inline(line) + "</p>";
+    html += "<p>" + inline(line) + "</p>";
   });
   closeList(); closeQuote();
   return html;
