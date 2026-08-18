@@ -1018,6 +1018,12 @@ const CALC = {
       ac: 10 + lv,
       maxHP: 5 + 10 * lv,
       hitDice: lv + "d10",
+      /* The whole reason to cast this spell — a horse that fits in your
+         hand until you need it — and until this was added there was no
+         way to say you were on it. allMounts() and every Mount/Dismount
+         control key off this flag, and none of them cared that it had
+         never been set here. */
+      isMount: true,
       canFly: lv >= 4,
       speed: "60 ft." + (lv >= 4 ? ", Fly 60 ft." : ""),
       abilities: abilities,

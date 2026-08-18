@@ -897,11 +897,21 @@ EXT.mountModal = function () {
           esc(f.name) + (f.kind ? " · " + esc(f.kind) : "") + "</option>";
       }).join("") + "</select></div>";
 
+  /* A companion has a role (COMPANION_ROLES); a summoned steed doesn't —
+     it has the animal form you picked when you cast the spell, on
+     formLabel, and nothing else here assumed a mount could arrive
+     without a .role until this modal met one. Its "why" is different
+     for the same reason: it shares your Initiative whether you're on it
+     or not, which is not the same claim as "stays out of the turn
+     order" — that line is true of a companion, not of the spell. */
+  const roleLabel = b.role ? b.role.label : b.formLabel;
+  const roleWhy = b.source.key === "findSteed"
+    ? "shares your Initiative — mounted or not"
+    : (b.inCombat ? "takes its own turn when nobody is on it" : "stays out of the turn order");
   body += '<div class="sb"><div class="sbrow"><span>Its speed</span><b>' + esc(b.speed) +
     '</b><span class="sbwhy">what you move at while mounted</span></div>' +
-    '<div class="sbrow"><span>Its role</span><b>' + esc(b.role.label) + "</b>" +
-    '<span class="sbwhy">' + (b.inCombat ? "takes its own turn when nobody is on it"
-                                         : "stays out of the turn order") + "</span></div>";
+    '<div class="sbrow"><span>Its role</span><b>' + esc(roleLabel) + "</b>" +
+    '<span class="sbwhy">' + roleWhy + "</span></div>";
   if (riderIsHal) {
     body += '<div class="sbrow"><span>Costs</span><b>' + cost +
       ' ft</b><span class="sbwhy">half your Speed, 2024 rules</span></div>' +

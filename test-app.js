@@ -820,6 +820,25 @@ click(byAct("tab", { tab: "followers" }));
 ok("and prints the stat block", /Otherworldly Steed/.test(text()));
 ok("naming Life Bond", /Life Bond/.test(text()));
 
+console.log("\n=== MOUNTING THE STEED ===");
+/* The whole reason to cast this spell — and until isMount was set on
+   steedBlock, allMounts() never included the result, so no Mount
+   control appeared for it anywhere: not the card, not the Combat tab,
+   not the strip mid-fight. */
+ok("the steed counts as a mount", CALe("CALC.followerBlock(S, S.followers[0]).isMount"));
+ok("its card offers Mount, not just Damage", !!byAct("mountModal", { id: steed.id }));
+click(byAct("mountModal", { id: steed.id }));
+ok("the modal opens rather than throwing on a .role a steed doesn't have",
+   /Mount up/.test(text()));
+ok("and explains itself in terms of the spell, not a bought companion's role",
+   /shares your Initiative/.test(text()));
+click(byAct("mountConfirm"));
+eq("the steed now carries you", state().followers[0].riddenBy, "hal");
+click(byAct("tab", { tab: "followers" }));
+ok("and the card offers Dismount instead", !!byAct("dismount", { id: steed.id }));
+click(byAct("dismount", { id: steed.id }));
+ok("...and can get off again", !state().followers[0].riddenBy);
+
 console.log("\n=== CR 0 BEASTS ===");
 eq("every eligible form is loaded", CALe("Object.keys(CR0_BEASTS).length"), 35);
 ok("and every one of them is Challenge 0",

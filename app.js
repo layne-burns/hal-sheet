@@ -3175,6 +3175,16 @@ function followerCard(f, full) {
     '<div class="folatk">' + esc(b.cardLine) + "</div>" +
     '<div class="folacts">' +
       '<button class="bt cutsm dg" data-act="followerDamageModal" data-id="' + f.id + '">Damage…</button>' +
+      /* A summoned steed is a mount too — Find Steed exists to give you
+         one — and until isMount was wired up for it, this button simply
+         never appeared here. It's the same control the Followers tab
+         gives a companion horse, just reachable from the card that
+         travels with you on every tab. */
+      (b.isMount
+        ? (f.riddenBy
+            ? '<button class="bt cutsm" data-act="dismount" data-id="' + f.id + '">Dismount</button>'
+            : '<button class="bt cutsm pri" data-act="mountModal" data-id="' + f.id + '">Mount…</button>')
+        : "") +
       (tracked ? '<button class="chip' + (f.baUsed ? " used" : "") + '" data-act="followerBonus" data-id="' +
         f.id + '" title="' + esc(tracked.text) + '">' + esc(tracked.name) +
         (f.baUsed ? " · spent" : "") + "</button>" : "") +
