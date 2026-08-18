@@ -924,6 +924,60 @@ click(byAct("noteKind", { k: "met" }));
 ok("but only when you ask for it", !$('[data-act="noteToPeople"]').classList.contains("on"));
 click(byAct("closeModal"));
 
+console.log("\n=== BACKDATING A NOTE ===");
+/* Writing a note about right now costs nothing extra — the picker
+   doesn't even exist in the DOM until asked for. */
+click(byAct("sessionModal"));
+click(byAct("noteModal"));
+ok("no date picker until asked for", !byAct("noteWhenYear"));
+ok("offers to set a different date", !!byAct("noteWhenChange"));
+click(byAct("noteWhenChange"));
+ok("the picker opens", !!byAct("noteWhenYear"));
+ok("the month select is schema-driven off the active calendar's months",
+   w.eval("CAL.system(S.calendar.system).months").every(function (mo, i) {
+     return $$('[data-act="noteWhenMonth"] option')[i].textContent === mo.name;
+   }));
+
+const liveYear = state().calendar.year;
+const sysKey = state().calendar.system;
+const months = w.eval("CAL.system('" + sysKey + "').months");
+const curMonthName = w.eval("CAL.monthFor('" + sysKey + "', S.calendar.day).name");
+const otherIdx = months.findIndex(function (mo) { return mo.name !== curMonthName; });
+const otherMonth = months[otherIdx];
+
+setVal(byAct("noteWhenMonth"), String(otherIdx));
+ok("picking a month keeps the day-of-month where it can",
+   parseInt(byAct("noteWhenDay").value, 10) <= (otherMonth.end - otherMonth.start + 1));
+setVal(byAct("noteWhenDay"), "5");
+setVal(byAct("noteWhenYear"), String(liveYear - 1));
+click(byAct("noteWhenTime", { k: "night" }));
+ok("Night is marked chosen", byAct("noteWhenTime", { k: "night" }).classList.contains("on"));
+
+click(byAct("noteKind", { k: "plain" }));
+setVal(byAct("noteField", { f: "text" }), "A note about the past");
+ok("the preview reflects the chosen time, not the live one", /Night.*A note about the past/.test(text()));
+click(byAct("noteSave"));
+const backdated = state().session.log[state().session.log.length - 1];
+eq("saved with the chosen year", backdated.cal.year, liveYear - 1);
+eq("and the chosen day", backdated.cal.day, otherMonth.start + 4);
+eq("and the chosen time", backdated.cal.time, "night");
+eq("the live campaign clock never moved", state().calendar.year, liveYear);
+
+/* A note written just now, after one dated to the past, still has to
+   land under ITS OWN day in the export — not get swept into the
+   backdated note's heading just because it was typed right after it. */
+click(byAct("noteModal"));
+click(byAct("noteKind", { k: "plain" }));
+setVal(byAct("noteField", { f: "text" }), "A note about right now");
+click(byAct("noteSave"));
+const exported = w.eval('sessionMarkdownFor("current")');
+const pastHeading = exported.indexOf("A note about the past");
+const nowHeading = exported.indexOf("A note about right now");
+ok("both notes made it into the export", pastHeading >= 0 && nowHeading >= 0);
+ok("the export is sorted by the in-world clock, not by typing order — " +
+   "the backdated note (a year ago) reads before the one from just now",
+   pastHeading < nowHeading);
+
 console.log("\n=== NARRATIVE AND TECHNICAL LOGS ARE SEPARATED ===");
 click(byAct("sessionModal"));
 ok("the story section is shown by default", /What happened/.test(text()));

@@ -1250,13 +1250,26 @@ function sessionToMarkdown(s) {
   if (s.party && s.party.length) out += "- Party: **" + s.party.join(", ") + "**\n";
   if (s.stats.highestDCSet != null) out += "- Highest save DC set: **" + s.stats.highestDCSet + "**\n";
 
+  /* .filter() already returns a fresh array, so sorting it below reorders
+     only this copy — s.log itself, the immutable record of what was
+     actually typed and when, is never touched. */
   const story = s.log.filter(isNarrative);
   const tech = s.log.filter(function (e) { return !isNarrative(e); });
 
   if (story.length) {
     out += "\n## What happened\n\n";
     /* Grouped by in-world day so the recap reads as a journal rather than
-       a flat feed — several real-world hours can be one in-game morning. */
+       a flat feed — several real-world hours can be one in-game morning.
+       Sorted by that same in-world clock first, because a backdated note
+       written mid-session no longer arrives in story order just because
+       it arrived in typing order — without this a note for three days
+       ago would split into its own heading wherever in the list you
+       happened to write it, rather than landing with the rest of that
+       day. Entries somehow missing a stamp fall back to when they were
+       actually typed, which is the only ordering they have. */
+    story.sort(function (a, b) {
+      return (a.cal && b.cal) ? CAL.compare(a.cal, b.cal) : a.t - b.t;
+    });
     let lastKey = null;
     story.forEach(function (e) {
       const key = e.cal ? e.cal.year + ":" + e.cal.day : "undated";
@@ -1507,14 +1520,57 @@ EXT.noteModal = function () {
   const m = UI.modal;
   const kind = noteKindOf(m.kind);
   const line = noteCompose(kind, m.f);
+  /* Writing a note about right now is the whole point most of the time,
+     so that stays exactly as cheap as it always was: nothing below
+     appears unless you ask for it, and until you do, the note is dated
+     to the live clock, same as before this existed. m.when, once set,
+     is a full { day, year, time } stamp — never a partial one — so it
+     can be handed straight to the log entry with no merging. */
+  const stamp = m.when || calStamp(S);
+  const sysKey = S.calendar.system;
 
   let body = "<h2>Write it down</h2>" +
-    '<div class="msub">In-world it is <b>' + esc(CAL.stamp(S.calendar)) + "</b></div>";
+    '<div class="msub">' + (m.when ? "Dated to" : "In-world it is") + " <b>" +
+    esc(CAL.format(sysKey, stamp.day) + ", " + CAL.timeLabel(stamp.time)) + "</b></div>";
 
-  const feast = CAL.holidayFor(S.calendar.system, S.calendar.day);
+  const feast = CAL.holidayFor(sysKey, stamp.day);
   if (feast) {
-    body += '<div class="gain k-note"><span class="gk">Today</span><span>' +
+    body += '<div class="gain k-note"><span class="gk">' +
+      (m.when ? esc(CAL.format(sysKey, stamp.day)) : "Today") + "</span><span>" +
       esc(feast.name) + "</span></div>";
+  }
+
+  /* Backdating without moving the party's actual clock — the same trick
+     the Calendar tab's browsing cursor already does, just reachable
+     without leaving the composer. Collapsed by default; the three
+     fields are schema-driven off CAL.system(...).months, same as the
+     Calendar tab's own "Jump to" row, so a homebrew calendar with
+     different months never needs this touched. */
+  if (!m.when) {
+    body += '<div class="mrow"><button class="bt cutsm" data-act="noteWhenChange">' +
+      "Not now? Set a different date…</button></div>";
+  } else {
+    const sys = CAL.system(sysKey);
+    const mo = CAL.monthFor(sysKey, m.when.day);
+    body += '<div class="mrow caljump">' +
+      '<span class="cjk">Year</span>' +
+      '<input type="number" value="' + m.when.year + '" data-act="noteWhenYear" style="width:84px">' +
+      '<span class="cjk">Month</span>' +
+      '<select data-act="noteWhenMonth">' +
+        sys.months.map(function (mo2, i) {
+          return '<option value="' + i + '"' + (mo2.name === mo.name ? " selected" : "") +
+            ">" + esc(mo2.name) + "</option>";
+        }).join("") + "</select>" +
+      '<span class="cjk">Day</span>' +
+      '<input type="number" min="1" max="' + (mo.end - mo.start + 1) + '" value="' +
+        CAL.dayOfMonth(sysKey, m.when.day) + '" data-act="noteWhenDay" style="width:60px"></div>';
+    body += '<div class="phints" style="margin-top:6px">' +
+      CAL.timesOfDay().map(function (t) {
+        return '<button class="hintchip' + (t.key === m.when.time ? " on" : "") +
+          '" data-act="noteWhenTime" data-k="' + t.key + '">' + esc(t.label) + "</button>";
+      }).join("") + "</div>";
+    body += '<div class="mrow" style="margin-top:6px"><button class="bt cutsm" data-act="noteWhenNow">' +
+      "Back to right now</button></div>";
   }
 
   /* The kinds first: picking one is what fills the form in, so it is the
@@ -1541,7 +1597,7 @@ EXT.noteModal = function () {
   /* Everything composes to one line in the log, so show the line. It is
      the only way to know what the boxes are about to become. */
   body += '<div class="ph2" style="margin-top:12px">It will read</div>' +
-    '<div class="gain k-note"><span class="gk">' + esc(CAL.timeLabel(S.calendar.timeOfDay)) +
+    '<div class="gain k-note"><span class="gk">' + esc(CAL.timeLabel(stamp.time)) +
     "</span><span>" + (line ? esc(line) : "<em>fill in the first box</em>") + "</span></div>";
 
   if (kind.id === "met") {
@@ -2239,6 +2295,46 @@ Object.assign(ACT, {
   },
   noteField(el) { UI.modal.f[el.dataset.f] = el.value; render(); },
   noteToPeople() { UI.modal.toPeople = !UI.modal.toPeople; render(); },
+
+  /* ---- Backdating a note (see EXT.noteModal) ----
+     UI.modal.when is undefined until asked for, and a full stamp the
+     moment it exists — never a partially-filled one, so noteSave never
+     has to guess what to fall back to on a field nobody touched. Seeded
+     from the live clock so opening the picker starts from "now" rather
+     than from a blank date nobody chose. */
+  noteWhenChange() {
+    const m = UI.modal;
+    if (!m.when) m.when = calStamp(S);
+    render();
+  },
+  noteWhenNow() { UI.modal.when = null; render(); },
+  noteWhenYear(el) {
+    const y = parseInt(el.value, 10);
+    if (!isNaN(y)) UI.modal.when.year = y;
+    render();
+  },
+  /* Same "keep the day-of-month where it can" rule as calJumpMonth on
+     the Calendar tab — picking a month should not also silently move
+     which day of it you meant. */
+  noteWhenMonth(el) {
+    const i = parseInt(el.value, 10);
+    const w = UI.modal.when;
+    const mo = CAL.system(S.calendar.system).months[i];
+    if (!mo) return;
+    const dom = CAL.dayOfMonth(S.calendar.system, w.day);
+    w.day = mo.start + Math.min(dom, mo.end - mo.start + 1) - 1;
+    render();
+  },
+  noteWhenDay(el) {
+    const d = parseInt(el.value, 10);
+    if (isNaN(d)) return;
+    const w = UI.modal.when;
+    const mo = CAL.monthFor(S.calendar.system, w.day);
+    const len = mo.end - mo.start + 1;
+    w.day = mo.start + Math.max(1, Math.min(len, d)) - 1;
+    render();
+  },
+  noteWhenTime(el) { UI.modal.when.time = el.dataset.k; render(); },
   noteSave() {
     const m = UI.modal;
     const kind = noteKindOf(m.kind);
@@ -2251,7 +2347,12 @@ Object.assign(ACT, {
          the session log, and the note IS the line — labelling it would
          file the same sentence twice, once tagged as a note and once as
          bookkeeping. */
-      st.session.log.push({ t: Date.now(), label: line, kind: "note", cal: calStamp(st) });
+      /* t is real wall-clock time — when you actually wrote this — kept
+         for the technical feed and for ordering your own writing
+         session. cal is the story's clock, and is the one the export
+         groups and sorts by: m.when lets the two disagree on purpose. */
+      st.session.log.push({ t: Date.now(), label: line, kind: "note",
+        cal: m.when || calStamp(st) });
       if (st.session.log.length > 500) st.session.log.shift();
       /* The one place a note is worth more than a line of text: you have
          just typed a name, a place and what they wanted, which is a
