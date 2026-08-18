@@ -166,6 +166,13 @@ eq("Grapple likewise",
    catalog.filter(function (a) { return a.id === "grapple"; })[0].slug, "srd:Grappling");
 ok("and the paladin features still point at the class pages",
    catalog.filter(function (a) { return a.id === "layOnHands"; })[0].slug === "paladin:main");
+/* The filter chip is only trustworthy if every action that actually
+   spends a Channel Divinity use is tagged for it — a card that costs
+   the resource but is missing from the filtered list is worse than no
+   filter at all, because it looks complete. */
+eq("every action costing Channel Divinity carries the tag",
+   catalog.filter(function (a) { return a.cost && a.cost.res === "channelDivinity"; })
+     .every(function (a) { return a.tags.indexOf("channelDivinity") >= 0; }), true);
 
 console.log("\n=== THE DOABLE LIST IS GROUPED, CARDED, AND READABLE ===");
 click(byAct("tab", { tab: "combat" }));

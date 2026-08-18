@@ -5264,7 +5264,13 @@ function resourceRail() {
     '<button data-act="loh" data-d="-10">−10</button>' +
     '<button data-act="loh" data-d="1">+1</button></div></div>';
 
-  out += '<div class="res"><div class="rh"><span class="lbl">Channel divinity</span>' +
+  out += '<div class="res"><div class="rh"><span class="lbl">Channel divinity ' +
+    /* Inside .lbl rather than a sibling of it: .rh is space-between with
+       two children normally (label, value), and a third would float in
+       the middle of the row instead of sitting next to the label it
+       belongs to. Ties the pool to the chip that marks what spends it —
+       tap either one and you land on the same filter. */
+    tagHTML(["channelDivinity"], true) + "</span>" +
     '<span class="rv" data-act="prov" data-prov="cd">' + S.resources.channelDivinity +
     "<small>/" + cdMax + "</small></span></div><div class=\"pips\">";
   for (let i = 0; i < cdMax; i++) {

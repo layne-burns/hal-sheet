@@ -63,6 +63,10 @@ const TAGS = {
   bonus:         { label: "Bonus Action",  color: "y2", group: "cost" },
   reaction:      { label: "Reaction",      color: "y3", group: "cost" },
   ritual:        { label: "Ritual",        color: "y4", group: "cost" },
+  /* Every use of this spends a Channel Divinity, the same pool no
+     matter which one — worth its own chip so "what can I still do with
+     Channel Divinity" is one tap, not three names memorised. */
+  channelDivinity: { label: "Channel Divinity", color: "y5", group: "cost" },
   /* reach — gray */
   melee:         { label: "Melee",         color: "g",  group: "reach" },
   touch:         { label: "Touch",         color: "g",  group: "reach" },
@@ -579,10 +583,10 @@ const FEATURES = {
   channelDivinity: { name:"Channel Divinity", slug:"paladin:main", src:"Paladin 3", tags:["utility"],
     text:"Two uses, regaining one on a Short Rest and all on a Long Rest. A third use at Paladin 11. Save DC equals your spell save DC." },
   divineSense: { name:"Channel Divinity: Divine Sense", slug:"paladin:main", src:"Paladin 3",
-    tags:["utility","bonus","selfOnly"],
+    tags:["utility","bonus","selfOnly","channelDivinity"],
     text:"As a Bonus Action, expend one use of Channel Divinity. For 10 minutes or until Incapacitated, you know the location and creature type of any Celestial, Fiend, or Undead within 60 feet, and detect any consecrated or desecrated place or object in that radius." },
   naturesWrath: { name:"Channel Divinity: Nature's Wrath", slug:"paladin:oath-of-the-ancients",
-    src:"Oath of the Ancients 3", tags:["control","aoe"],
+    src:"Oath of the Ancients 3", tags:["control","aoe","channelDivinity"],
     text:"As a Magic action, expend one use of Channel Divinity to conjure spectral vines. Each creature of your choice you can see within 15 feet makes a Strength saving throw against your spell save DC or has the Restrained condition for 1 minute. A Restrained creature repeats the save at the end of each of its turns, ending the effect on a success." },
   extraAttack: { name:"Extra Attack", slug:"paladin:main", src:"Paladin 5", tags:["damage","melee"], unlockLevel:5,
     text:"You can attack twice, instead of once, whenever you take the Attack action on your turn." },
@@ -594,7 +598,7 @@ const FEATURES = {
   auraOfWarding: { name:"Aura of Warding", slug:"paladin:oath-of-the-ancients",
     src:"Oath of the Ancients 7", tags:["defense","support"], unlockLevel:7,
     text:"You and your allies have Resistance to Necrotic, Psychic, and Radiant damage while in your Aura of Protection." },
-  abjureFoes: { name:"Abjure Foes", slug:"paladin:main", src:"Paladin 9", tags:["control"], unlockLevel:9,
+  abjureFoes: { name:"Abjure Foes", slug:"paladin:main", src:"Paladin 9", tags:["control","channelDivinity"], unlockLevel:9,
     text:"As a Magic action, expend one use of Channel Divinity to target creatures equal to your Charisma modifier (minimum 1) within 60 feet. Each makes a Wisdom save or has the Frightened condition for 1 minute or until it takes damage. While Frightened this way, a target can do only one of the following on its turn: move, take an action, or take a Bonus Action." },
   auraOfCourage: { name:"Aura of Courage", slug:"paladin:main", src:"Paladin 10",
     tags:["defense","support"], unlockLevel:10,

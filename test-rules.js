@@ -209,6 +209,12 @@ eq("every spell tag is in the vocabulary",
    Object.keys(SPELLS).every(k => SPELLS[k].tags.every(t => !!R.TAGS[t])), true);
 eq("every feature tag is in the vocabulary",
    Object.keys(FEATURES).every(k => FEATURES[k].tags.every(t => !!R.TAGS[t])), true);
+/* Every feature whose own text says it spends a Channel Divinity use
+   should carry the tag that says so — the filter chip is only honest
+   if it actually finds all three of them. */
+eq("every Channel-Divinity-costing feature is tagged for it",
+   Object.keys(FEATURES).filter(k => /expend one use of Channel Divinity/.test(FEATURES[k].text))
+     .every(k => FEATURES[k].tags.indexOf("channelDivinity") >= 0), true);
 
 console.log("\n" + "=".repeat(46));
 console.log(pass + " passed, " + fail + " failed");
