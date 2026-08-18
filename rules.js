@@ -1586,7 +1586,12 @@ const SEED = {
      recaps stick around without the live log growing forever. */
   session: {
     active: false, startedAt: null, log: [],
-    stats: { highestDCSet: null }
+    stats: { highestDCSet: null },
+    /* Who was actually at the table, snapshotted when the session began
+       — the party roster's Present toggle is a live setting and keeps
+       moving after that, so this is the only record of who a given
+       night's notes were actually about. */
+    party: []
   },
   sessionHistory: [],
 
@@ -1632,7 +1637,8 @@ const SEED = {
     economyLockout: true,   /* grey out what you can't afford */
     edgeGlow: true,         /* concentration and low-HP screen rim */
     confirmOverride: true,  /* warn before spending economy you don't have */
-    uiScale: 100            /* percent — whole-UI zoom, not just font */
+    uiScale: 100,           /* percent — whole-UI zoom, not just font */
+    noteReminderMinutes: 25 /* the session nudge's cadence; 0 = disabled */
   },
   notes: {
     backstory: "Found wandering two years ago by a Locathah named Gill. No cohesive memory of origins — only sensory fragments: the ticking of a massive clockwork device, ozone and crushed pine, geometric shadows, the sensation of falling upward. Clings fiercely to chosen family. Gill's reverence for Eadro is casual; Hal's is absolute.",

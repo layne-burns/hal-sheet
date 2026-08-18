@@ -93,6 +93,22 @@ click(byAct("combatStart"));
 ok("it asks everyone to roll rather than reusing the last order", /Roll for initiative/.test(text()));
 ok("and it offers to add an enemy line", !!byAct("initAddFoe"));
 ok("nothing is committed by opening it", state().combat.active === false);
+
+console.log("\n=== INITIATIVE MODAL: TAB WALKS ONLY THE ROLLS ===");
+/* Typing a table of rolls is the actual task, and Tab is how you move
+   down it — so the numeric input has to be the only stop. */
+click(byAct("initAddFoe"));
+const oinits = $$(".oinit");
+ok("at least two rows to check order across", oinits.length >= 2);
+eq("each roll input's tabindex is its row position, one-based",
+   oinits.map(function (el) { return el.tabIndex; }),
+   oinits.map(function (el, i) { return i + 1; }));
+ok("portrait triggers are pulled out of the tab order",
+   $$(".facebtn:not(.fixed)").every(function (el) { return el.tabIndex === -1; }));
+ok("a foe's name field is pulled out too — it's Tab-through-rolls, not Tab-through-everything",
+   $$(".rowname").every(function (el) { return el.tabIndex === -1; }));
+ok("the row-add buttons are pulled out",
+   [byAct("initAddFoe"), byAct("initAddParty")].every(function (el) { return el.tabIndex === -1; }));
 click(byAct("closeModal"));
 ok("cancelling leaves you out of combat", state().combat.active === false);
 ok("What you can do now panel renders", /What you can do now/.test(text()));
@@ -802,6 +818,11 @@ st = state();
 eq("session marked active", st.session.active, true);
 ok("session has a start time", typeof st.session.startedAt === "number");
 ok("checklist modal closed after Begin session", !byAct("preSessionRest"));
+/* Snapshotted at the moment it started, not read live later — Present is
+   a toggle that keeps moving, so a note exported next week has to credit
+   the session with who was actually there, not whoever is marked Present
+   today. */
+eq("who was present is captured on the session, by name", st.session.party, ["Gill"]);
 /* Starting itself is a labeled mutate() call, so it's the log's first
    entry — that's a feature, not a bug: the recap opens with "Started". */
 eq("log opens with its own Start session entry", st.session.log.length, 1);
@@ -957,6 +978,29 @@ ok("a note from the nudge lands in the log",
    st.session.log.some(function (e) { return e.kind === "note" && /Quick note from the nudge/.test(e.label); }));
 ok("nudge disappears again right after adding a note", w.eval("EXT.sessionNudge()") === "");
 
+console.log("\n=== NOTE REMINDER CADENCE IS CONFIGURABLE ===");
+click(byAct("settingsModal"));
+ok("the cadence row is in Settings", /Note reminder/.test(text()));
+ok("25 minutes is the default, unmarked as a preset — it's the SEED value, not one of the four chips",
+   [15, 30, 45, 60].indexOf(state().settings.noteReminderMinutes) < 0);
+click(byAct("setNoteReminder", { min: "60" }));
+eq("picking a preset stores it", state().settings.noteReminderMinutes, 60);
+ok("and the chip shows as selected", /class="bt cutsm pri" data-act="setNoteReminder" data-min="60"/.test($("#modal-root").innerHTML));
+click(byAct("closeModal"));
+w.eval("S.session.log = S.session.log.filter(function(e){ return e.kind !== 'note'; }); S.session.startedAt = Date.now() - 30*60*1000;");
+ok("30 minutes no longer trips it once the cadence is 60",
+   w.eval("EXT.sessionNudge()") === "");
+w.eval("S.session.startedAt = Date.now() - 61*60*1000;");
+ok("but 61 does", /data-act="noteModal"/.test(w.eval("EXT.sessionNudge()")));
+click(byAct("settingsModal"));
+click(byAct("setNoteReminder", { min: "0" }));
+eq("Off stores as 0", state().settings.noteReminderMinutes, 0);
+click(byAct("closeModal"));
+ok("and a disabled cadence never nudges, however long it's been",
+   w.eval("EXT.sessionNudge()") === "");
+/* Put it back — later checks in this file assume the SEED default. */
+w.eval("mutate(function(st){ st.settings.noteReminderMinutes = 25; })");
+
 console.log("\n=== THE COMBAT BAR HOLDS ONE LINE ===");
 /* The controls wrapped to a second row that held one button. They step
    down instead — spacing, then type, then the word under each pip, then
@@ -1066,6 +1110,10 @@ const archived = st.sessionHistory[st.sessionHistory.length - 1];
 ok("archived entry kept its log", archived.log.length > 0);
 eq("archived log opens with Start session", archived.log[0].label, "Start session");
 eq("archived log closes with End session", archived.log[archived.log.length - 1].label, "End session");
+eq("archived entry keeps who was there", archived.party, ["Gill"]);
+eq("the live session's party clears for next time", st.session.party, []);
+ok("the exported markdown names the party",
+   /- Party: \*\*Gill\*\*/.test(w.eval('sessionMarkdownFor("last")')));
 ok("session modal now offers to export the last session", !!byAct("sessionExport"));
 click(byAct("closeModal"));
 

@@ -6105,3 +6105,16 @@ document.addEventListener("keydown", function (e) {
 clampState(S);
 save();
 render();
+
+/* The note-reminder nudge (see EXT.sessionNudge in combat.js) is computed
+   at render time from "now minus the last note" — accurate, but only
+   visible the next time something else happens to trigger a render.
+   Genuine idle time — nobody tapping anything, mid-conversation at the
+   table — would leave it invisible past the moment it actually became
+   due. A render once a minute is cheap, touches nothing while there is
+   no session running, and is the difference between a reminder that
+   works and one that only works if you were about to touch the sheet
+   anyway. */
+setInterval(function () {
+  if (S.session && S.session.active) render();
+}, 60 * 1000);

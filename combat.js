@@ -664,6 +664,20 @@ EXT.settingsModal = function () {
     '<button class="bt cutsm" data-act="scaleUI" data-dir="1">A+</button>' +
     '<button class="bt cutsm" data-act="resetUIScale">Reset</button>' +
     '<span class="lbl" style="margin-left:12px">' + scale + '%</span></div>';
+  /* A preset row rather than a boolean, and rather than a free-typed
+     number — "how long before the sheet nudges you" is really a choice
+     of pace, not a precise duration, and the old value was a constant
+     nobody but a developer could change. */
+  const reminderMin = S.settings.noteReminderMinutes || 0;
+  body += '<div class="mrow" style="margin-top:9px"><span class="lbl">Note reminder</span>' +
+    [15, 30, 45, 60].map(function (m) {
+      return '<button class="bt cutsm' + (reminderMin === m ? " pri" : "") +
+        '" data-act="setNoteReminder" data-min="' + m + '">' + m + "</button>";
+    }).join("") +
+    '<button class="bt cutsm' + (reminderMin === 0 ? " pri" : "") +
+      '" data-act="setNoteReminder" data-min="0">Off</button></div>' +
+    '<div class="foot" style="margin:2px 0 9px">How many minutes into a running session before ' +
+    "the sheet nudges you to jot something down. Resets every time you write a note.</div>";
   rows.forEach(function (r) {
     const on = S.settings[r[0]];
     body += '<button class="pick' + (on ? " sel" : "") + '" data-act="setting" data-key="' + r[0] + '">' +
@@ -1142,6 +1156,14 @@ EXT.initiativeModal = function () {
         "goes to the back.") + "</div>";
 
   body += '<div class="ph2">Who is in it</div>';
+  /* Typing a whole table of rolls is the actual task here, and Tab is how
+     you move down it — so the numeric input is the only thing in each row
+     that Tab should ever land on. Everything else (the portrait, a foe's
+     name, the tie-break arrows, the drop button) gets tabindex="-1": still
+     reachable by tap or by Shift+Tab-then-click, just not something the
+     roll-then-Tab-then-roll rhythm can stumble into. The input's own
+     tabindex is the row number, one-based, so the order survives even if
+     a row without a face or a name button changes the DOM's own order. */
   m.rows.forEach(function (r, i) {
     /* Hal wears his own portrait and the party wear the faces set on the
        roster; only a foe gets to choose one here, because only a foe's is
@@ -1149,16 +1171,16 @@ EXT.initiativeModal = function () {
     const face = tokenFace({ hal: r.kind === "hal", token: r.token, name: r.name });
     body += '<div class="ordrow">' +
       (r.kind === "foe"
-        ? '<button class="facebtn" data-act="tokenModal" data-kind="row" data-i="' + i +
+        ? '<button class="facebtn" tabindex="-1" data-act="tokenModal" data-kind="row" data-i="' + i +
           '" title="Pick a face for this line">' + face + "</button>"
         : '<span class="facebtn fixed">' + face + "</span>") +
       (r.kind === "foe"
-        ? '<input class="on rowname" value="' + esc(r.name) +
+        ? '<input class="on rowname" tabindex="-1" value="' + esc(r.name) +
           '" placeholder="Goblins, the ogre…" data-act="initName" data-i="' + i + '">'
         : '<span class="on">' + esc(r.name) +
           (r.kind === "hal" ? ' <span class="emeta">' + sign(init.value) + " to the roll</span>" : "") +
           "</span>") +
-      '<input type="number" class="oinit" data-act="initValue" data-i="' + i +
+      '<input type="number" class="oinit" tabindex="' + (i + 1) + '" data-act="initValue" data-i="' + i +
         '" placeholder="Roll" value="' + (r.init == null ? "" : r.init) + '">' +
       /* Ties are settled by hand. The rules leave it to the table, and a
          sort cannot know that the rogue goes before the ogre on a 14 —
@@ -1166,12 +1188,13 @@ EXT.initiativeModal = function () {
          actually tied, because nudging anyone else would be undone by
          the sort the moment you commit. */
       (tiedWith(m.rows, i, -1)
-        ? '<button class="bt cutsm" data-act="initMove" data-i="' + i +
+        ? '<button class="bt cutsm" tabindex="-1" data-act="initMove" data-i="' + i +
           '" data-d="-1" title="Go before the one above, on the same roll">↑</button>' : "") +
       (tiedWith(m.rows, i, 1)
-        ? '<button class="bt cutsm" data-act="initMove" data-i="' + i +
+        ? '<button class="bt cutsm" tabindex="-1" data-act="initMove" data-i="' + i +
           '" data-d="1" title="Go after the one below, on the same roll">↓</button>' : "") +
-      '<button class="bt cutsm dg" data-act="initDrop" data-i="' + i + '" title="Not in this fight">×</button>' +
+      '<button class="bt cutsm dg" tabindex="-1" data-act="initDrop" data-i="' + i +
+        '" title="Not in this fight">×</button>' +
       "</div>";
   });
   if (!m.rows.length) {
@@ -1179,10 +1202,11 @@ EXT.initiativeModal = function () {
   }
 
   body += '<div class="mrow" style="margin-top:9px">' +
-    '<button class="bt cutsm" data-act="initAddFoe">+ Enemy</button>' +
-    '<button class="bt cutsm" data-act="initAddParty">+ Everyone present</button>' +
+    '<button class="bt cutsm" tabindex="-1" data-act="initAddFoe">+ Enemy</button>' +
+    '<button class="bt cutsm" tabindex="-1" data-act="initAddParty">+ Everyone present</button>' +
     (m.rows.some(function (r) { return r.kind === "hal"; })
-      ? "" : '<button class="bt cutsm" data-act="initAddHal">+ ' + esc(S.identity.name || "Hal") + "</button>") +
+      ? "" : '<button class="bt cutsm" tabindex="-1" data-act="initAddHal">+ ' +
+        esc(S.identity.name || "Hal") + "</button>") +
     "</div>";
 
   const away = (S.party.roster || []).filter(function (x) { return !x.present; }).length;
@@ -1223,6 +1247,7 @@ function sessionToMarkdown(s) {
   const sys = S.calendar.system;
   let out = "# Session — " + fmtDate(s.startedAt) + "\n\n";
   out += "*" + fmtTime(s.startedAt) + " to " + fmtTime(s.endedAt) + "*\n\n";
+  if (s.party && s.party.length) out += "- Party: **" + s.party.join(", ") + "**\n";
   if (s.stats.highestDCSet != null) out += "- Highest save DC set: **" + s.stats.highestDCSet + "**\n";
 
   const story = s.log.filter(isNarrative);
@@ -1316,6 +1341,9 @@ EXT.sessionModal = function () {
   let body = "<h2>Session log</h2>";
   if (s.active) {
     body += '<div class="msub">Started ' + fmtTime(s.startedAt) + " · " + s.log.length + " event(s) logged</div>";
+    if (s.party && s.party.length) {
+      body += '<div class="foot">Party: <b>' + esc(s.party.join(", ")) + "</b></div>";
+    }
     const stats = [];
     if (s.stats.highestDCSet != null) stats.push("Highest save DC set: " + s.stats.highestDCSet);
     if (stats.length) body += '<div class="foot">' + esc(stats.join(" · ")) + "</div>";
@@ -1369,6 +1397,9 @@ EXT.sessionModal = function () {
       body += '<div class="ph2" style="margin-top:10px">Last session</div>';
       body += '<div class="foot">' + fmtDate(last.startedAt) + " · " + last.log.length + " events" +
         (lastStats.length ? " · " + esc(lastStats.join(", ")) : "") + "</div>";
+      if (last.party && last.party.length) {
+        body += '<div class="foot">Party: ' + esc(last.party.join(", ")) + "</div>";
+      }
     }
     body += sessionExportControls();
     body += '<div class="mfoot"><button class="bt cutsm" data-act="closeModal">Close</button></div>';
@@ -1379,13 +1410,19 @@ EXT.sessionModal = function () {
 /* A gentle reminder strip, visible outside the Session modal, when a
    session is running and it's been a while since the last note (or
    since the session started, if there's no note yet). Lets you jot
-   one right there without opening the modal. */
-const SESSION_NOTE_REMINDER_MS = 25 * 60 * 1000;
+   one right there without opening the modal.
+
+   The cadence is a Settings field (minutes, 0 = disabled) rather than a
+   constant now — everyone's table talks at a different pace, and the
+   25-minute default that used to be hardcoded here is just its starting
+   value (see SEED.settings.noteReminderMinutes in rules.js). */
 EXT.sessionNudge = function () {
   if (!S.session.active) return "";
+  const minutes = S.settings.noteReminderMinutes;
+  if (!minutes) return "";
   const notes = S.session.log.filter(function (e) { return e.kind === "note"; });
   const last = notes.length ? notes[notes.length - 1].t : S.session.startedAt;
-  if (Date.now() - last < SESSION_NOTE_REMINDER_MS) return "";
+  if (Date.now() - last < minutes * 60 * 1000) return "";
   /* If today is a feast day, say so — it's usually the thing worth writing
      down, and it saves a trip to the Calendar tab to find out. */
   const feast = CAL.holidayFor(S.calendar.system, S.calendar.day);
@@ -2056,6 +2093,14 @@ Object.assign(ACT, {
     const k = el.dataset.key;
     mutate(function (st) { st.settings[k] = !st.settings[k]; });
   },
+  /* Minutes, or 0 for "don't ask." A preset row rather than a free-typed
+     number — the choice is really "often, occasionally, or never", and
+     a slider or a text box would spend a tap dialing in a number nobody
+     actually needed to be exact. */
+  setNoteReminder(el) {
+    const min = parseInt(el.dataset.min, 10) || 0;
+    mutate(function (st) { st.settings.noteReminderMinutes = min; });
+  },
 
   /* ---- Session log ---- */
   sessionModal() { UI.modal = { type: "session" }; render(); },
@@ -2069,6 +2114,14 @@ Object.assign(ACT, {
       st.session.startedAt = Date.now();
       st.session.log = [];
       st.session.stats = { highestDCSet: null };
+      /* Snapshotted now rather than read live at export time — Present
+         is a toggle on the roster and keeps changing after this, so
+         "who was at this session" has to be pinned to the moment it
+         actually started or a note exported weeks later would credit
+         the session with whoever happens to be marked Present today. */
+      st.session.party = (st.party.roster || [])
+        .filter(function (m) { return m.present; })
+        .map(function (m) { return m.name; });
     }, "Start session");
     UI.modal = null;
     render();
@@ -2083,7 +2136,8 @@ Object.assign(ACT, {
       const log = st.session.log.concat([{ t: endedAt, label: "End session" }]);
       const entry = {
         startedAt: st.session.startedAt, endedAt: endedAt,
-        log: log, stats: Object.assign({}, st.session.stats)
+        log: log, stats: Object.assign({}, st.session.stats),
+        party: (st.session.party || []).slice()
       };
       st.sessionHistory.push(entry);
       if (st.sessionHistory.length > 30) st.sessionHistory.shift();
@@ -2091,6 +2145,7 @@ Object.assign(ACT, {
       st.session.startedAt = null;
       st.session.log = [];
       st.session.stats = { highestDCSet: null };
+      st.session.party = [];
     }, "End session");
     UI.modal = { type: "session" };
     render();
