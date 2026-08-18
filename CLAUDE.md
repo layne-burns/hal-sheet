@@ -154,11 +154,45 @@ mounted (`isMount` was never set on it, so no Mount control ever offered
 it); and a Channel Divinity filter chip tying the resource to what spends
 it.
 
+A second, larger pass followed: the initiative sheet's Tab key now walks
+only the numeric rolls, not the portraits and arrows between them; the
+"it's been a while" nudge's cadence is a Settings preset instead of a
+hardcoded 25 minutes, backed by a once-a-minute render so it actually
+fires during genuine idle time rather than waiting for an incidental
+interaction; who was present gets snapshotted onto the session the moment
+it starts (`S.session.party`), not read live at export time; the note
+composer can backdate or forward-date a note to any day/month/year/time
+in the active calendar without moving the party's actual clock, and the
+export sorts "What Happened" by that in-world clock rather than by typing
+order; `CALC.characterSnapshot()` leads every session export, and the old
+two-way story/technical split is now three (`## What Happened` /
+`## Game Activity` / `## Technical Log`), classified by reading the label
+every `mutate()` call already carries (`logKind()` in combat.js) rather
+than touching the ~140 call sites; a generic item-modifier engine
+(`CALC.itemMods`/`applyMods`, target/op/value/key) that also **built**
+`CALC.activeMods` for the first time — it had been referenced in three
+places and defined nowhere, so "Active effects change your AC and attack
+numbers" in Settings had never actually done anything; and the Notes tab
+grew a Session Explorer (every past session, not just "last") and Hal's
+Diary, a second record for polished prose kept separate from the
+immutable raw log, rendered through a small hand-rolled markdown-to-HTML
+step (`mdToHtml()`) since this app has no runtime dependencies to reach
+for instead.
+
 ### Outstanding
 
-Nothing at the moment. The four items that lived here — Channel Divinity's
-filter, Extra Attack at level 5, the mount-vs-rider damage question, and
-the stray `qee.webp` — are resolved; see below for what was decided.
+- **Ability-score item mods aren't wired through.** `CALC.itemMods()`
+  supports an `abilityScore` target and the advanced builder offers it as
+  a menu choice, but nothing reads it yet — `S.abilities.x` is read
+  directly in dozens of places (`CALC.mod()` calls throughout), and
+  retrofitting all of them is a wider, riskier pass than made sense to
+  fold into the item-modifier work. Same story for a mod that targets one
+  specific weapon rather than every equipped one.
+- **The Session Explorer and Diary UI haven't had a design pass.** They
+  work and are tested, but the layout was built to the same visual
+  vocabulary as the rest of the app without a specific look-and-feel
+  review — worth revisiting once there's more than a session or two of
+  real data to look at.
 
 ### Decisions already taken — do not relitigate
 
@@ -181,3 +215,24 @@ the stray `qee.webp` — are resolved; see below for what was decided.
   that matters. A picker that asked "who got hit" on every press would be
   overhead for a question the existing buttons already answer by which one
   you tap.
+- **The delta log is label-based, not a generic state-diff observer.**
+  `logKind()` classifies by reading the label every `mutate()` call already
+  writes, sorted against a short, closed allowlist of what counts as
+  Technical (session lifecycle, turn transitions, a portrait pick, an undo,
+  who's present, the People tab's NPC-record toggles) — everything else
+  non-narrative defaults to Game Activity. A real path-diffing engine that
+  auto-describes changes without a hand-written label was considered and
+  rejected: much bigger, and the existing label convention already covers
+  the app thoroughly.
+- **Hal's Diary is manual export → external tool → paste back, not an
+  in-app LLM call.** The app has no backend and no API key storage; adding
+  either for this would be a bigger architectural change than the feature
+  is worth. Copy/Share already hand you the raw markdown; an LLM
+  diary-writing skill is something you run yourself.
+- **`CALC.characterSnapshot()` is computed fresh, not frozen per session.**
+  A level-up or a gear swap mid-session already gets its own line in the
+  delta log, so a snapshot showing where Hal ended up is consistent with
+  that record. The tradeoff: exporting an *old* session shows current
+  stats, not that session's — `sessionToMarkdown()` says so explicitly
+  when the session being exported isn't the live one, rather than a
+  silent, misleading number.
