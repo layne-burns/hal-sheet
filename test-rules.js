@@ -216,6 +216,62 @@ eq("every Channel-Divinity-costing feature is tagged for it",
    Object.keys(FEATURES).filter(k => /expend one use of Channel Divinity/.test(FEATURES[k].text))
      .every(k => FEATURES[k].tags.indexOf("channelDivinity") >= 0), true);
 
+console.log("\n=== ITEM MODIFIERS ===");
+/* Baseline, unmodified — the numbers the "HAL'S DERIVED STATS" section
+   above already established, repeated here so the deltas below are
+   readable against a known start rather than a magic number. */
+eq("baseline AC before any item mods", CALC.armorClass(S).value, 16);
+eq("baseline shortsword to-hit", CALC.attackAction(S).rows[0].toHit, 5);
+
+const ring = clone(S);
+ring.equipment.inventory.push({ id: "i-testring", name: "Ring of Protection",
+  qty: 1, tags: [], note: "", consumable: false, equipped: true,
+  mods: [{ target: "acBonus", op: "add", value: 1 }, { target: "saveBonus", op: "add", value: 1 }] });
+eq("an equipped acBonus mod raises AC", CALC.armorClass(ring).value, 17);
+eq("AC provenance names the item", CALC.armorClass(ring).sources.some(s => s.label === "Ring of Protection"), true);
+eq("a universal saveBonus mod raises every save, not one",
+   [CALC.savingThrow(ring, "str").value, CALC.savingThrow(ring, "wis").value], [-1 + 1, 2 + 1]);
+
+const unequipped = clone(S);
+unequipped.equipment.inventory.push({ id: "i-testring2", name: "Ring of Protection", qty: 1, tags: [],
+  note: "", consumable: false, equipped: false, mods: [{ target: "acBonus", op: "add", value: 1 }] });
+eq("a mod on an item that isn't equipped does nothing",
+   CALC.armorClass(unequipped).value, 16);
+
+const weap = clone(S);
+weap.equipment.inventory.push({ id: "i-testweap", name: "Gauntlet of Striking", qty: 1, tags: [],
+  note: "", consumable: false, equipped: true,
+  mods: [{ target: "attackBonus", op: "add", value: 2 }, { target: "damageBonus", op: "add", value: 2 }] });
+const weapAtk = CALC.attackAction(weap);
+eq("a universal attackBonus applies to every weapon",
+   weapAtk.rows.map(r => r.toHit), [5 + 2, 5 + 2, 5 + 2]);
+eq("a universal damageBonus folds into the damage string",
+   weapAtk.rows[0].damage, "1d6+" + (3 + 2));
+
+const skilled = clone(S);
+skilled.equipment.inventory.push({ id: "i-testcloak", name: "Cloak of Elvenkind", qty: 1, tags: [],
+  note: "", consumable: false, equipped: true,
+  mods: [{ target: "skillBonus", op: "add", value: 5, key: "stealth" }] });
+eq("a keyed skillBonus only touches its own skill",
+   [CALC.skill(skilled, "stealth").value, CALC.skill(skilled, "insight").value],
+   [CALC.skill(S, "stealth").value + 5, CALC.skill(S, "insight").value]);
+
+const overridden = clone(S);
+overridden.equipment.inventory.push({ id: "i-testset", name: "Amulet of Fixed AC", qty: 1, tags: [],
+  note: "", consumable: false, equipped: true,
+  mods: [{ target: "acBonus", op: "set", value: 20 }] });
+eq("set overrides the computed value outright", CALC.armorClass(overridden).value, 20);
+
+const doubled = clone(S);
+doubled.equipment.inventory.push({ id: "i-testmult", name: "Boots of Doubled Speed", qty: 1, tags: [],
+  note: "", consumable: false, equipped: true, mods: [{ target: "speed", op: "mult", value: 2 }] });
+eq("mult scales rather than adds", CALC.applyMods(30, CALC.itemMods(doubled).speed), 60);
+
+const dc = clone(S);
+dc.equipment.inventory.push({ id: "i-testfocus", name: "Arcane Focus of Insistence", qty: 1, tags: [],
+  note: "", consumable: false, equipped: true, mods: [{ target: "spellDc", op: "add", value: 1 }] });
+eq("spellDc raises the spell save DC", CALC.spellSaveDC(dc).value, 15);
+
 console.log("\n=== CHARACTER SNAPSHOT ===");
 /* Data only — sessionToMarkdown() in combat.js is what turns this into
    the export's header, so this checks the numbers rather than any

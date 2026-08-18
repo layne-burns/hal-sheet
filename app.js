@@ -1876,7 +1876,8 @@ const ACT = {
   addItem() {
     mutate(function (st) {
       st.equipment.inventory.push({ id: uid("i"), name: "New item", qty: 1, tags: [],
-                                    note: "", consumable: false });
+                                    note: "", consumable: false, weight: null, value: "",
+                                    equipped: false, mods: [] });
     });
   },
   itemConsumable(el) {
@@ -1894,6 +1895,85 @@ const ACT = {
   delItem(el) {
     const i = parseInt(el.dataset.i, 10);
     mutate(function (st) { st.equipment.inventory.splice(i, 1); });
+  },
+  itemEquipped(el) {
+    const i = parseInt(el.dataset.i, 10);
+    mutate(function (st) {
+      const it = st.equipment.inventory[i];
+      if (it) it.equipped = !it.equipped;
+    });
+  },
+  /* The +1/+2/+3 shortcut for the common case — a plain enchantment on
+     a weapon or a piece of armor — inferred from the item's own tags
+     rather than asked for, so it is genuinely one tap. Damage-tagged
+     gets both attackBonus and damageBonus, the way a real +N weapon
+     works; defense-tagged gets acBonus. Anything else falls through to
+     the advanced builder below, which can name any target at all.
+     Pressing a second preset corrects the level rather than stacking —
+     tapping +2 after +1 makes it a +2 item, not a +3 one. */
+  itemPreset(el) {
+    const i = parseInt(el.dataset.i, 10);
+    const n = parseInt(el.dataset.n, 10);
+    const before = S.equipment.inventory[i];
+    if (!before) return;
+    mutate(function (st) {
+      const it = st.equipment.inventory[i];
+      if (!it) return;
+      if (!it.mods) it.mods = [];
+      const defense = (it.tags || []).indexOf("defense") >= 0;
+      const targets = defense ? ["acBonus"] : ["attackBonus", "damageBonus"];
+      targets.forEach(function (t) {
+        const existing = it.mods.filter(function (m) { return m.target === t && m.op === "add" && !m.key; })[0];
+        if (existing) existing.value = n;
+        else it.mods.push({ target: t, op: "add", value: n });
+      });
+      it.equipped = true;
+    }, "+" + n + " " + before.name);
+  },
+  /* ---- The advanced modifier builder ----
+     One draft at a time (UI.itemModDraft), not a live-editing row per
+     existing modifier — simpler to reason about, and matches how the
+     rest of the app composes something before committing it (the note
+     composer, the mount picker) rather than editing structured data
+     inline cell by cell. Opening it seeds a fresh draft; the draft
+     itself never touches S until Add is pressed. */
+  itemAdvOpen(el) {
+    const i = parseInt(el.dataset.i, 10);
+    const key = "itemAdv-" + i;
+    const opening = !UI.expanded[key];
+    UI.expanded[key] = opening;
+    if (opening) UI.itemModDraft = { i: i, target: "acBonus", op: "add", value: 1, key: "" };
+    render();
+  },
+  itemModTarget(el) { UI.itemModDraft.target = el.value; render(); },
+  itemModOp(el) { UI.itemModDraft.op = el.value; render(); },
+  itemModValue(el) { UI.itemModDraft.value = parseFloat(el.value) || 0; render(); },
+  itemModKey(el) { UI.itemModDraft.key = el.value; render(); },
+  itemModAdd() {
+    const d = UI.itemModDraft;
+    if (!d || !d.target) return;
+    const before = S.equipment.inventory[d.i];
+    if (!before) return;
+    mutate(function (st) {
+      const it = st.equipment.inventory[d.i];
+      if (!it) return;
+      if (!it.mods) it.mods = [];
+      it.mods.push({ target: d.target, op: d.op, value: d.value, key: (d.key || "").trim() || undefined });
+      it.equipped = true;
+    }, "Add a modifier to " + before.name);
+    /* Left open, value cleared rather than the whole draft reset — a
+       Ring of Protection is +1 AC and +1 saves, two adds in a row with
+       the same value, and re-picking the target each time would be the
+       annoying part. */
+    UI.itemModDraft = { i: d.i, target: d.target, op: d.op, value: d.value, key: "" };
+    render();
+  },
+  itemModDel(el) {
+    const i = parseInt(el.dataset.i, 10), j = parseInt(el.dataset.j, 10);
+    mutate(function (st) {
+      const it = st.equipment.inventory[i];
+      if (it && it.mods) it.mods.splice(j, 1);
+    });
   },
   editTags(el) {
     const id = el.dataset.id;
@@ -3035,6 +3115,65 @@ function featureEntry(k, f) {
 }
 
 /* ---------- INVENTORY ---------- */
+/* What the advanced modifier builder offers as a target, and its label
+   — deliberately not the only targets CALC.itemMods() will honour
+   (nothing there checks this list; a homebrew value typed into
+   "Something else…" works exactly like a named one), just the ones
+   common enough to deserve their own row in a dropdown. */
+const ITEM_MOD_TARGETS = [
+  ["acBonus", "AC"], ["attackBonus", "Attack rolls"], ["damageBonus", "Damage"],
+  ["saveBonus", "Saving throws"], ["skillBonus", "One skill"], ["speed", "Speed"],
+  ["abilityScore", "An ability score"], ["spellDc", "Spell save DC"],
+  ["critThreshold", "Crit threshold"], ["custom", "Something else…"]
+];
+/* Only these targets need a sub-address — everything else is universal
+   (a saveBonus helps every save, not one named ability). */
+const ITEM_MOD_KEY_HINT = {
+  skillBonus: "Skill (e.g. stealth)", abilityScore: "str / dex / con / int / wis / cha",
+  custom: "Name what this changes"
+};
+const ITEM_MOD_OPS = [["add", "flat bonus"], ["mult", "multiplier"], ["set", "override"]];
+
+/* One modifier, read back as a short chip — "+1 AC", "×2 Speed", the
+   target's known label if it has one, the raw string typed into
+   "Something else…" otherwise, since that string IS the target. */
+function modLabel(m) {
+  const known = ITEM_MOD_TARGETS.filter(function (t) { return t[0] === m.target; })[0];
+  const name = (known ? known[1] : m.target) + (m.key ? " (" + m.key + ")" : "");
+  const val = m.op === "set" ? "= " + m.value : m.op === "mult" ? "×" + m.value : sign(m.value);
+  return val + " " + name;
+}
+
+/* The open-ended half of the layered Add Item UI. One draft at a time
+   (UI.itemModDraft), composed the same way the note composer and the
+   mount picker compose theirs — filled in, previewed, then committed —
+   rather than a form of live-editing rows. */
+function itemModBuilder(i) {
+  const d = UI.itemModDraft && UI.itemModDraft.i === i ? UI.itemModDraft
+    : { i: i, target: "acBonus", op: "add", value: 1, key: "" };
+  const keyHint = ITEM_MOD_KEY_HINT[d.target];
+  let out = '<div class="mrow" style="margin-top:6px">' +
+    '<select data-act="itemModTarget">' +
+      ITEM_MOD_TARGETS.map(function (t) {
+        return '<option value="' + t[0] + '"' + (t[0] === d.target ? " selected" : "") + ">" +
+          esc(t[1]) + "</option>";
+      }).join("") + "</select>" +
+    (keyHint
+      ? '<input type="text" style="width:130px" placeholder="' + esc(keyHint) + '" value="' +
+        esc(d.key || "") + '" data-act="itemModKey">'
+      : "") +
+    '<select data-act="itemModOp">' +
+      ITEM_MOD_OPS.map(function (o) {
+        return '<option value="' + o[0] + '"' + (o[0] === d.op ? " selected" : "") + ">" +
+          esc(o[1]) + "</option>";
+      }).join("") + "</select>" +
+    '<input type="number" style="width:70px" value="' + d.value + '" data-act="itemModValue">' +
+    '<button class="bt cutsm pri" data-act="itemModAdd">Add modifier</button></div>';
+  out += '<div class="foot" style="margin:4px 0 0">Flat bonus adds to the target; multiplier scales it; ' +
+    "override replaces it outright. Equipping this item is what makes any of it count.</div>";
+  return out;
+}
+
 function inventoryTab() {
   const E = S.toggles.editMode;
   const c = S.equipment.coins;
@@ -3048,6 +3187,7 @@ function inventoryTab() {
   out += '<div class="pnl cut"><h3>Carried</h3>';
   S.equipment.inventory.forEach(function (it, i) {
     if (!matchesFilter(it.tags)) return;
+    const mods = it.mods || [];
     if (E) {
       /* Consumable is what tells a favourited potion from a favourited
          sword: one offers Use, the other doesn't, because nothing good
@@ -3059,12 +3199,43 @@ function inventoryTab() {
           '" title="A consumable can be spent from Favourites">Consumable</button>' +
         '<button class="bt cutsm dg" data-act="delItem" data-i="' + i + '">Delete</button></div>' +
         '<input style="width:100%;margin-top:4px" placeholder="Note" value="' + esc(it.note || "") +
-        '" data-act="editItem" data-i="' + i + '" data-field="note"></div>';
+        '" data-act="editItem" data-i="' + i + '" data-field="note">' +
+        '<div class="mrow" style="margin-top:4px">' +
+          '<span class="lbl">Weight</span><input type="number" min="0" style="width:64px" value="' +
+            (it.weight == null ? "" : it.weight) + '" placeholder="lb" data-act="editItem" data-i="' + i +
+            '" data-field="weight">' +
+          '<span class="lbl">Value</span><input type="text" style="width:90px" placeholder="15 gp" value="' +
+            esc(it.value || "") + '" data-act="editItem" data-i="' + i + '" data-field="value">' +
+        "</div>" +
+        /* Basic enchantment first, the open-ended builder behind More —
+           the layering the task asked for: a tap for the common case,
+           nothing hidden for the rest. */
+        '<div class="mrow" style="margin-top:4px"><span class="lbl">Enchant</span>' +
+          '<button class="bt cutsm" data-act="itemPreset" data-i="' + i + '" data-n="1">+1</button>' +
+          '<button class="bt cutsm" data-act="itemPreset" data-i="' + i + '" data-n="2">+2</button>' +
+          '<button class="bt cutsm" data-act="itemPreset" data-i="' + i + '" data-n="3">+3</button>' +
+          '<button class="bt cutsm" data-act="itemAdvOpen" data-i="' + i + '">' +
+            (UI.expanded["itemAdv-" + i] ? "Less" : "More…") + "</button></div>" +
+        (mods.length
+          ? '<div class="mrow" style="margin-top:4px;flex-wrap:wrap"><span class="lbl">Modifiers</span>' +
+            '<button class="tg cutsm' + (it.equipped ? " on" : "") + '" data-act="itemEquipped" data-i="' + i +
+              '" title="Only equipped items propagate to your stats">Equipped</button>' +
+            mods.map(function (m, j) {
+              return '<button class="chip" data-act="itemModDel" data-i="' + i + '" data-j="' + j +
+                '" title="Tap to remove">' + esc(modLabel(m)) + " ×</button>";
+            }).join("") + "</div>"
+          : "") +
+        (UI.expanded["itemAdv-" + i] ? itemModBuilder(i) : "") +
+        "</div>";
     } else {
       out += '<div class="card">' +
-        '<span class="cardname">' + esc(it.name) + "</span>" +
+        '<span class="cardname">' + esc(it.name) +
+          (it.equipped && mods.length ? " ⚡" : "") + "</span>" +
         '<span class="cardmeta">' + esc(it.note || "") + "</span>" +
-        '<div class="cardtags">' + tagHTML(it.tags, true) + "</div>" +
+        '<div class="cardtags">' + tagHTML(it.tags, true) +
+          (mods.length ? mods.map(function (m) {
+            return '<span class="tag t-g">' + esc(modLabel(m)) + "</span>";
+          }).join("") : "") + "</div>" +
         '<div class="cardbtns">' +
           (it.consumable
             ? '<button class="bt cutsm ' + (it.qty > 0 ? "pri" : "dim") + '" data-act="itemUse" data-id="' +

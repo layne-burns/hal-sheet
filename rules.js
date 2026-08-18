@@ -908,6 +908,62 @@ const CALC = {
 
   profBonus(level) { return 2 + Math.floor((level - 1) / 4); },
 
+  /* ---- ITEM MODIFIERS -----------------------------------------
+     An inventory item can carry a `mods` array — { target, op, value,
+     key } — instead of the sheet needing a dedicated field for every
+     kind of bonus a magic item might grant. `target` names what it
+     changes ("acBonus", "attackBonus", a custom string a homebrew item
+     invents); `op` is "add" (the default — nearly everything in 5e is a
+     flat bonus), "mult", or "set"; `key` is only for targets that need
+     a sub-address, like which skill or which ability score. A mod only
+     counts while its item is equipped — see itemMods() below.
+
+     This does not replace equipment.weaponBonuses or equipment.acBonus,
+     which a lot of the app and its tests already read. It adds a second,
+     open-ended source that combines with them, so nothing that already
+     worked has to change. */
+  itemMods(S) {
+    const buckets = {};
+    function bucketKey(target, key) { return key ? target + ":" + key : target; }
+    function bucket(target, key) {
+      const k = bucketKey(target, key);
+      if (!buckets[k]) buckets[k] = { add: 0, mult: 1, set: null, items: [] };
+      return buckets[k];
+    }
+    (S.equipment.inventory || []).forEach(function (it) {
+      if (!it.equipped || !it.mods) return;
+      it.mods.forEach(function (m) {
+        if (!m || !m.target || typeof m.value !== "number") return;
+        const b = bucket(m.target, m.key);
+        if (m.op === "set") b.set = m.value;
+        else if (m.op === "mult") b.mult *= m.value;
+        else b.add += m.value;
+        b.items.push({ name: it.name, op: m.op || "add", value: m.value });
+      });
+    });
+    return buckets;
+  },
+
+  /* The one place a bucket turns into a number: set overrides
+     everything, otherwise add then multiply. Every caller applies mods
+     this same way instead of re-deriving the order for itself. */
+  applyMods(base, bucket) {
+    if (!bucket) return base;
+    if (bucket.set != null) return bucket.set;
+    return (base + bucket.add) * bucket.mult;
+  },
+
+  /* Reads a bucket for display — "sources" rows an existing card can
+     just concat onto its own, matching the { kind, label, value } shape
+     every other CALC function already returns. */
+  modSources(bucket) {
+    if (!bucket) return [];
+    return bucket.items.map(function (it) {
+      return { kind: "item", label: it.name,
+        value: it.op === "add" ? it.value : null };
+    });
+  },
+
   abilityMod(S, key) {
     const score = S.abilities[key];
     const srcs = [{ kind:"ability", label:ABILITY_NAMES[key] + " " + score, value:CALC.mod(score) }];
@@ -928,8 +984,13 @@ const CALC = {
     ((S.abilityNotes && S.abilityNotes[key]) || []).forEach(function (n) {
       sources.push({ kind:"feat", label:n, value:null });
     });
+    /* Universal — a Cloak of Protection helps every save, not one named
+       ability, so saveBonus takes no key (unlike skillBonus below). */
+    const mods = CALC.itemMods(S).saveBonus;
+    const value = CALC.applyMods(m + prof + aura, mods);
+    if (mods) sources.push.apply(sources, CALC.modSources(mods));
     return {
-      value: m + prof + aura, sources,
+      value: value, sources,
       advantage: (key === "str" && S.toggles.takeHeart) ? "Take Heart" : null
     };
   },
@@ -944,7 +1005,12 @@ const CALC = {
     const sources = [{ kind:"ability", label:ABILITY_NAMES[ab] + " modifier", value:m }];
     if (isExp) sources.push({ kind:"proficiency", label:"Expertise (2x proficiency)", value:p * 2 });
     else if (isProf) sources.push({ kind:"proficiency", label:"Proficiency", value:p });
-    return { value: m + bonus, sources, proficient:isProf, expertise:isExp };
+    /* Keyed to the skill — a Cloak of Elvenkind helps Stealth, not
+       Persuasion, so skillBonus mods are addressed by which skill. */
+    const mods = CALC.itemMods(S)["skillBonus:" + key];
+    const value = CALC.applyMods(m + bonus, mods);
+    if (mods) sources.push.apply(sources, CALC.modSources(mods));
+    return { value: value, sources, proficient:isProf, expertise:isExp };
   },
 
   /* The same arithmetic a skill gets, for a proficiency that isn't one.
@@ -974,24 +1040,38 @@ const CALC = {
     else sources.push({ kind:"ability", label:"DEX modifier", value:dexUsed });
     if (shield) sources.push({ kind:"item", label:"Shield", value:shield });
     if (misc) sources.push({ kind:"item", label:"Misc bonus", value:misc });
-    return { value: a.base + dexUsed + shield + misc, sources, stealthDis: a.stealthDis };
+    /* Equipped items with an acBonus mod — a ring, a cloak, anything
+       that isn't the armor slot itself, which acBonus above already
+       covers by hand. */
+    const acMods = CALC.itemMods(S).acBonus;
+    const withMods = CALC.applyMods(a.base + dexUsed + shield + misc, acMods);
+    if (acMods) sources.push.apply(sources, CALC.modSources(acMods));
+    return { value: withMods, sources, stealthDis: a.stealthDis };
   },
 
   spellSaveDC(S) {
     const p = CALC.profBonus(S.level), c = CALC.mod(S.abilities.cha);
-    return { value: 8 + p + c, sources: [
+    const sources = [
       { kind:"level", label:"Base", value:8 },
       { kind:"proficiency", label:"Proficiency", value:p },
       { kind:"ability", label:"CHA modifier", value:c }
-    ]};
+    ];
+    const mods = CALC.itemMods(S).spellDc;
+    const value = CALC.applyMods(8 + p + c, mods);
+    if (mods) sources.push.apply(sources, CALC.modSources(mods));
+    return { value: value, sources };
   },
 
   spellAttack(S) {
     const p = CALC.profBonus(S.level), c = CALC.mod(S.abilities.cha);
-    return { value: p + c, sources: [
+    const sources = [
       { kind:"proficiency", label:"Proficiency", value:p },
       { kind:"ability", label:"CHA modifier", value:c }
-    ]};
+    ];
+    const mods = CALC.itemMods(S).attackBonus;
+    const value = CALC.applyMods(p + c, mods);
+    if (mods) sources.push.apply(sources, CALC.modSources(mods));
+    return { value: value, sources };
   },
 
   initiative(S) {
@@ -1313,6 +1393,9 @@ const CALC = {
     const str = CALC.mod(S.abilities.str);
     const extraAttack = CALC.hasFeature(S, "extraAttack");
 
+    const mods = CALC.itemMods(S);
+    const atkMods = mods.attackBonus, dmgMods = mods.damageBonus;
+
     const rows = S.equipment.weapons.map(function (id) {
       const w = WEAPONS[id];
       if (!w) return null;
@@ -1334,10 +1417,19 @@ const CALC = {
         toHitSources.push({ kind:"item", label:"Magic +" + magic, value:magic });
         damageSources.push({ kind:"item", label:"Magic +" + magic, value:magic });
       }
+      /* Equipped items with an attackBonus/damageBonus mod — universal
+         across every weapon, the same as a real ring or gauntlet would
+         be, rather than tied to one. weaponBonuses above stays the way
+         to enchant a specific weapon; this is for anything that isn't
+         the weapon itself. */
+      const toHit = CALC.applyMods(abilMod + prof + magic, atkMods);
+      const dmgFlat = CALC.applyMods(abilMod + magic, dmgMods);
+      if (atkMods) toHitSources.push.apply(toHitSources, CALC.modSources(atkMods));
+      if (dmgMods) damageSources.push.apply(damageSources, CALC.modSources(dmgMods));
       return {
         id: id, weapon: w,
-        toHit: abilMod + prof + magic, toHitSources: toHitSources,
-        damage: w.die + "+" + (abilMod + magic), damageType: w.type, damageSources: damageSources,
+        toHit: toHit, toHitSources: toHitSources,
+        damage: w.die + "+" + dmgFlat, damageType: w.type, damageSources: damageSources,
         mastery: w.mastery, masteryActive: masteryActive,
         light: w.props.indexOf("Light") >= 0
       };

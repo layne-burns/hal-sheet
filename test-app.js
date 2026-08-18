@@ -1695,6 +1695,58 @@ ok("deleting an item drops its pin",
      .every(function (f) { return f.kind !== "item"; }));
 setEdit(false);
 
+console.log("\n=== ITEM MODIFIERS, LIVE THROUGH THE REAL UI ===");
+click(byAct("tab", { tab: "inventory" }));
+setEdit(true);
+const acBefore = w.eval("CALC.armorClass(S).value");
+click(byAct("addItem"));
+const modN = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).equipment.inventory.length - 1;
+
+/* The +1/+2/+3 preset: no defense tag on this item, so it's read as a
+   weapon-style enchant — attackBonus and damageBonus together. */
+click(byAct("itemPreset", { i: String(modN), n: "1" }));
+let item = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).equipment.inventory[modN];
+ok("the preset marks the item equipped", item.equipped);
+ok("and adds the attack/damage pair a +N weapon actually has",
+   item.mods.some(function (m) { return m.target === "attackBonus" && m.value === 1; }) &&
+   item.mods.some(function (m) { return m.target === "damageBonus" && m.value === 1; }));
+click(byAct("itemPreset", { i: String(modN), n: "2" }));
+item = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).equipment.inventory[modN];
+eq("pressing +2 corrects the level rather than stacking a second mod",
+   item.mods.filter(function (m) { return m.target === "attackBonus"; }).length, 1);
+eq("...up to +2", item.mods.filter(function (m) { return m.target === "attackBonus"; })[0].value, 2);
+
+/* The advanced builder, for a target the preset doesn't reach. */
+click(byAct("itemAdvOpen", { i: String(modN) }));
+ok("the builder opens", !!byAct("itemModAdd"));
+const targetSel = byAct("itemModTarget");
+targetSel.value = "acBonus";
+targetSel.dispatchEvent(new w.Event("change", { bubbles: true }));
+const valIn = byAct("itemModValue");
+valIn.value = "1";
+valIn.dispatchEvent(new w.Event("change", { bubbles: true }));
+click(byAct("itemModAdd"));
+item = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).equipment.inventory[modN];
+ok("the builder added the acBonus mod too",
+   item.mods.some(function (m) { return m.target === "acBonus" && m.value === 1; }));
+eq("which reactively raises Hal's actual AC — no separate recalculation step",
+   w.eval("CALC.armorClass(S).value"), acBefore + 1);
+
+/* Equipping is the gate — the mods exist on the item either way. */
+click(byAct("itemEquipped", { i: String(modN) }));
+eq("un-equipping drops the AC bonus", w.eval("CALC.armorClass(S).value"), acBefore);
+click(byAct("itemEquipped", { i: String(modN) }));
+eq("re-equipping brings it back", w.eval("CALC.armorClass(S).value"), acBefore + 1);
+
+/* The mod chips themselves remove one modifier at a time. */
+const lastJ = item.mods.length - 1;
+click($('[data-act="itemModDel"][data-i="' + modN + '"][data-j="' + lastJ + '"]'));
+item = JSON.parse(w.localStorage.getItem("hal-briarshade-sheet-v1")).equipment.inventory[modN];
+eq("removing a chip removes just that one modifier", item.mods.length, 2);
+eq("and AC drops back with it", w.eval("CALC.armorClass(S).value"), acBefore);
+click(byAct("delItem", { i: String(modN) }));
+setEdit(false);
+
 console.log("\n=== TOOL PROFICIENCIES (2024) ===");
 /* test-app.js reads the sheet from storage rather than keeping a live
    handle to it, the way test-combat.js does. */
