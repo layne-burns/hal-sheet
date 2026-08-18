@@ -1272,6 +1272,44 @@ ok("clearing removes the diary record", !state().diaries[String(archived.started
 eq("...and still never touched the session's own log",
    JSON.stringify(state().sessionHistory[histIdx].log), rawLogBefore);
 
+console.log("\n=== DELETING SESSION NOTES (EDIT MODE ONLY) ===");
+ok("no delete control on a story line outside edit mode",
+   !byAct("noteDelete", { which: "hist:" + histIdx }));
+if (!byAct("editMode")) click(byAct("expand", { id: "moreActions" }));
+click(byAct("editMode"));
+ok("entering edit mode reveals it", !!byAct("noteDelete", { which: "hist:" + histIdx }));
+const histLogLenBefore = state().sessionHistory[histIdx].log.length;
+const delBtn = byAct("noteDelete", { which: "hist:" + histIdx });
+const delI = parseInt(delBtn.dataset.i, 10);
+const deletedLabel = state().sessionHistory[histIdx].log[delI].label;
+click(delBtn);
+st = state();
+eq("the log shrinks by exactly one", st.sessionHistory[histIdx].log.length, histLogLenBefore - 1);
+ok("and it's the line that was actually tapped, not just any line",
+   !st.sessionHistory[histIdx].log.some(function (e) { return e.label === deletedLabel; }));
+ok("deleting one note leaves an unlabelled trace — no new log line for the deletion itself",
+   st.sessionHistory[histIdx].log.length < histLogLenBefore);
+
+console.log("\n=== DELETING A WHOLE SESSION (EDIT MODE + CONFIRM) ===");
+/* A fresh diary entry, since the earlier Diary test already cleared
+   the one it wrote — otherwise "the diary goes with it" would pass for
+   the wrong reason (there being nothing there to begin with). */
+w.eval('mutate(function (st) { st.diaries["' + archived.startedAt +
+  '"] = { markdown: "placeholder", updatedAt: Date.now() }; })');
+ok("the diary entry exists again before the cascade test", !!state().diaries[String(archived.startedAt)]);
+const histCountBeforeDelete = state().sessionHistory.length;
+w.confirm = function () { return false; };
+click(byAct("sessionDelete", { which: "hist:" + histIdx }));
+eq("declining the confirm leaves the session alone",
+   state().sessionHistory.length, histCountBeforeDelete);
+w.confirm = function () { return true; };
+click(byAct("sessionDelete", { which: "hist:" + histIdx }));
+st = state();
+eq("confirming removes it from history", st.sessionHistory.length, histCountBeforeDelete - 1);
+ok("and its diary entry goes with it — nothing orphaned pointing at a session that's gone",
+   !st.diaries[String(archived.startedAt)]);
+click(byAct("editMode"));
+
 /* The guarantee worth having: skipping is not a different code path with
    its own idea of what a round costs. Build a six-strong order with Hal in
    the middle, park the marker past him, and check that one press lands in

@@ -1474,6 +1474,7 @@ EXT.sessionExplorer = function () {
    behind their own sub-toggle the same way the live modal hides them,
    and Hal's Diary last — the polished half, once there is one. */
 function sessionExplorerRow(s, which, live) {
+  const E = S.toggles.editMode;
   const key = String(s.startedAt);
   const rowId = "sess-" + key;
   const open = !!UI.expanded[rowId];
@@ -1482,7 +1483,10 @@ function sessionExplorerRow(s, which, live) {
     '<span class="chev">' + (open ? "Hide" : "Show") + "</span></h3>";
   if (!open) return out + "</div>";
 
-  const story = s.log.filter(isNarrative);
+  /* Same index-carrying trick as the live Session log modal — deleting
+     a line has to splice the real array, not the filtered copy. */
+  const storyIdx = [];
+  s.log.forEach(function (e, i) { if (isNarrative(e)) storyIdx.push(i); });
   const activity = s.log.filter(function (e) { return logKind(e) === "activity"; });
   const technical = s.log.filter(function (e) { return logKind(e) === "technical"; });
 
@@ -1491,11 +1495,15 @@ function sessionExplorerRow(s, which, live) {
     " · " + s.log.length + " event(s)</div>";
 
   out += '<div class="ph2" style="margin-top:8px">What happened</div>';
-  if (!story.length) out += '<div class="foot">Nothing written down.</div>';
-  story.slice().reverse().forEach(function (e) {
+  if (!storyIdx.length) out += '<div class="foot">Nothing written down.</div>';
+  storyIdx.slice().reverse().forEach(function (i) {
+    const e = s.log[i];
     out += '<div class="gain ' + (e.kind === "flag" ? "k-flag" : "k-note") + '">' +
       '<span class="gk">' + esc(calLabel(e) || fmtTime(e.t)) + "</span><span>" +
-      (e.kind === "flag" ? "⚠ " : "") + esc(e.label) + "</span></div>";
+      (e.kind === "flag" ? "⚠ " : "") + esc(e.label) + "</span>" +
+      (E ? '<button class="bt cutsm dg" style="margin-left:auto" data-act="noteDelete" ' +
+        'data-which="' + which + '" data-i="' + i + '" title="Remove this line">×</button>' : "") +
+      "</div>";
   });
 
   out += sessionLogSubsection("Game activity", activity, "sessAct-" + key);
@@ -1503,7 +1511,15 @@ function sessionExplorerRow(s, which, live) {
 
   out += '<div class="mrow" style="margin-top:8px">' +
     '<button class="bt cutsm pri" data-act="sessionCopy" data-which="' + which + '">Copy markdown</button>' +
-    '<button class="bt cutsm" data-act="sessionExport" data-which="' + which + '">Share</button></div>';
+    '<button class="bt cutsm" data-act="sessionExport" data-which="' + which + '">Share</button>' +
+    /* Ending, not deleting, is how a running session goes away — this
+       is only offered for an already-archived one, and needs its own
+       confirm() the way resetSheet does: unlike one line, there's no
+       getting this back once it's gone. */
+    (E && !live ? '<button class="bt cutsm dg" style="margin-left:auto" data-act="sessionDelete" ' +
+      'data-which="' + which + '" title="Delete this session, its log, and its diary entry">' +
+      "Delete session</button>" : "") +
+    "</div>";
 
   const diary = S.diaries[key];
   out += '<div class="ph2" style="margin-top:12px">Hal’s Diary</div>';
@@ -1553,20 +1569,32 @@ EXT.sessionModal = function () {
     body += '<div class="mrow"><button class="bt cutsm pri" data-act="noteModal">' +
       "Write something down…</button></div>";
 
-    const story = s.log.filter(isNarrative);
+    const E = S.toggles.editMode;
+    /* Original position in s.log, carried alongside each filtered entry
+       — .filter() throws that away, and deleting one line needs to know
+       exactly where it was. */
+    const storyIdx = [];
+    s.log.forEach(function (e, i) { if (isNarrative(e)) storyIdx.push(i); });
     const activity = s.log.filter(function (e) { return logKind(e) === "activity"; });
     const technical = s.log.filter(function (e) { return logKind(e) === "technical"; });
 
     body += '<div class="ph2" style="margin-top:10px">What happened</div>';
-    if (!story.length) {
+    if (!storyIdx.length) {
       body += '<div class="foot">No notes yet. Anything you jot lands here, along with the moments worth flagging on their own — going down, dying, coming back.</div>';
     }
-    story.slice().reverse().forEach(function (e) {
+    storyIdx.slice().reverse().forEach(function (i) {
+      const e = s.log[i];
       const stamp = calLabel(e) || fmtTime(e.t);
       body += '<div class="gain ' +
         (e.kind === "flag" ? "k-flag" : e.kind === "world" ? "k-proficiency" : "k-note") + '">' +
         '<span class="gk">' + esc(stamp) + "</span><span>" +
-        (e.kind === "flag" ? "⚠ " : "") + esc(e.label) + "</span></div>";
+        (e.kind === "flag" ? "⚠ " : "") + esc(e.label) + "</span>" +
+        /* Edit mode is what gates deletion everywhere else in the app
+           (a companion, an inventory item) — a note gets the same guard
+           rather than a control that's always one tap away. */
+        (E ? '<button class="bt cutsm dg" style="margin-left:auto" data-act="noteDelete" ' +
+          'data-which="current" data-i="' + i + '" title="Remove this line">×</button>' : "") +
+        "</div>";
     });
 
     /* Casts, attacks, rests, resource spends — real game state, so it
@@ -2624,6 +2652,43 @@ Object.assign(ACT, {
     mutate(function (st) { delete st.diaries[m.key]; });
     UI.modal = null;
     render();
+  },
+
+  /* ---- Cleaning up a session log ----
+     Edit mode is the same guard a companion or an inventory item's
+     delete button already sits behind — a control that's always one tap
+     away is a control you eventually tap by accident. which is either
+     "current" (the live session) or "hist:N", the same address the
+     export buttons already use. */
+  noteDelete(el) {
+    const which = el.dataset.which;
+    const i = parseInt(el.dataset.i, 10);
+    mutate(function (st) {
+      let log = null;
+      if (which === "current") log = st.session.active ? st.session.log : null;
+      else if (which.indexOf("hist:") === 0) {
+        const s = st.sessionHistory[parseInt(which.slice(5), 10)];
+        log = s ? s.log : null;
+      }
+      if (log) log.splice(i, 1);
+    });
+  },
+  /* A whole session, not one line — the same weight as resetSheet, so
+     it gets the same guard: a native confirm(), since there is nothing
+     else in the app that gets this back once it's gone. Only offered
+     for an already-archived session; a running one is ended, not
+     deleted, from the Session log modal. */
+  sessionDelete(el) {
+    const which = el.dataset.which;
+    if (which.indexOf("hist:") !== 0) return;
+    if (!confirm("Delete this session — its log and its diary entry, if it has one? This can't be undone.")) return;
+    const idx = parseInt(which.slice(5), 10);
+    mutate(function (st) {
+      const s = st.sessionHistory[idx];
+      if (!s) return;
+      delete st.diaries[String(s.startedAt)];
+      st.sessionHistory.splice(idx, 1);
+    });
   },
 
   /* ---- Undo ---- */
