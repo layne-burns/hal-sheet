@@ -1237,10 +1237,66 @@ function isNarrative(e) {
   return e.kind === "note" || e.kind === "flag" || e.kind === "world";
 }
 
+/* A LABEL EVERY MUTATE() CALL ALREADY CARRIES IS WHAT SORTS IT.
+   The session log has never had a third bucket for "mechanical, but not
+   app bookkeeping" — everything that wasn't a note or a flag landed in
+   one "Technical log" that mixed casting a spell in with the app
+   noticing you closed a modal. Splitting it needed a classifier, and the
+   real choice was where that classification lives: touching every one
+   of the ~140 mutate() call sites to hand-tag a third argument, or
+   reading the label the call site already writes.
+
+   This reads the label. New mutate() call sites need nothing extra to
+   be correctly filed — and since "meaningful character state change" is
+   deliberately open-ended (Task 3's own framing), the safe default for
+   anything not on the technical allowlist below is Game Activity, not
+   Technical: a bookkeeping line that ends up in the mechanical feed by
+   mistake is a mild annoyance, a real event buried in bookkeeping is a
+   session nobody can recap. The allowlist itself is short and closed —
+   session lifecycle, whose turn it is, which face got picked, an undo,
+   who's marked present at the table (a real-world fact, not a change
+   to Hal), and the People tab's relationship bookkeeping (standing /
+   status / membership toggles, which are about NPCs' records, not
+   Hal's own state) — everything else non-narrative is activity. */
+const TECHNICAL_LABELS = /^(Start session|End session|Next turn|End turn|To your turn|Update turn order|Set a face|Standing|Status|Membership|Toggle present)$/;
+function logKind(e) {
+  if (isNarrative(e)) return "story";
+  if (e.kind === "undo" || TECHNICAL_LABELS.test(e.label)) return "technical";
+  return "activity";
+}
+
 /* In-world date for a log entry, in whichever calendar you're reading. */
 function calLabel(e) {
   if (!e.cal) return "";
   return CAL.format(S.calendar.system, e.cal.day) + ", " + CAL.timeLabel(e.cal.time);
+}
+
+/* Renders CALC.characterSnapshot() — data in, markdown out, kept
+   separate from the data itself the same way every other CALC result in
+   this app is computed once and formatted wherever it's read. */
+function snapshotMarkdown() {
+  const snap = CALC.characterSnapshot(S);
+  const abKeys = ["str", "dex", "con", "int", "wis", "cha"];
+  let out = "## Character Snapshot\n\n";
+  out += "**" + snap.name + "** — " + snap.species + " " + snap.class +
+    " " + snap.level + " (" + snap.subclass + ")\n\n";
+  out += "- HP " + snap.hp.current + "/" + snap.hp.max + " · AC " + snap.ac + "\n";
+  out += "- " + abKeys.map(function (k) {
+    return k.toUpperCase() + " " + snap.abilities[k] + " (" + sign(CALC.mod(snap.abilities[k])) + ")";
+  }).join(" · ") + "\n";
+  out += "- Proficiency " + sign(snap.proficiencyBonus) + "\n";
+  out += "- Loadout: " + (snap.loadout.weapons.join(", ") || "none") +
+    (snap.loadout.armor && snap.loadout.armor !== "None" ? " · " + snap.loadout.armor : "") +
+    (snap.loadout.shield ? " · Shield" : "") + "\n";
+  const r = snap.resources;
+  const slotBits = Object.keys(r.slots).map(function (lv) {
+    return "L" + lv + " " + (r.slots[lv].max - r.slots[lv].used) + "/" + r.slots[lv].max;
+  });
+  out += "- Lay on Hands " + r.layOnHands.current + "/" + r.layOnHands.max +
+    " · Channel Divinity " + r.channelDivinity.current + "/" + r.channelDivinity.max +
+    " · Hit Dice " + (r.hitDice.max - r.hitDice.used) + "/" + r.hitDice.max +
+    (slotBits.length ? " · Slots " + slotBits.join(", ") : "") + "\n";
+  return out;
 }
 
 function sessionToMarkdown(s) {
@@ -1249,15 +1305,17 @@ function sessionToMarkdown(s) {
   out += "*" + fmtTime(s.startedAt) + " to " + fmtTime(s.endedAt) + "*\n\n";
   if (s.party && s.party.length) out += "- Party: **" + s.party.join(", ") + "**\n";
   if (s.stats.highestDCSet != null) out += "- Highest save DC set: **" + s.stats.highestDCSet + "**\n";
+  out += "\n" + snapshotMarkdown();
 
   /* .filter() already returns a fresh array, so sorting it below reorders
      only this copy — s.log itself, the immutable record of what was
      actually typed and when, is never touched. */
   const story = s.log.filter(isNarrative);
-  const tech = s.log.filter(function (e) { return !isNarrative(e); });
+  const activity = s.log.filter(function (e) { return logKind(e) === "activity"; });
+  const technical = s.log.filter(function (e) { return logKind(e) === "technical"; });
 
   if (story.length) {
-    out += "\n## What happened\n\n";
+    out += "\n## What Happened\n\n";
     /* Grouped by in-world day so the recap reads as a journal rather than
        a flat feed — several real-world hours can be one in-game morning.
        Sorted by that same in-world clock first, because a backdated note
@@ -1283,9 +1341,28 @@ function sessionToMarkdown(s) {
     });
   }
 
-  if (tech.length) {
-    out += "\n## Technical log\n\n";
-    tech.forEach(function (e) {
+  /* Casts, attacks, rests, resource spends — the mechanical record. Real
+     game state changed here, so unlike Technical it stays in in-world
+     order too, for the same reason What Happened does. */
+  if (activity.length) {
+    out += "\n## Game Activity\n\n";
+    activity.sort(function (a, b) {
+      return (a.cal && b.cal) ? CAL.compare(a.cal, b.cal) : a.t - b.t;
+    });
+    activity.forEach(function (e) {
+      out += "- " + (e.cal ? CAL.timeLabel(e.cal.time) : fmtTime(e.t)) +
+        (e.cal ? " (" + CAL.bothLabel(e.cal.day, null) + ")" : "") +
+        " — " + e.label + "\n";
+    });
+  }
+
+  /* App bookkeeping — session lifecycle, whose turn it is, which face
+     got picked, an undo. Left in real-write order: unlike the other two
+     sections this one is about the session ITSELF, not the story or the
+     character, so wall-clock order is the correct order. */
+  if (technical.length) {
+    out += "\n## Technical Log\n\n";
+    technical.forEach(function (e) {
       out += "- " + fmtTime(e.t) +
         (e.cal ? " (" + CAL.bothLabel(e.cal.day, null) + ")" : "") +
         " — " + e.label + "\n";
@@ -1369,7 +1446,8 @@ EXT.sessionModal = function () {
       "Write something down…</button></div>";
 
     const story = s.log.filter(isNarrative);
-    const tech = s.log.filter(function (e) { return !isNarrative(e); });
+    const activity = s.log.filter(function (e) { return logKind(e) === "activity"; });
+    const technical = s.log.filter(function (e) { return logKind(e) === "technical"; });
 
     body += '<div class="ph2" style="margin-top:10px">What happened</div>';
     if (!story.length) {
@@ -1383,16 +1461,33 @@ EXT.sessionModal = function () {
         (e.kind === "flag" ? "⚠ " : "") + esc(e.label) + "</span></div>";
     });
 
+    /* Casts, attacks, rests, resource spends — real game state, so it
+       gets its own section rather than living inside "technical" — but
+       it is still the mechanical feed, not the story you're writing, so
+       it stays collapsed by default the same way technical always has. */
+    const actHidden = !UI.expanded.sessionActivityOpen;
+    body += '<div class="ph2" style="margin-top:12px">Game activity ' +
+      '<span class="sc">' + activity.length + "</span>" +
+      '<button class="bt cutsm" style="margin-left:8px" data-act="expand" data-id="sessionActivityOpen">' +
+      (actHidden ? "Show" : "Hide") + "</button></div>";
+    if (!actHidden) {
+      if (!activity.length) body += '<div class="foot">Nothing mechanical logged yet.</div>';
+      activity.slice().reverse().forEach(function (e) {
+        body += '<div class="gain"><span class="gk">' + fmtTime(e.t) + "</span><span>" +
+          esc(e.label) + "</span></div>";
+      });
+    }
+
     /* The mechanical feed is still captured and still exported — it just
        doesn't get to drown out the notes you actually wrote. */
     const techHidden = !UI.expanded.sessionTechOpen;
     body += '<div class="ph2" style="margin-top:12px">Technical log ' +
-      '<span class="sc">' + tech.length + "</span>" +
+      '<span class="sc">' + technical.length + "</span>" +
       '<button class="bt cutsm" style="margin-left:8px" data-act="expand" data-id="sessionTechOpen">' +
       (techHidden ? "Show" : "Hide") + "</button></div>";
     if (!techHidden) {
-      if (!tech.length) body += '<div class="foot">Nothing mechanical logged yet.</div>';
-      tech.slice().reverse().forEach(function (e) {
+      if (!technical.length) body += '<div class="foot">Nothing mechanical logged yet.</div>';
+      technical.slice().reverse().forEach(function (e) {
         body += '<div class="gain"><span class="gk">' + fmtTime(e.t) + "</span><span>" +
           esc(e.label) + "</span></div>";
       });
@@ -2405,7 +2500,18 @@ Object.assign(ACT, {
     const last = h.pop();
     histSave(h);
     S = migrate(last.state);
-    clampState(S); save();
+    clampState(S);
+    /* Not through mutate() — mutate() would push this restore onto the
+       undo stack too, and undoing should not be a thing you then have
+       to undo. Appended directly instead, and only when the restored
+       state is itself mid-session, so a recap can be honest that a line
+       above got taken back rather than silently showing a session that
+       reads as if the mistake never happened. */
+    if (S.session && S.session.active) {
+      S.session.log.push({ t: Date.now(), label: "Undo: " + last.label, kind: "undo" });
+      if (S.session.log.length > 500) S.session.log.shift();
+    }
+    save();
     UI.alert = { info: "Undid: " + last.label };
     render();
   },

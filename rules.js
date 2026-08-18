@@ -1395,6 +1395,48 @@ const CALC = {
       newSpellCount: row.prepared - cur.prepared,
       newSpellLevels: Object.keys(row.slots).map(Number)
     };
+  },
+
+  /* ---- Character snapshot: who Hal is, right now ----
+     Data only — no markdown, no HTML. sessionToMarkdown() in combat.js
+     is what turns this into the session export's header, but the shape
+     is the same regardless of who reads it, which is the whole point of
+     computing it here instead of formatting it inline where it's used.
+
+     Computed fresh wherever it's asked for rather than frozen at session
+     start (contrast S.session.party, which IS frozen — see sessionStart
+     in combat.js): a level-up or a gear swap mid-session already gets
+     its own line in the delta log, so a snapshot showing where Hal
+     ended up is consistent with that record, not in tension with it.
+
+     No attunement here yet — the item data model doesn't have the
+     concept. It belongs in this snapshot once it exists. */
+  characterSnapshot(S) {
+    const slotsMax = CALC.slotsMax(S);
+    return {
+      name: S.identity.name, species: S.identity.species,
+      class: S.identity.class, subclass: S.identity.subclass, level: S.level,
+      hp: { current: S.currentHP, max: CALC.maxHP(S).value },
+      ac: CALC.armorClass(S).value,
+      abilities: Object.assign({}, S.abilities),
+      proficiencyBonus: CALC.profBonus(S.level),
+      loadout: {
+        weapons: (S.equipment.weapons || []).map(function (id) {
+          return (WEAPONS[id] || {}).name || id;
+        }),
+        armor: (ARMOR[S.equipment.armor] || ARMOR.none).name,
+        shield: !!S.equipment.shield
+      },
+      resources: {
+        layOnHands: { current: S.resources.layOnHands, max: CALC.layOnHandsMax(S).value },
+        channelDivinity: { current: S.resources.channelDivinity, max: CALC.channelDivinityMax(S).value },
+        hitDice: { used: S.hitDiceUsed, max: S.level },
+        slots: Object.keys(slotsMax).reduce(function (o, lv) {
+          o[lv] = { used: (S.resources.slots[lv] || {}).used || 0, max: slotsMax[lv] };
+          return o;
+        }, {})
+      }
+    };
   }
 };
 

@@ -994,6 +994,48 @@ ok("the in-world date is shown in the session modal", /In-world it is/.test(text
 
 click(byAct("closeModal"));
 
+console.log("\n=== GAME ACTIVITY IS ITS OWN EXPORT CATEGORY ===");
+/* logKind() reads the label every mutate() call already writes, rather
+   than requiring a third argument at every one of the ~140 call sites
+   — so this is really a test of the classifier's allowlist, not of any
+   particular call site. Real labels from real actions, checked directly
+   rather than fished for through whatever UI state happens to be live
+   at this point in the file. */
+ok("casting classifies as activity", w.eval('logKind({label:"Cast Bless"})') === "activity");
+ok("the attack action classifies as activity", w.eval('logKind({label:"Attack action"})') === "activity");
+ok("spending a resource classifies as activity", w.eval('logKind({label:"Lay on Hands (self)"})') === "activity");
+ok("session lifecycle classifies as technical", w.eval('logKind({label:"Start session"})') === "technical");
+ok("turn transitions classify as technical", w.eval('logKind({label:"Next turn"})') === "technical");
+ok("a portrait pick classifies as technical", w.eval('logKind({label:"Set a face"})') === "technical");
+ok("undo classifies as technical by its kind, whatever the restored label was",
+   w.eval('logKind({label:"Undo: Cast Bless", kind:"undo"})') === "technical");
+ok("a note is still story, same as always", w.eval('logKind({label:"anything", kind:"note"})') === "story");
+
+/* A hand-built session, one entry per category, run straight through
+   the real export function — independent of whatever the rest of this
+   file has or hasn't triggered by this point. */
+const fakeSession = {
+  startedAt: Date.now() - 3600000, endedAt: Date.now(),
+  party: ["Gill"], stats: { highestDCSet: null },
+  log: [
+    { t: 1, label: "Start session" },
+    { t: 2, label: "Something happened", kind: "note", cal: { day: 5, year: 2022, time: "dawn" } },
+    { t: 3, label: "Cast Bless" }
+  ]
+};
+const md = w.eval("sessionToMarkdown(" + JSON.stringify(fakeSession) + ")");
+ok("the export leads with the Character Snapshot", /^# Session[\s\S]*## Character Snapshot/.test(md));
+ok("all three category headers appear",
+   /## What Happened/.test(md) && /## Game Activity/.test(md) && /## Technical Log/.test(md));
+ok("the mechanical entry sorts under Game Activity, not Technical",
+   md.indexOf("## Game Activity") < md.indexOf("Cast Bless") &&
+   md.indexOf("Cast Bless") < md.indexOf("## Technical Log"));
+ok("the bookkeeping entry sorts under Technical Log",
+   md.indexOf("## Technical Log") < md.indexOf("Start session"));
+ok("the note sorts under What Happened, ahead of both",
+   md.indexOf("## What Happened") < md.indexOf("Something happened") &&
+   md.indexOf("Something happened") < md.indexOf("## Game Activity"));
+
 console.log("\n=== SESSION NOTE REMINDER NUDGE ===");
 ok("no nudge right after a fresh note", w.eval("EXT.sessionNudge()") === "");
 w.eval("S.session.log = S.session.log.filter(function(e){ return e.kind !== 'note'; }); S.session.startedAt = Date.now() - 30*60*1000;");

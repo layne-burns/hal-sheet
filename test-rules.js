@@ -216,6 +216,27 @@ eq("every Channel-Divinity-costing feature is tagged for it",
    Object.keys(FEATURES).filter(k => /expend one use of Channel Divinity/.test(FEATURES[k].text))
      .every(k => FEATURES[k].tags.indexOf("channelDivinity") >= 0), true);
 
+console.log("\n=== CHARACTER SNAPSHOT ===");
+/* Data only — sessionToMarkdown() in combat.js is what turns this into
+   the export's header, so this checks the numbers rather than any
+   formatting. */
+const snap = CALC.characterSnapshot(S);
+eq("who: name, species, class, subclass, level",
+   [snap.name, snap.species, snap.class, snap.subclass, snap.level],
+   ["Hal Briarshade", "Jerbeen", "Paladin", "Oath of the Ancients", 4]);
+eq("HP matches CALC.maxHP", snap.hp, { current: S.currentHP, max: CALC.maxHP(S).value });
+eq("AC matches CALC.armorClass", snap.ac, CALC.armorClass(S).value);
+eq("loadout names the equipped weapons, not their ids",
+   snap.loadout.weapons, ["Shortsword", "Scimitar", "Hand Crossbow"]);
+eq("and the armor actually worn", snap.loadout.armor, "Scale Mail");
+eq("Lay on Hands and Channel Divinity match their own CALC functions",
+   [snap.resources.layOnHands, snap.resources.channelDivinity],
+   [{ current: S.resources.layOnHands, max: CALC.layOnHandsMax(S).value },
+    { current: S.resources.channelDivinity, max: CALC.channelDivinityMax(S).value }]);
+eq("hit dice: none spent yet at a fresh level 4", snap.resources.hitDice, { used: 0, max: 4 });
+eq("level 4 has one line of slots, level 1 x3, none spent",
+   snap.resources.slots, { 1: { used: 0, max: 3 } });
+
 console.log("\n" + "=".repeat(46));
 console.log(pass + " passed, " + fail + " failed");
 console.log("=".repeat(46) + "\n");
