@@ -3339,10 +3339,13 @@ function notesTab() {
   });
   out += "</div></div>";
 
-  /* combat.js owns the session log this reads, the same way it owns
-     everything else that only makes sense once a fight or a session
-     exists — this just calls into it, the way effectsTab() already
-     calls CALC.activeMods. */
+  /* combat.js owns the session log both of these read, the same way it
+     owns everything else that only makes sense once a fight or a
+     session exists — this just calls into it, the way effectsTab()
+     already calls CALC.activeMods. The Diary comes first: it's the
+     recap worth reading, and the raw log below it is reference
+     material for when the diary isn't enough. */
+  out += typeof EXT.diaryPanel === "function" ? EXT.diaryPanel() : "";
   out += typeof EXT.sessionExplorer === "function" ? EXT.sessionExplorer() : "";
 
   out += '<div class="pnl cut"><h3>Backstory</h3>' +

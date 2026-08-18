@@ -1443,13 +1443,51 @@ function sessionExportControls() {
   return out;
 }
 
+/* ---------- HAL'S DIARY, ALL OF IT (Notes tab) -------------------
+   The polished half on its own, so reading a recap never means paging
+   through a session's raw log to find where the prose was. Filled in
+   from a session's own row below, exactly as before — this is a read
+   (and a shortcut to re-edit), not a second way to write one. Sorted
+   by the session it belongs to, newest first, since a diary reads as a
+   journal and a journal goes in story order, not edit order. */
+EXT.diaryPanel = function () {
+  const keys = Object.keys(S.diaries).sort(function (a, b) { return Number(b) - Number(a); });
+  let out = '<div class="pnl cut"><h3>Hal’s Diary <span class="cnt">' + (keys.length || "none") + "</span></h3>";
+  if (!keys.length) {
+    return out + '<div class="foot" style="margin:0">Nothing written yet. Fill one in from a session below — ' +
+      "copy its raw notes, run them through whatever writes the prose, and paste the result back in.</div></div>";
+  }
+  keys.forEach(function (key) {
+    const d = S.diaries[key];
+    out += '<div style="margin-top:12px"><div class="ph2">' + esc(fmtDate(Number(key))) + "</div>" +
+      '<div class="etext" style="font-size:17px">' + mdToHtml(d.markdown) + "</div>" +
+      '<div class="mrow" style="margin-top:4px">' +
+      '<button class="bt cutsm" data-act="diaryEdit" data-key="' + esc(key) + '">Edit…</button>' +
+      /* Opens (but doesn't scroll to) that session's own row in the
+         Sessions panel below — the raw log this was written from,
+         for whoever wants it, without it being in the way otherwise. */
+      '<button class="bt cutsm" data-act="expand" data-id="sess-' + esc(key) + '">Full session log</button>' +
+      "</div></div>";
+  });
+  return out + "</div>";
+};
+
 /* ---------- SESSION EXPLORER (Notes tab) ------------------------
    The live Session log modal only ever shows the one session running
    right now. This is the same information — story, activity, technical,
    the export buttons, and now Hal's Diary — for every session that's
    ever been recorded, including the one still running if there is one.
    Collapsed by default, one row per session, so a long campaign doesn't
-   turn the Notes tab into a wall of old logs. */
+   turn the Notes tab into a wall of old logs.
+
+   The panel's own Hide/Show has to be explicit rather than left to the
+   generic per-panel fold: each row already draws itself as a sibling
+   .pnl, not a child, so the automatic fold (which only ever hides a
+   panel's own direct children) would fold this header and leave every
+   row sitting there unaffected — a Hide button that visibly does
+   nothing. A .pcol button, the same one the Filter panel uses, both
+   gates the row list and tells applyPanelFolds to leave this header
+   alone rather than layering a second, redundant control onto it. */
 EXT.sessionExplorer = function () {
   const rows = S.sessionHistory.map(function (s, idx) {
     return { s: s, which: "hist:" + idx };
@@ -1459,7 +1497,11 @@ EXT.sessionExplorer = function () {
   }
   rows.reverse(); /* newest first, whether that's the running one or not */
 
-  let out = '<div class="pnl cut"><h3>Sessions <span class="cnt">' + rows.length + "</span></h3>";
+  const collapsed = !!UI.expanded.sessionsCollapsed;
+  let out = '<div class="pnl cut"><h3>Sessions <span class="cnt">' + rows.length +
+    '</span><button class="pcol" data-act="expand" data-id="sessionsCollapsed">' +
+    (collapsed ? "Show" : "Hide") + "</button></h3>";
+  if (collapsed) return out + "</div>";
   if (!rows.length) {
     return out + '<div class="foot" style="margin:0">Nothing recorded yet. Start a session from the ' +
       "Combat tab — it shows up here right away, and stays once it ends.</div></div>";

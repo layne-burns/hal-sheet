@@ -1244,6 +1244,22 @@ ok("that export is genuinely this session's markdown",
 ok("a past session's snapshot is honest that it isn't from back then",
    /not necessarily as of this session/.test(histMd));
 
+console.log("\n=== THE SESSIONS PANEL'S OWN HIDE/SHOW ACTUALLY HIDES THE ROWS ===");
+/* Each row draws as its own sibling panel, not a child of the Sessions
+   header — so the generic per-panel fold (which only ever hides a
+   panel's own direct children) would toggle a header with nothing
+   under it to hide, and every row would just sit there regardless.
+   This is the bug report itself, turned into an assertion. */
+ok("the row is visible before collapsing", /Left town at dusk/.test(text()));
+click(byAct("expand", { id: "sessionsCollapsed" }));
+ok("collapsing the Sessions panel actually hides its rows",
+   !/Left town at dusk/.test(text()) && !byAct("expand", { id: rowId }));
+click(byAct("expand", { id: "sessionsCollapsed" }));
+ok("showing it again brings the rows back", !!byAct("expand", { id: rowId }));
+/* The row itself was left expanded before the panel collapsed — showing
+   the panel again should not have silently re-collapsed it too. */
+ok("...still expanded, the way it was left", /Left town at dusk/.test(text()));
+
 console.log("\n=== HAL'S DIARY ===");
 ok("no diary entry yet for this session", /No diary entry yet/.test(text()));
 click(byAct("diaryEdit", { key: String(archived.startedAt) }));
@@ -1265,10 +1281,29 @@ ok("markdown actually rendered — bold text, not literal asterisks",
    /<b>arrived<\/b>/.test($("#app").innerHTML) && !/\*\*arrived\*\*/.test(text()));
 ok("a heading rendered as a heading, not a hash mark in the paragraph",
    /<h3>A Night in Town<\/h3>/.test($("#app").innerHTML));
+
+console.log("\n=== HAL'S DIARY GETS ITS OWN PANEL, SEPARATE FROM THE RAW LOG ===");
+ok("the standalone Diary panel names this session's date",
+   $$(".ph2").some(function (h) {
+     return h.textContent.trim() === new Date(archived.startedAt).toLocaleDateString();
+   }));
+/* The row's own header is one expand toggle for "sess-<key>"; the
+   Diary panel's "Full session log" link is a second one, addressing
+   the same row — reading the diary should never require opening it
+   first, but the way back to it has to still be one tap away. */
+eq("the diary panel offers its own way back to the row, on top of the row's own toggle",
+   $$('[data-act="expand"][data-id="sess-' + archived.startedAt + '"]').length, 2);
+ok("and its own Edit, so editing doesn't require the row open either",
+   $$('[data-act="diaryEdit"][data-key="' + archived.startedAt + '"]').length >= 1);
 click(byAct("diaryEdit", { key: String(archived.startedAt) }));
 ok("editing an existing entry offers to clear it", !!byAct("diaryClear"));
 click(byAct("diaryClear"));
 ok("clearing removes the diary record", !state().diaries[String(archived.startedAt)]);
+/* Down from 2 (the row's Edit + the Diary panel's Edit) to 1 — the row
+   still offers "Write it…" under the same data-act, but the Diary
+   panel's own entry is gone with nothing left to write from there. */
+eq("the standalone Diary panel drops its entry too, once the diary is gone",
+   $$('[data-act="diaryEdit"][data-key="' + archived.startedAt + '"]').length, 1);
 eq("...and still never touched the session's own log",
    JSON.stringify(state().sessionHistory[histIdx].log), rawLogBefore);
 
